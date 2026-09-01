@@ -1,0 +1,22 @@
+# --- build ---
+bin/
+obj/
+
+# --- секреты и сессия Telegram (НИКОГДА не коммитить!) ---
+secrets.local.txt
+settings.local.txt
+alarms.csv
+map.html
+*.session
+updates.state
+WTelegram.log
+
+# --- сборки дизайна (Electron) и зависимости ---
+node_modules/
+design/dist-exe/
+design/.xcode-build/
+dist/
+
+# --- прочее ---
+.vs/
+*.user
