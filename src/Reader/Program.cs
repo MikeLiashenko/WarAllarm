@@ -61,8 +61,13 @@ var khChannels = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 // Локальные каналы Киева → уровень города (парсер KyivMonitor). Ты бываешь в Киеве.
 var kyChannels = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "nebo_raketa", "chyste_neboo" };
-// Всеукраинский → уровень город/область (парсер ThreatParser).
-const string uaChannel = "raketa_trevoga";
+// Всеукраинские каналы-сводки → уровень город/область (парсер ThreatParser).
+// Настраивается в settings.local.txt:  ua_channels=raketa_trevoga,chomu_trivoga,...
+var uaChannels = new HashSet<string>(
+    cfg.GetValueOrDefault("ua_channels", "raketa_trevoga")
+       .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+       .Select(s => s.TrimStart('@')),
+    StringComparer.OrdinalIgnoreCase);
 
 // Внутренние логи WTelegram уводим в файл, чтобы консоль оставалась чистой.
 WTelegram.Helpers.Log = (level, message) =>
@@ -176,7 +181,20 @@ if (args.Length >= 1 && args[0].Equals("sounds", StringComparison.OrdinalIgnoreC
 // Прогоняет типичные посты @raketa_trevoga через парсер и рисует стрелки по стране.
 if (args.Length >= 1 && args[0].Equals("uamap", StringComparison.OrdinalIgnoreCase))
 {
-    // Реальний формат зведення (області без двокрапки, дрібні міста → фолбэк у центр області).
+    // Можно передать файл с РЕАЛЬНЫМ постом:  dotnet run -- uamap post.txt
+    if (args.Length >= 2 && File.Exists(args[1]))
+    {
+        var real = File.ReadAllText(args[1]);
+        int drawn = 0;
+        foreach (var ev in ThreatParser.Parse(real)) if (tracker.IngestUa(ev, DateTime.Now) is not null) drawn++;
+        MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+        Console.WriteLine($"🗺  Карта з твого поста: {Path.GetFullPath(MapPath)}");
+        Console.WriteLine($"   Намальовано цілей: {tracker.Active.Count} (розпізнано рядків: {drawn}).");
+        foreach (var t in tracker.Active)
+            Console.WriteLine($"   • {ThreatTracker.Label(t)} → {t.LastPlace}  ×{t.Amount}  ({t.DistKm:0} км від дому)");
+        return;
+    }
+    // Демо: реальний формат зведення (області без двокрапки, дрібні міста → фолбэк у центр області).
     var post = """
 Чернігівщина
 2 БпЛА на Славутич
@@ -446,7 +464,7 @@ if (args.Length >= 1 && args[0].Equals("check", StringComparison.OrdinalIgnoreCa
     var sources = Enumerable.Empty<(string uname, string kind)>();
     if (WatchKharkiv) sources = sources.Concat(khChannels.Select(u => (uname: u, kind: "kh")));
     if (WatchKyiv) sources = sources.Concat(kyChannels.Select(u => (uname: u, kind: "ky")));
-    sources = sources.Append((uname: uaChannel, kind: "ua"));
+    sources = sources.Concat(uaChannels.Select(u => (uname: u, kind: "ua")));
     int total = 0, hits = 0;
 
     foreach (var (uname, kind) in sources)
@@ -523,7 +541,7 @@ try
     var needed = new List<string>();
     if (WatchKharkiv) needed.AddRange(khChannels);
     if (WatchKyiv) needed.AddRange(kyChannels);
-    needed.Add(uaChannel);
+    needed.AddRange(uaChannels);
     var missing = needed.Where(u => !subscribed.Contains(u)).ToList();
     if (missing.Count > 0)
         Ui.Line(ConsoleColor.Yellow, "⚠ НЕ підписаний на: " + string.Join(", ", missing.Select(u => "@" + u)) + " — по ним live не прийде! Вступи в них.");
@@ -601,7 +619,7 @@ async Task OnUpdate(Update update)
     }
 
     // ── Всеукраинский → город/область ─────────────────────────────────────────
-    if (uname != null && uname.Equals(uaChannel, StringComparison.OrdinalIgnoreCase))
+    if (uname != null && uaChannels.Contains(uname))
     {
         bool drew = false;
         foreach (var ev in ThreatParser.Parse(m.message))
