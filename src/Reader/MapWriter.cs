@@ -92,7 +92,9 @@ public static class MapWriter
         sb.Append(",\"aiAt\":").Append(AiAt is { } aa ? ((DateTimeOffset)aa.ToUniversalTime()).ToUnixTimeMilliseconds().ToString() : "null");
         sb.Append('}');
 
-        var html = Template.Replace("/*__STATE__*/", sb.ToString()).Replace("/*__ICON__*/", IconUri);
+        var html = Template.Replace("/*__STATE__*/", sb.ToString())
+                           .Replace("/*__ICON__*/", IconUri)
+                           .Replace("/*__OBLASTS__*/", MapOblasts.Json);
         try { File.WriteAllText(path, html, new UTF8Encoding(false)); } catch { /* карта не критична */ }
     }
 
@@ -268,7 +270,9 @@ nav.tabs .b.show{display:inline-flex}
   background:linear-gradient(180deg,#0b1424,#0a1020);border:1px solid var(--line)}
 .mapcard svg{display:block;width:100%;height:auto;cursor:grab;touch-action:none}
 .mapcard svg:active{cursor:grabbing}
-.ua-fill{fill:rgba(52,211,153,.06);stroke:rgba(90,169,255,.45);stroke-width:1.1;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.ua-fill{fill:none;stroke:rgba(120,150,190,.35);stroke-width:.9;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.obl{stroke:rgba(130,150,180,.22);stroke-width:.4px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.clabel2{fill:rgba(230,237,243,.6);font-size:6px;font-weight:600;font-family:var(--sans);paint-order:stroke;stroke:#0a1020;stroke-width:1.2px;text-anchor:middle}
 .city{fill:var(--mut)}.clabel{fill:var(--dim);font-size:6px;font-family:var(--mono)}
 .you{fill:var(--sky)}.you-ring{fill:none;stroke:var(--sky);stroke-width:1.1;animation:pip 2s ease-in-out infinite}
 .traj{stroke-width:1.4;fill:none;stroke-dasharray:4 5;stroke-linecap:round;opacity:.9;animation:flow 1.3s linear infinite}
@@ -377,6 +381,7 @@ h3{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);
 </section>
 <script>
 const S = /*__STATE__*/;
+const OBLASTS = /*__OBLASTS__*/;
 const ICON="/*__ICON__*/";
 if(ICON){var mk=document.getElementById('mark');if(mk){mk.style.background='none';mk.innerHTML='<img src="'+ICON+'" alt="WarAlarm" style="width:100%;height:100%;object-fit:cover;border-radius:9px;display:block">';}}
 const NS='http://www.w3.org/2000/svg';
@@ -395,14 +400,24 @@ function fit(){
   P=function(lon,lat){return [oX+((lon-22.14)/18.09)*pw, oY+((52.38-lat)/7.99)*ph];};
   return true;
 }
+// точка в полигоне (луч), кольцо — массив [lon,lat]
+function pip(lon,lat,ring){var inside=false;for(var i=0,j=ring.length-1;i<ring.length;j=i++){var xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];if(((yi>lat)!=(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi)+xi))inside=!inside;}return inside;}
 let built=false;
 function build(){
   if(built||!fit()) return;
   built=true;
-  // города для контекста
-  // Города — только точки, без подписей (названия есть в данных/панели, на карте не рисуем).
-  [['Київ',30.52,50.45],['Дніпро',35.05,48.47],['Одеса',30.73,46.48],['Львів',24.03,49.84],['Харків',36.23,49.99]].forEach(function(c){
-    var p=P(c[1],c[2]); el('circle',{'class':'city',cx:p[0],cy:p[1],r:1.3});
+  // ОБЛАСТИ: регион заливается красным, если в нём есть цели (интенсивность ∝ кол-ву) — как на реальной карте.
+  OBLASTS.forEach(function(o){
+    var outer=o.r[0]||[];
+    var cnt=0; S.threats.forEach(function(t){ if(t.lat!=null && pip(t.lon,t.lat,outer)) cnt+=(t.n||1); });
+    var fill = cnt>0 ? 'rgba(255,59,48,'+Math.min(0.60,0.20+cnt*0.07)+')' : 'rgba(70,110,90,0.10)';
+    var d=o.r.map(function(ring){ if(ring.length<3)return ''; return 'M'+ring.map(function(p){var q=P(p[0],p[1]);return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join(' L')+'Z'; }).join(' ');
+    el('path',{'class':'obl',d:d,fill:fill});
+  });
+  // Города — точки + приглушённые подписи крупнейших (как на реальной карте).
+  [['Київ',30.52,50.45],['Харків',36.23,49.99],['Дніпро',35.05,48.47],['Одеса',30.73,46.48],['Львів',24.03,49.84],['Запоріжжя',35.14,47.84],['Донецьк',37.80,48.00],['Миколаїв',31.99,46.98]].forEach(function(c){
+    var p=P(c[1],c[2]); el('circle',{'class':'city',cx:p[0],cy:p[1],r:1.1});
+    el('text',{'class':'clabel2',x:p[0],y:p[1]-2},c[0]);
   });
   // цели: СТРЕЛКА в точке цели, направление = куда летит, длина = по типу
   // (ракеты/балістика — длинные и быстрые, шахеди/КАБ — короткие).
