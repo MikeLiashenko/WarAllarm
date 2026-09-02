@@ -1,0 +1,20 @@
+# systemd-сервис (если без Docker). Положи в /etc/systemd/system/waralarm.service,
+# поправь пути/пользователя, потом:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now waralarm
+#   journalctl -u waralarm -f          # смотреть логи
+[Unit]
+Description=WarAlarm reader (persistent air-raid monitor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=waralarm
+WorkingDirectory=/opt/waralarm/data
+ExecStart=/usr/bin/dotnet /opt/waralarm/app/WarAlarm.Reader.dll
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

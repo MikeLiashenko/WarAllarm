@@ -1,0 +1,15 @@
+# WarAlarm · запуск на сервере одной командой:  docker compose up -d --build
+# Положи в папку ./data свои файлы:  secrets.local.txt, settings.local.txt, WTelegram.session
+services:
+  waralarm:
+    build: .
+    container_name: waralarm
+    restart: unless-stopped        # сам поднимется после перезагрузки/падения
+    volumes:
+      - ./data:/data               # секреты, сессия, map.html, журнал
+    # карту можно смотреть, раскомментировав простой веб-сервер ниже (по желанию):
+  # map:
+  #   image: nginx:alpine
+  #   restart: unless-stopped
+  #   volumes: [ "./data:/usr/share/nginx/html:ro" ]
+  #   ports: [ "8080:80" ]         # тогда карта на http://СЕРВЕР:8080/map.html

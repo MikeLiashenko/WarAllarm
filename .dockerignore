@@ -1,0 +1,14 @@
+bin/
+obj/
+design/dist-exe/
+design/.xcode-build/
+node_modules/
+dist/
+**/*.session
+**/secrets.local.txt
+**/settings.local.txt
+map.html
+alarms.csv
+WTelegram.log
+updates.state
+.git/
