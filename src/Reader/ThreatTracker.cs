@@ -34,10 +34,11 @@ public sealed class Threat
     public DateTime LastPing;             // когда последний раз пикнули (для каденции)
     public TrackStage Stage = TrackStage.Approaching;
     public bool MyArea;                   // назван ТВОЙ район
-    public int Reports;                   // сколько раз о цели повідомили (объём «спама»)
+    public HashSet<string> Hits = new();  // РАЗНЫЕ названные места (реальное кол-во целей, не повторы)
     public int Count;                     // явна к-сть з поста («5 шахедів») — максимум
     public List<(string place, double? dist, DateTime t)> Trail = new();
-    public int Amount => Math.Max(Reports, Count); // что показывать как ×N
+    // ×N = реальное число целей: разные места ИЛИ явная к-сть; повторы одного места НЕ раздувают.
+    public int Amount => Math.Max(1, Math.Max(Hits.Count, Count));
 }
 
 public readonly record struct TrackUpdate(Threat Threat, bool StageChanged, TrackSound Sound, string Note);
@@ -103,7 +104,8 @@ public sealed class ThreatTracker
         }
         t!.Ammo ??= e.Extra;
         t.LastUpdate = now;
-        t.Reports++;                                   // ещё одно повідомлення про цю ціль
+        foreach (var pn in e.Places) t.Hits.Add(pn);   // разные названные места = разные цели
+        if (place.Length > 0) t.Hits.Add(place);
         var cm = Regex.Match(e.Raw, @"(\d+)\s*(шахед|шахід|дрон|бпла|ракет|ціл|каб)", RegexOptions.IgnoreCase);
         if (cm.Success && int.TryParse(cm.Groups[1].Value, out var cnt)) t.Count = Math.Max(t.Count, cnt);
         if (e.Tier == KhTier.MyArea) t.MyArea = true;
@@ -157,7 +159,7 @@ public sealed class ThreatTracker
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
             t!.Ammo ??= ev.Extra;
             t.LastUpdate = now;
-            t.Reports++;
+            t.Hits.Add(ev.City ?? gp.name);            // разный город = отдельная цель (в области суммируются)
             t.Count = Math.Max(t.Count, ev.Count);
             t.PrevDistKm = t.DistKm;
             t.Pos = pos; t.LastPlace = place;
@@ -187,10 +189,11 @@ public sealed class ThreatTracker
                 _ = mins;
             }
 
-            // Снятие с карты: Impact/Passed висят 3 мин, потом Gone; молчащая цель — 8 мин.
+            // Снятие с карты (точность!): цель НЕ должна «зависать». Приліт/пройшла — 90 сек;
+            // молчащая цель — 4 мин (за цей час шахед або пролетів, або збили). Карта = «зараз».
             var age = now - t.LastUpdate;
-            if ((t.Stage is TrackStage.Impact or TrackStage.Passed && age > TimeSpan.FromMinutes(3))
-                || age > TimeSpan.FromMinutes(8))
+            if ((t.Stage is TrackStage.Impact or TrackStage.Passed && age > TimeSpan.FromSeconds(90))
+                || age > TimeSpan.FromMinutes(4))
             {
                 t.Stage = TrackStage.Gone;
                 _active.Remove(t.Id);
