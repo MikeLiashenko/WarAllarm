@@ -1,19 +1,14 @@
 @echo off
-chcp 65001 >nul
-title WarAlarm - живий режим
+title WarAlarm
 cd /d "%~dp0src\Reader"
-
 echo.
-echo   WarAlarm - запускаю живий режим...
-echo   Карта: %cd%\map.html  (вiдкриється сама через 10 сек)
-echo   Вихiд: Ctrl+C
+echo   WarAlarm - starting live mode
+echo   Map opens in your browser in about 10 seconds
+echo   Map file: %CD%\map.html
+echo   Press Ctrl+C to stop
 echo.
-
-rem відкрити карту в браузері, коли застосунок її створить
-start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep 10; if (Test-Path '%cd%\map.html') { Start-Process '%cd%\map.html' }"
-
+start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 10; if (Test-Path '%CD%\map.html') { Start-Process '%CD%\map.html' }"
 dotnet run
-
 echo.
-echo   WarAlarm зупинено. Натисни будь-яку клавiшу...
+echo   WarAlarm stopped. Press any key to close.
 pause >nul
