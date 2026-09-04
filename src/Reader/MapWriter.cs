@@ -77,6 +77,7 @@ public static class MapWriter
             sb.Append(",\"dir\":\"").Append(Esc(t.Dir)).Append('"');
             sb.Append(",\"n\":").Append(amount);
             sb.Append(",\"heading\":").Append(t.Heading is { } h ? N(h) : "null");
+            sb.Append(",\"seen\":").Append(((DateTimeOffset)t.LastUpdate).ToUnixTimeMilliseconds()); // час останнього спостереження позиції (для руху/екстраполяції)
             sb.Append(",\"place\":\"").Append(Esc(t.LastPlace)).Append('"');
             sb.Append(",\"trail\":[");
             bool first = true;
@@ -309,6 +310,9 @@ nav.tabs .b.show{display:inline-flex}
 .fig path{stroke-linejoin:round}
 .tlabel{font-size:8px;font-weight:700;font-family:var(--mono);fill:var(--tx);paint-order:stroke;stroke:#0a1020;stroke-width:1px}
 .plabel{font-size:3.4px;font-weight:600;font-family:var(--sans);paint-order:stroke;stroke:#0a1020;stroke-width:.8px}
+.pred{opacity:.55;stroke-linecap:round;fill:none}
+.ghost{opacity:.3}
+.predlab{font-size:3.2px;font-weight:600;font-family:var(--sans);paint-order:stroke;stroke:#0a1020;stroke-width:.7px;opacity:.85}
 .zoomc{position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:6px}
 .zoomc button{width:30px;height:30px;border-radius:8px;border:1px solid var(--line2);background:rgba(11,20,36,.85);
   color:var(--tx);font-size:17px;line-height:1;cursor:pointer;display:grid;place-items:center;font-family:var(--sans)}
@@ -516,7 +520,12 @@ function build(){
   // Розмір ФІКСОВАНИЙ на екрані (не роздувається при зумі) — applyZoom робить контр-масштаб.
   figNodes=[];
   S.threats.forEach(function(t){
-    var col=C[t.cat]||C.other, b=P(t.lon,t.lat), rot=(t.heading==null?0:t.heading);
+    var col=C[t.cat]||C.other, rot=(t.heading==null?0:t.heading), known=t.heading!=null;
+    // прогноз курсу (під фігурою): пунктир уперед + «привид» силуета у передбаченій точці
+    var pred=el('line',{'class':'pred',stroke:col});
+    var ghost=el('g',{'class':'ghost'});
+    figParts(t.cat).forEach(function(p){ if(p.s)return; var pa=document.createElementNS(NS,'path'); pa.setAttribute('d',p.d); pa.setAttribute('fill',col); ghost.appendChild(pa); });
+    // основна фігура
     var g=el('g',{'class':'fig'});
     figParts(t.cat).forEach(function(p){
       var pa=document.createElementNS(NS,'path');
@@ -525,9 +534,11 @@ function build(){
       if(!p.s){ pa.setAttribute('stroke','rgba(10,15,25,.6)'); pa.setAttribute('stroke-width','0.35'); }
       g.appendChild(pa);
     });
+    var predlab = known ? el('text',{'class':'predlab',fill:col}) : null; // передбачене місто (ІІ)
     var nlab = t.n>1 ? el('text',{'class':'tlabel',fill:col},'×'+t.n) : null;   // ×N
     var plab = t.place ? el('text',{'class':'plabel',fill:col},esc(t.place)) : null; // назва міста цілі (за зумом)
-    figNodes.push({g:g,x:b[0],y:b[1],rot:rot,base:figScale(t.cat),nlab:nlab,plab:plab});
+    figNodes.push({g:g,pred:pred,ghost:ghost,predlab:predlab,nlab:nlab,plab:plab,
+      lon0:t.lon,lat0:t.lat,mlon:t.lon,mlat:t.lat,rot:rot,known:known,base:figScale(t.cat),spd:speedKmMin(t),seen:(t.seen||S.ts)});
   });
   // дом
   var hp=P(S.home.lon,S.home.lat);
@@ -538,17 +549,42 @@ function build(){
 }
 // Автозум на дом+цели (в SVG-координатах группы #zoom).
 let scale=1,tx=0,ty=0;
+// зсув точки (lon,lat) на dkm за курсом brg (0°=Пн, за годинниковою)
+function moveKm(lon,lat,brg,dkm){var rad=Math.PI/180,la=lat*rad;
+  return [lon+(dkm*Math.sin(brg*rad))/(111*Math.cos(la)), lat+(dkm*Math.cos(brg*rad))/111];}
+// найближче місто до точки (для передбачення цілі ІІ), у межах ~28 км
+function nearestCity(lon,lat){var best=null,bd=1e9;CITY.forEach(function(c){var dx=(c[1]-lon)*71,dy=(c[2]-lat)*111,d=Math.sqrt(dx*dx+dy*dy);if(d<bd){bd=d;best=c;}});return bd<=28?best:null;}
+// Розмістити одну ціль: силует у поточній (екстрапольованій) точці + прогноз курсу вперед.
+function layoutFig(f){
+  var inv=1/scale, cs=P(f.mlon,f.mlat);
+  f.g.setAttribute('transform','translate('+cs[0].toFixed(2)+' '+cs[1].toFixed(2)+') rotate('+f.rot.toFixed(1)+') scale('+(f.base*inv).toFixed(3)+')');
+  // ІІ-прогноз: куди летить далі (пунктир + привид + передбачене місто)
+  if(f.known && f.spd>0){
+    var lead=Math.min(55,f.spd*10), pd=moveKm(f.mlon,f.mlat,f.rot,lead), ps=P(pd[0],pd[1]);
+    f.pred.setAttribute('display',''); f.pred.setAttribute('x1',cs[0].toFixed(2)); f.pred.setAttribute('y1',cs[1].toFixed(2)); f.pred.setAttribute('x2',ps[0].toFixed(2)); f.pred.setAttribute('y2',ps[1].toFixed(2));
+    f.pred.style.strokeWidth=(0.9*inv).toFixed(2)+'px'; f.pred.setAttribute('stroke-dasharray',(1.7*inv).toFixed(2)+' '+(1.5*inv).toFixed(2));
+    f.ghost.setAttribute('display',''); f.ghost.setAttribute('transform','translate('+ps[0].toFixed(2)+' '+ps[1].toFixed(2)+') rotate('+f.rot.toFixed(1)+') scale('+(f.base*inv*0.92).toFixed(3)+')');
+    if(f.predlab){ var nc=nearestCity(pd[0],pd[1]); if(nc){ f.predlab.setAttribute('display',''); f.predlab.textContent='→ '+nc[0]+'?'; f.predlab.setAttribute('x',(ps[0]+2*inv).toFixed(2)); f.predlab.setAttribute('y',(ps[1]-1.5*inv).toFixed(2)); f.predlab.style.fontSize=(3.2*inv).toFixed(2)+'px'; f.predlab.style.strokeWidth=(0.7*inv).toFixed(2)+'px'; } else f.predlab.setAttribute('display','none'); }
+  } else { f.pred.setAttribute('display','none'); f.ghost.setAttribute('display','none'); if(f.predlab)f.predlab.setAttribute('display','none'); }
+  if(f.nlab){ f.nlab.setAttribute('x',(cs[0]+5*inv).toFixed(2)); f.nlab.setAttribute('y',(cs[1]-5*inv).toFixed(2)); f.nlab.style.fontSize=(7*inv).toFixed(2)+'px'; f.nlab.style.strokeWidth=(1.0*inv).toFixed(2)+'px'; }
+  if(f.plab){ var sp=scale>=2.4; f.plab.setAttribute('display',sp?'':'none'); if(sp){ f.plab.setAttribute('x',(cs[0]+5*inv).toFixed(2)); f.plab.setAttribute('y',(cs[1]+6.5*inv).toFixed(2)); f.plab.style.fontSize=(3.6*inv).toFixed(2)+'px'; f.plab.style.strokeWidth=(0.7*inv).toFixed(2)+'px'; } }
+}
+// Рух цілей (dead-reckoning): екстраполюємо позицію за курсом і швидкістю від часу даних.
+// Коли з каналів приходить реальне місце — S оновлюється і ціль «телепортується» туди.
+function animateFigs(){
+  if(!P||!figNodes.length) return;
+  figNodes.forEach(function(f){
+    if(f.known){ var em=Math.max(0,(Date.now()-(f.seen||S.ts))/60000); // хв від останнього спостереження позиції
+      var d=Math.min(60,f.spd*em), m=moveKm(f.lon0,f.lat0,f.rot,d); f.mlon=m[0]; f.mlat=m[1]; }
+    layoutFig(f);
+  });
+}
 function applyZoom(){
   document.getElementById('zoom').setAttribute('transform','translate('+tx+' '+ty+') scale('+scale+')');
   try{localStorage.setItem('wa_zoom',JSON.stringify({s:scale,tx:tx,ty:ty}));}catch(e){}
   var inv=1/scale; // контр-масштаб: екранний розмір лишається сталим попри зум (розмір/обводку задаємо через style)
-  // Цілі: фіксований розмір + підпис міста цілі з'являється при наближенні (scale≥2.4).
-  figNodes.forEach(function(f){
-    f.g.setAttribute('transform','translate('+f.x.toFixed(2)+' '+f.y.toFixed(2)+') rotate('+f.rot.toFixed(1)+') scale('+(f.base*inv).toFixed(3)+')');
-    if(f.nlab){ f.nlab.setAttribute('x',(f.x+5*inv).toFixed(2)); f.nlab.setAttribute('y',(f.y-5*inv).toFixed(2)); f.nlab.style.fontSize=(7*inv).toFixed(2)+'px'; f.nlab.style.strokeWidth=(1.0*inv).toFixed(2)+'px'; }
-    if(f.plab){ var sp=scale>=2.4; f.plab.setAttribute('display',sp?'':'none');
-      if(sp){ f.plab.setAttribute('x',(f.x+5*inv).toFixed(2)); f.plab.setAttribute('y',(f.y+6.5*inv).toFixed(2)); f.plab.style.fontSize=(3.6*inv).toFixed(2)+'px'; f.plab.style.strokeWidth=(0.7*inv).toFixed(2)+'px'; } }
-  });
+  // Цілі: розмір/позиція/прогноз — через layoutFig (спільно з анімацією руху).
+  figNodes.forEach(layoutFig);
   // Міста: рівні деталізації за зумом; точки/підписи не роздуваються (розмір через style).
   cityNodes.forEach(function(c){
     var show = c.tier===0 || (c.tier===1 && scale>=1.7) || (c.tier===2 && scale>=2.8);
@@ -954,6 +990,7 @@ render();
 requestAnimationFrame(function(){ showView(savedTab); });
 window.addEventListener('load',function(){ showView(savedTab); });
 setInterval(render,1000);
+setInterval(animateFigs,400); // рух цілей + прогноз курсу (dead-reckoning між оновленнями даних)
 // Авто-оновлення даних (заміна meta-refresh), але НЕ перезавантажуємо, поки заповнюють поле/форму.
 setInterval(function(){
   var a=document.activeElement, tag=a&&a.tagName;
