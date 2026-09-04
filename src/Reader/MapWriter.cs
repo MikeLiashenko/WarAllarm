@@ -132,7 +132,7 @@ public static class MapWriter
         ThreatKind.Ballistic => "balist",
         ThreatKind.Missile   => "missile",
         ThreatKind.Kab       => "kab",
-        ThreatKind.Aviation  => "kab",
+        ThreatKind.Aviation  => "avia",
         ThreatKind.Drone     => "shahed",
         _                    => "other",
     };
@@ -221,7 +221,7 @@ public static class MapWriter
   --line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.12);
   --tx:#E8ECF4;--mut:#8792A6;--dim:#5C6780;--sky:#5AA9FF;--wheat:#F4C550;
   --calm:#34D399;--calm-glow:rgba(52,211,153,.30);--alarm:#FF3B30;--alarm-glow:rgba(255,59,48,.34);
-  --balist:#FF3B30;--missile:#FF5A3C;--shahed:#FF9F45;--kab:#FF6B4A;--other:#F4C550;
+  --balist:#FF3B30;--missile:#FF7A3C;--shahed:#FF9F45;--kab:#C77DFF;--avia:#F4C550;--other:#9AA6B2;
   --sans:"Segoe UI Variable","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
   --mono:ui-monospace,"Cascadia Code","Consolas",monospace;color-scheme:dark;
 }
@@ -370,10 +370,11 @@ h3{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);
     </svg>
     <div class="zoomc"><button id="zin">+</button><button id="zout">−</button><button id="zreset">⤢</button></div>
     <div class="legend">
-      <span><i style="background:var(--balist)"></i>Балістика</span>
-      <span><i style="background:var(--missile)"></i>Ракета</span>
       <span><i style="background:var(--shahed)"></i>Шахед</span>
+      <span><i style="background:var(--missile)"></i>Крилата ракета</span>
+      <span><i style="background:var(--balist)"></i>Балістика</span>
       <span><i style="background:var(--kab)"></i>КАБ</span>
+      <span><i style="background:var(--avia)"></i>Авіація</span>
     </div>
   </div>
   </div>
@@ -415,17 +416,46 @@ const OBLASTS = /*__OBLASTS__*/;
 const ICON="/*__ICON__*/";
 if(ICON){var mk=document.getElementById('mark');if(mk){mk.style.background='none';mk.innerHTML='<img src="'+ICON+'" alt="WarAlarm" style="width:100%;height:100%;object-fit:cover;border-radius:9px;display:block">';}}
 const NS='http://www.w3.org/2000/svg';
-const C={balist:'#FF3B30',missile:'#FF5A3C',shahed:'#FF9F45',kab:'#FF6B4A',other:'#F4C550'};
+const C={balist:'#FF3B30',missile:'#FF7A3C',shahed:'#FF9F45',kab:'#C77DFF',avia:'#F4C550',other:'#9AA6B2'};
 function el(n,at,txt){var e=document.createElementNS(NS,n);for(var k in at)e.setAttribute(k,at[k]);if(txt!=null)e.textContent=txt;document.getElementById('ua-overlay').appendChild(e);return e;}
-// Силуэты целей (нос смотрит вверх, 0°=Пн; поворот по heading). Координаты в юнитах ~±8.
-function figPath(cat){
-  if(cat==='balist'||cat==='missile')                                   // ракета/балістика: гострий ніс, корпус, хвостові стабілізатори
-    return 'M0,-9 C1.5,-6 1.5,-2 1.4,2.6 L3.1,7 L1,5.6 L1,8.2 L-1,8.2 L-1,5.6 L-3.1,7 L-1.4,2.6 C-1.5,-2 -1.5,-6 0,-9 Z';
-  if(cat==='kab')                                                        // КАБ: коротша «бомба» з оперенням
-    return 'M0,-6.4 C2.1,-5.6 2,-1 1.6,3 L3.3,6 L1,5 L1,7 L-1,7 L-1,5 L-3.3,6 L-1.6,3 C-2,-1 -2.1,-5.6 0,-6.4 Z';
-  return 'M0,-7.6 L5.9,5 L1,3.6 L1.5,7.2 L-1.5,7.2 L-1,3.6 L-5.9,5 Z';   // шахед/ціль: дельта-крило дрона зі «жалом»
+// Детальні силуети цілей (ніс дивиться вгору, 0°=Пн; поворот по heading). Кілька частин на фігуру:
+// s:'dark' — темніша деталь (ніс/фюзеляж), s:'light' — світлий акцент (гвинт/кабіна), інакше — колір типу.
+function figParts(cat){
+  switch(cat){
+    case 'missile': return [ // Крилата ракета: довгий корпус, прямі серединні крила, хрестове оперення
+      {d:'M0,-11 C1.2,-8.8 1.2,-6 1.2,7.5 C1.2,8.6 -1.2,8.6 -1.2,7.5 C-1.2,-6 -1.2,-8.8 0,-11 Z'},
+      {d:'M-8,0.2 L8,0.2 L8,1.5 L-8,1.5 Z'},
+      {d:'M-3.4,5.4 L3.4,5.4 L3.4,6.8 L-3.4,6.8 Z'},
+      {d:'M0,-11 C0.7,-9.6 0.7,-8.3 0,-7.9 C-0.7,-8.3 -0.7,-9.6 0,-11 Z',s:'dark'},
+      {d:'M-0.9,6.6 L0.9,6.6 L0.7,8.7 L-0.7,8.7 Z',s:'dark'}
+    ];
+    case 'balist': return [ // Балістика: дуже довга, гострий ніс, БЕЗ крил, малі хвостові стабілізатори
+      {d:'M0,-12.5 C0.9,-9 1,-4 1,7 L2.7,10.6 L0.9,9 L0.9,10.7 L-0.9,10.7 L-0.9,9 L-2.7,10.6 L-1,7 C-1,-4 -0.9,-9 0,-12.5 Z'},
+      {d:'M0,-12.5 C0.7,-10.6 0.7,-8.7 0,-8.1 C-0.7,-8.7 -0.7,-10.6 0,-12.5 Z',s:'dark'},
+      {d:'M-0.28,-8 L0.28,-8 L0.28,7 L-0.28,7 Z',s:'dark'}
+    ];
+    case 'kab': return [ // КАБ (УМПК): коротке товсте тіло, серединні крила, хвостовий короб-оперення
+      {d:'M0,-6.6 C2.2,-6 2.2,-1 1.8,3.2 L1.8,5.2 L-1.8,5.2 L-1.8,3.2 C-2.2,-1 -2.2,-6 0,-6.6 Z'},
+      {d:'M-5.6,-0.4 L5.6,-0.4 L5.6,0.9 L-5.6,0.9 Z'},
+      {d:'M-2.8,4.6 L2.8,4.6 L2.3,7.1 L-2.3,7.1 Z'},
+      {d:'M0,-6.6 C1,-5.6 1,-4.4 0,-4 C-1,-4.4 -1,-5.6 0,-6.6 Z',s:'dark'}
+    ];
+    case 'avia': return [ // Авіація: фюзеляж із гострим носом, стрілоподібні крила, хвостове оперення, ліхтар
+      {d:'M0,-10.5 L1,-4.5 L1.3,6 L2.1,9.2 L0,8.2 L-2.1,9.2 L-1.3,6 L-1,-4.5 Z'},
+      {d:'M-1.1,-1 L-9,5 L-9,6.3 L-1.1,3.1 L1.1,3.1 L9,6.3 L9,5 L1.1,-1 Z'},
+      {d:'M-1,5.6 L-4.3,7.7 L-4.3,8.4 L-1,6.9 L1,6.9 L4.3,8.4 L4.3,7.7 L1,5.6 Z'},
+      {d:'M0,-6 C0.8,-6 0.9,-3.6 0,-3.2 C-0.9,-3.6 -0.8,-6 0,-6 Z',s:'light'}
+    ];
+    default: return [ // Шахед-136 / ціль: дельта-крило, фюзеляж, два кільові стабілізатори, штовхальний гвинт
+      {d:'M0,-9.5 L1.6,-7.5 L9.5,5.2 L1.3,4.2 L1.3,5.4 L-1.3,5.4 L-1.3,4.2 L-9.5,5.2 L-1.6,-7.5 Z'},
+      {d:'M-0.7,-8.6 L0.7,-8.6 L0.9,6.6 L-0.9,6.6 Z',s:'dark'},
+      {d:'M1.3,4.4 L3.2,6.7 L1.3,5.4 Z'},
+      {d:'M-1.3,4.4 L-3.2,6.7 L-1.3,5.4 Z'},
+      {d:'M-2.5,6.9 L2.5,6.9 L2.5,7.35 L-2.5,7.35 Z',s:'light'}
+    ];
+  }
 }
-function figScale(cat){return cat==='balist'?1.5:cat==='missile'?1.28:cat==='kab'?1.05:cat==='shahed'?1.08:0.9;}
+function figScale(cat){return cat==='balist'?1.12:cat==='missile'?1.0:cat==='avia'?1.0:cat==='kab'?0.98:cat==='shahed'?0.9:0.8;}
 
 // Проекция контура (те же границы Украины, что в концепте) — совмещаем overlay с path.
 let P=null;
@@ -458,19 +488,20 @@ function build(){
     var p=P(c[1],c[2]); el('circle',{'class':'city',cx:p[0],cy:p[1],r:1.1});
     el('text',{'class':'clabel2',x:p[0],y:p[1]-2},c[0]);
   });
-  // цели: РЕАЛЬНИЙ СИЛУЕТ (шахед/ракета/КАБ) у точці цілі, ніс — куди летить (heading, 0°=Пн).
+  // цели: ДЕТАЛЬНИЙ СИЛУЕТ типу (шахед/крилата/балістика/КАБ/авіація) у точці цілі,
+  // ніс — куди летить (heading, 0°=Пн). Фігура складається з кількох частин.
   S.threats.forEach(function(t){
     var col=C[t.cat]||C.other, b=P(t.lon,t.lat), rot=(t.heading==null?0:t.heading);
-    var g=el('g',{'class':'fig',transform:'translate('+b[0].toFixed(2)+' '+b[1].toFixed(2)+') rotate('+rot.toFixed(1)+')'});
-    var fig=document.createElementNS(NS,'path');
-    fig.setAttribute('d',figPath(t.cat));
-    fig.setAttribute('fill',col);
-    fig.setAttribute('stroke','rgba(10,15,25,.55)');
-    fig.setAttribute('stroke-width','0.5');
-    fig.setAttribute('transform','scale('+figScale(t.cat)+')');
-    g.appendChild(fig);
+    var g=el('g',{'class':'fig',transform:'translate('+b[0].toFixed(2)+' '+b[1].toFixed(2)+') rotate('+rot.toFixed(1)+') scale('+figScale(t.cat)+')'});
+    figParts(t.cat).forEach(function(p){
+      var pa=document.createElementNS(NS,'path');
+      pa.setAttribute('d',p.d);
+      pa.setAttribute('fill', p.s==='dark'?'rgba(12,16,26,.5)':p.s==='light'?'rgba(255,255,255,.72)':col);
+      if(!p.s){ pa.setAttribute('stroke','rgba(10,15,25,.6)'); pa.setAttribute('stroke-width','0.35'); }
+      g.appendChild(pa);
+    });
     // ×N (не обертаємо — читабельно)
-    if(t.n>1) el('text',{'class':'tlabel',x:b[0]+4,y:b[1]-4,fill:col},'×'+t.n);
+    if(t.n>1) el('text',{'class':'tlabel',x:b[0]+5,y:b[1]-5,fill:col},'×'+t.n);
   });
   // дом
   var hp=P(S.home.lon,S.home.lat);
