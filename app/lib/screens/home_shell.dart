@@ -82,20 +82,30 @@ class PageBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final padding = EdgeInsets.symmetric(
+      horizontal: Responsive.isCompact(context) ? 16 : 28,
+      vertical: 22,
+    );
     final content = ConstrainedBox(
       constraints:
           BoxConstraints(maxWidth: Responsive.contentMaxWidth(context)),
       child: child,
     );
+
+    if (!scrollable) {
+      // Fixed-height screens (Map, Chat) manage their own internal scrolling.
+      return SafeArea(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Padding(padding: padding, child: content),
+        ),
+      );
+    }
     return SafeArea(
-      child: Align(
-        alignment: Alignment.topCenter,
+      child: SingleChildScrollView(
         child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: Responsive.isCompact(context) ? 16 : 28,
-            vertical: 22,
-          ),
-          child: content,
+          padding: padding,
+          child: Center(child: content),
         ),
       ),
     );

@@ -2,13 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/ai_controller.dart';
+import '../controllers/map_data_controller.dart';
+import '../controllers/nav_controller.dart';
+import '../controllers/settings_controller.dart';
+import '../domain/analytics.dart';
+import '../domain/situation.dart';
 import '../models/ai_session.dart';
+import '../models/map_target.dart';
+import '../models/monitored_place.dart';
 import '../theme/app_colors.dart';
 import '../utils/formatting.dart';
-import '../widgets/responsive.dart';
+import '../widgets/glass_container.dart';
 import '../widgets/section_header.dart';
 import 'home_shell.dart';
 
+/// AI tab — the Reader's AI functionality ported into the app's style:
+/// a live LLM (Claude/Gemini) analysis + heuristic risk, trajectory forecast
+/// and history patterns computed from the current situation.
 class AiScreen extends StatefulWidget {
   const AiScreen({super.key});
 
@@ -18,151 +28,234 @@ class AiScreen extends StatefulWidget {
 
 class _AiScreenState extends State<AiScreen> {
   final _input = TextEditingController();
-  final _scroll = ScrollController();
 
   @override
   void dispose() {
     _input.dispose();
-    _scroll.dispose();
     super.dispose();
   }
 
-  Future<void> _send(AiController controller) async {
-    final text = _input.text;
-    if (text.trim().isEmpty) return;
-    _input.clear();
-    await controller.sendMessage(text);
-    if (_scroll.hasClients) {
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent + 200,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
+  String _situation(MapDataController d, List<MonitoredPlace> sel) {
+    final b = StringBuffer();
+    b.writeln('Дім: ${d.homeName} (${d.home.lat}, ${d.home.lon}).');
+    final places = sel.isEmpty ? d.places : sel;
+    for (final pl in places) {
+      final arr = placeThreats(pl, d.targets);
+      if (arr.isEmpty) {
+        b.writeln('${pl.name}: загроз поруч немає.');
+        continue;
+      }
+      b.writeln('${pl.name}:');
+      for (final t in arr.take(4)) {
+        b.writeln(
+            '  - ${t.label}${t.amount > 1 ? ' ×${t.amount}' : ''}, ${t.pdist?.round() ?? '?'} км, '
+            'ETA ${fmtEta(etaNow(t, d.stateTs))}, ${t.stageLabel}, напрям ${t.dir}, біля ${t.place}.');
+      }
     }
+    return b.toString();
+  }
+
+  Future<void> _ask(BuildContext context) async {
+    final text = _input.text.trim();
+    if (text.isEmpty) return;
+    _input.clear();
+    final settings = context.read<SettingsController>();
+    final data = context.read<MapDataController>();
+    await context.read<AiController>().sendMessage(
+          text,
+          apiKey: settings.aiApiKey,
+          model: settings.aiModel,
+          situation: _situation(data, data.selectedPlaces),
+        );
   }
 
   @override
   Widget build(BuildContext context) {
-    final controller = context.watch<AiController>();
-    final showSidePanel = !Responsive.railCollapsed(context);
+    final data = context.watch<MapDataController>();
+    final settings = context.watch<SettingsController>();
+    final ai = context.watch<AiController>();
+
+    final activePlaces =
+        data.places.where((p) => !p.paused).toList();
+    final risks = activePlaces.map((p) => riskOf(p, data.targets)).toList()
+      ..sort((a, b) => b.score.compareTo(a.score));
+    final worst = risks.isEmpty ? null : risks.first;
+    final patterns = computePatterns(data.rows);
 
     return PageBody(
-      scrollable: false,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SectionHeader(
-            title: 'AI assistant',
-            subtitle: 'Ask about status, places and integration',
+          const SectionHeader(
+            title: 'ШІ · аналіз загроз',
+            subtitle: 'Розумний висновок, ризик, прогноз курсу та патерни',
             icon: Icons.auto_awesome_rounded,
-            trailing: showSidePanel
-                ? null
-                : IconButton(
-                    tooltip: 'Sessions',
-                    onPressed: () => _openSessionsSheet(context, controller),
-                    icon: const Icon(Icons.history_rounded),
-                  ),
           ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (showSidePanel) ...[
-                  SizedBox(
-                    width: 260,
-                    child: _SessionList(controller: controller),
-                  ),
-                  const SizedBox(width: 14),
-                ],
-                Expanded(child: _conversation(controller)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          _Composer(
-            controller: _input,
-            thinking: controller.thinking,
-            onSend: () => _send(controller),
-          ),
+          const SizedBox(height: 18),
+
+          // 1 — Live LLM assistant (Claude / Gemini)
+          _llmCard(context, data, settings, ai),
+          const SizedBox(height: 22),
+
+          // 2 — Smart verdict now
+          _heading('Розумний висновок · зараз'),
+          _verdictCard(worst, data),
+          const SizedBox(height: 22),
+
+          // 3 — Risk per place
+          _heading('Оцінка ризику по місцях'),
+          ...risks.map(_riskCard),
+          const SizedBox(height: 22),
+
+          // 4 — Trajectory forecast
+          _heading('Прогноз траєкторії'),
+          _forecast(activePlaces, data),
+          const SizedBox(height: 22),
+
+          // 5 — Patterns from history
+          _heading('Патерни з історії'),
+          _patternGrid(patterns),
+          const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  Widget _conversation(AiController controller) {
-    final session = controller.active;
-    final messages = session?.messages ?? const <AiMessage>[];
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: messages.isEmpty && !controller.thinking
-          ? _emptyState()
-          : ListView.builder(
-              controller: _scroll,
-              padding: const EdgeInsets.all(18),
-              itemCount: messages.length + (controller.thinking ? 1 : 0),
-              itemBuilder: (context, i) {
-                if (i >= messages.length) return const _ThinkingBubble();
-                return _AiBubble(message: messages[i]);
-              },
-            ),
-    );
-  }
-
-  Widget _emptyState() {
-    final suggestions = [
-      'What\'s the current threat status?',
-      'How do I add a place to monitor?',
-      'Generate an API integration snippet',
-    ];
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                  colors: [AppColors.accent, AppColors.primary]),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Icon(Icons.auto_awesome_rounded,
-                color: Colors.white, size: 30),
+  Widget _heading(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 12, left: 4),
+        child: Text(
+          text.toUpperCase(),
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.6,
+            color: AppColors.textMuted,
           ),
-          const SizedBox(height: 16),
-          const Text('How can I help?',
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary)),
-          const SizedBox(height: 6),
-          const Text('Ask the WarAlarm assistant anything.',
-              style: TextStyle(color: AppColors.textSecondary)),
-          const SizedBox(height: 18),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
+        ),
+      );
+
+  Widget _llmCard(BuildContext context, MapDataController data,
+      SettingsController settings, AiController ai) {
+    final configured = settings.aiConfigured;
+    final msgs = ai.active?.messages ?? const <AiMessage>[];
+    return GlassContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              for (final s in suggestions)
-                ActionChip(
-                  label: Text(s),
-                  backgroundColor: AppColors.primarySoft,
-                  side: BorderSide.none,
-                  labelStyle: const TextStyle(
-                      color: AppColors.primaryDark,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12.5),
-                  onPressed: () {
-                    _input.text = s;
-                    _send(context.read<AiController>());
-                  },
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                      colors: [AppColors.accent, AppColors.primary]),
+                  borderRadius: BorderRadius.circular(12),
                 ),
+                child: const Icon(Icons.auto_awesome_rounded,
+                    color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text('Асистент (Claude · Gemini)',
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: configured ? AppColors.safeSoft : AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  configured ? 'ключ підключено' : 'ключ не задано',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: configured ? AppColors.safe : AppColors.primaryDark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (!configured)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Додай ключ Anthropic (sk-ant-…) або Google (AIza…/AQ…) '
+                        'у Налаштуваннях, щоб увімкнути справжній ІІ.',
+                        style: TextStyle(
+                            fontSize: 13, color: AppColors.textSecondary),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => context
+                          .read<NavController>()
+                          .select(AppTab.settings),
+                      child: const Text('Налаштування'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (data.aiText.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _bubble('🤖 ${data.aiText}',
+                sub: data.aiAt == null ? null : clock(data.aiAt!)),
+          ],
+          for (final m in msgs)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: _bubble(m.content, mine: m.isUser),
+            ),
+          if (ai.thinking)
+            const Padding(
+              padding: EdgeInsets.only(top: 10),
+              child: Text('Аналізую…',
+                  style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontStyle: FontStyle.italic)),
+            ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _input,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _ask(context),
+                  decoration: InputDecoration(
+                    hintText: configured
+                        ? 'Запитати ІІ про обстановку…'
+                        : 'Запитати (локальна відповідь без ключа)…',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 50,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: ai.thinking ? null : () => _ask(context),
+                  style: ElevatedButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    shape: const CircleBorder(),
+                  ),
+                  child: const Icon(Icons.arrow_upward_rounded, size: 20),
+                ),
+              ),
             ],
           ),
         ],
@@ -170,267 +263,260 @@ class _AiScreenState extends State<AiScreen> {
     );
   }
 
-  void _openSessionsSheet(BuildContext context, AiController controller) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (context) => SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.6,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: _SessionList(
-            controller: controller,
-            onSelected: () => Navigator.pop(context),
-          ),
+  Widget _bubble(String text, {bool mine = false, String? sub}) {
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 620),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: mine ? AppColors.primary : AppColors.primarySoft,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(text,
+                style: TextStyle(
+                    fontSize: 14,
+                    height: 1.45,
+                    color: mine ? Colors.white : AppColors.textPrimary)),
+            if (sub != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(sub,
+                    style: const TextStyle(
+                        fontSize: 11, color: AppColors.textMuted)),
+              ),
+          ],
         ),
       ),
     );
   }
-}
 
-class _SessionList extends StatelessWidget {
-  const _SessionList({required this.controller, this.onSelected});
-  final AiController controller;
-  final VoidCallback? onSelected;
+  Widget _verdictCard(RiskResult? worst, MapDataController data) {
+    if (worst != null && worst.score >= 55) {
+      final t = worst.top!;
+      return _panel(
+        AppColors.threat,
+        AppColors.threatSoft,
+        '🔴 Зараз небезпечно — ${worst.place.name}',
+        '${t.label} · ${t.pdist?.round() ?? '?'} км · ${fmtEta(etaNow(t, data.stateTs))} · напрям ${t.dir}\n➤ ${worst.advice}',
+      );
+    }
+    if (worst != null && worst.score >= 35) {
+      final t = worst.top!;
+      return _panel(
+        AppColors.primary,
+        AppColors.primarySoft,
+        '🟡 Підвищена увага — ${worst.place.name}',
+        '${t.label} · ${t.pdist?.round() ?? '?'} км · ${fmtEta(etaNow(t, data.stateTs))}\n${worst.advice}',
+      );
+    }
+    final near = data.targets.where((t) => t.distKm != null).toList()
+      ..sort((a, b) => a.distKm!.compareTo(b.distKm!));
+    final tail = data.targets.isEmpty
+        ? 'Активних загроз немає.'
+        : 'По країні цілей: ${data.targets.length} (далеко). Найближча — '
+            '${near.isEmpty ? '—' : '${near.first.label} ${near.first.distKm!.round()} км'}.';
+    return _panel(AppColors.safe, AppColors.safeSoft, '🟢 Зараз безпечно',
+        'Активних загроз поруч немає. $tail');
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    final sessions = controller.sessions;
-    final activeId = controller.active?.id;
+  Widget _panel(Color accent, Color bg, String title, String body) {
     return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: bg.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: TextStyle(
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w700,
+                  color: accent == AppColors.safe
+                      ? AppColors.textPrimary
+                      : accent)),
+          const SizedBox(height: 6),
+          Text(body,
+              style: const TextStyle(
+                  fontSize: 13.5, height: 1.5, color: AppColors.textSecondary)),
+        ],
+      ),
+    );
+  }
+
+  Widget _riskCard(RiskResult r) {
+    final color = r.cls == 'alarm'
+        ? AppColors.threat
+        : r.cls == 'warn'
+            ? const Color(0xFFF4B740)
+            : AppColors.safe;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppColors.border),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-            child: ElevatedButton.icon(
-              onPressed: () {
-                controller.newSession();
-                onSelected?.call();
-              },
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('New chat'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(44),
-              ),
-            ),
-          ),
-          const Divider(height: 1, color: AppColors.divider),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(8),
-              itemCount: sessions.length,
-              itemBuilder: (context, i) {
-                final s = sessions[i];
-                final active = s.id == activeId;
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () {
-                      controller.select(s.id);
-                      onSelected?.call();
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: active
-                            ? AppColors.primarySoft
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.chat_bubble_outline_rounded,
-                              size: 16,
-                              color: active
-                                  ? AppColors.primaryDark
-                                  : AppColors.textMuted),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  s.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: active
-                                        ? FontWeight.w700
-                                        : FontWeight.w500,
-                                    color: AppColors.textPrimary,
-                                  ),
-                                ),
-                                Text(
-                                  timeAgo(s.updatedAt),
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppColors.textMuted),
-                                ),
-                              ],
-                            ),
-                          ),
-                          InkWell(
-                            borderRadius: BorderRadius.circular(8),
-                            onTap: () => controller.deleteSession(s.id),
-                            child: const Padding(
-                              padding: EdgeInsets.all(4),
-                              child: Icon(Icons.close_rounded,
-                                  size: 15, color: AppColors.textMuted),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AiBubble extends StatelessWidget {
-  const _AiBubble({required this.message});
-  final AiMessage message;
-
-  @override
-  Widget build(BuildContext context) {
-    final user = message.isUser;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment:
-            user ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!user) ...[
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                    colors: [AppColors.accent, AppColors.primary]),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: const Icon(Icons.auto_awesome_rounded,
-                  color: Colors.white, size: 16),
+          Row(
+            children: [
+              Text('${r.place.icon} ${r.place.name}',
+                  style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary)),
+              const Spacer(),
+              Text('${r.level} · ${r.score}/100',
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: color)),
+            ],
+          ),
+          const SizedBox(height: 9),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: r.score / 100,
+              minHeight: 9,
+              backgroundColor: AppColors.divider,
+              valueColor: AlwaysStoppedAnimation(color),
             ),
-            const SizedBox(width: 10),
+          ),
+          const SizedBox(height: 8),
+          Text(r.advice,
+              style: const TextStyle(
+                  fontSize: 13, color: AppColors.textSecondary)),
+        ],
+      ),
+    );
+  }
+
+  Widget _forecast(List<MonitoredPlace> places, MapDataController data) {
+    final cards = <Widget>[];
+    for (final pl in places) {
+      MapTarget? bestT;
+      ClosestApproach? bestCa;
+      for (final t in data.targets) {
+        if (t.heading == null) continue;
+        final ca = closest(t, pl);
+        if (bestCa == null || ca.minKm < bestCa.minKm) {
+          bestCa = ca;
+          bestT = t;
+        }
+      }
+      if (bestT == null || bestCa == null) continue;
+      final d = kmTo(bestT, pl);
+      final verdict = bestCa.approaching
+          ? 'при збереженні курсу пройде за ~${bestCa.minKm.round()} км від «${pl.name}»${bestCa.minKm <= 12 ? ' — БЛИЗЬКО ⚠' : ''}'
+          : 'віддаляється від «${pl.name}»';
+      cards.add(Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${bestT.label} → ${pl.name}',
+                style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 4),
+            Text('зараз ${d.round()} км, курс ${bestT.dir}. $verdict.',
+                style: const TextStyle(
+                    fontSize: 13, color: AppColors.textSecondary)),
           ],
-          Flexible(
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 560),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: user ? AppColors.primary : AppColors.primarySoft,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                message.content,
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.4,
-                  color: user ? Colors.white : AppColors.textPrimary,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+        ),
+      ));
+    }
+    if (cards.isEmpty) {
+      return _note('Немає активних цілей з відомим курсом.');
+    }
+    return Column(children: cards);
   }
-}
 
-class _ThinkingBubble extends StatelessWidget {
-  const _ThinkingBubble();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 6),
-      child: Row(
+  Widget _patternGrid(Patterns? p) {
+    if (p == null) {
+      return _note('Ще мало даних для патернів — накопичиться з тривогами.');
+    }
+    final tiles = [
+      ('🕐', 'Найнебезпечніша година',
+          '${p.peakHour.toString().padLeft(2, '0')}:00', 'найбільше тривог'),
+      ('🎯', 'Найчастіша загроза',
+          kKindMeta[p.topKind]?.name ?? p.topKind, 'за весь період'),
+      ('📈', 'Тренд за тиждень', p.weekTrend, 'vs попередній тиждень'),
+      ('💥', 'Найбільше прильотів', p.topImpactZone, 'за твоїми зонами'),
+    ];
+    return LayoutBuilder(builder: (context, c) {
+      final cols = c.maxWidth > 640 ? 2 : 1;
+      return GridView.count(
+        crossAxisCount: cols,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 2.6,
         children: [
-          SizedBox(
-            width: 30,
-            height: 30,
-            child: DecoratedBox(
+          for (final t in tiles)
+            Container(
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                    colors: [AppColors.accent, AppColors.primary]),
-                borderRadius: BorderRadius.all(Radius.circular(9)),
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
               ),
-              child: Icon(Icons.auto_awesome_rounded,
-                  color: Colors.white, size: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('${t.$1}  ${t.$2}',
+                      style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textSecondary)),
+                  const SizedBox(height: 6),
+                  Text(t.$3,
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary)),
+                  Text(t.$4,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: AppColors.textMuted)),
+                ],
+              ),
             ),
-          ),
-          SizedBox(width: 10),
-          Text('Thinking…',
-              style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontStyle: FontStyle.italic)),
         ],
-      ),
-    );
+      );
+    });
   }
-}
 
-class _Composer extends StatelessWidget {
-  const _Composer({
-    required this.controller,
-    required this.thinking,
-    required this.onSend,
-  });
-
-  final TextEditingController controller;
-  final bool thinking;
-  final VoidCallback onSend;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: controller,
-            minLines: 1,
-            maxLines: 5,
-            textInputAction: TextInputAction.send,
-            onSubmitted: (_) => onSend(),
-            decoration: const InputDecoration(
-              hintText: 'Message the assistant…',
-            ),
-          ),
+  Widget _note(String text) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.primarySoft.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
         ),
-        const SizedBox(width: 10),
-        SizedBox(
-          width: 52,
-          height: 52,
-          child: ElevatedButton(
-            onPressed: thinking ? null : onSend,
-            style: ElevatedButton.styleFrom(
-              padding: EdgeInsets.zero,
-              shape: const CircleBorder(),
-            ),
-            child: const Icon(Icons.arrow_upward_rounded, size: 20),
-          ),
-        ),
-      ],
-    );
-  }
+        child: Text(text,
+            style:
+                const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+      );
 }

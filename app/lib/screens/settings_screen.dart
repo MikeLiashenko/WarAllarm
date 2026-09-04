@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../controllers/settings_controller.dart';
 import '../firebase_config.dart';
+import '../services/ai_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/section_header.dart';
@@ -68,6 +69,30 @@ class SettingsScreen extends StatelessWidget {
                 value: s.threatOnly,
                 onChanged: s.setThreatOnly,
                 accent: AppColors.threat,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          _Group(
+            title: 'ШІ · AI',
+            children: [
+              _AiKeyField(
+                value: s.aiApiKey,
+                onChanged: s.setAiApiKey,
+              ),
+              _AiModelField(
+                value: s.aiModel,
+                apiKey: s.aiApiKey,
+                onChanged: s.setAiModel,
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 2, 16, 10),
+                child: Text(
+                  'Ключ Anthropic (sk-ant-…) або Google (AIza…/AQ…) вмикає '
+                  'справжній ІІ у вкладці ШІ. Зберігається лише на цьому пристрої.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                ),
               ),
             ],
           ),
@@ -250,6 +275,93 @@ class _NameFieldState extends State<_NameField> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AiKeyField extends StatefulWidget {
+  const _AiKeyField({required this.value, required this.onChanged});
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_AiKeyField> createState() => _AiKeyFieldState();
+}
+
+class _AiKeyFieldState extends State<_AiKeyField> {
+  late final TextEditingController _ctl =
+      TextEditingController(text: widget.value);
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: TextField(
+        controller: _ctl,
+        obscureText: _obscure,
+        onChanged: widget.onChanged,
+        decoration: InputDecoration(
+          labelText: 'API-ключ ІІ',
+          hintText: 'sk-ant-…  /  AIza…',
+          prefixIcon: const Icon(Icons.key_rounded, size: 20),
+          suffixIcon: IconButton(
+            icon: Icon(_obscure ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+                size: 20),
+            onPressed: () => setState(() => _obscure = !_obscure),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AiModelField extends StatefulWidget {
+  const _AiModelField({
+    required this.value,
+    required this.apiKey,
+    required this.onChanged,
+  });
+  final String value;
+  final String apiKey;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_AiModelField> createState() => _AiModelFieldState();
+}
+
+class _AiModelFieldState extends State<_AiModelField> {
+  late final TextEditingController _ctl =
+      TextEditingController(text: widget.value);
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = widget.apiKey.trim().isEmpty
+        ? 'claude-haiku-4-5 / gemini-2.5-flash'
+        : AiService.defaultModel(widget.apiKey);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: TextField(
+        controller: _ctl,
+        onChanged: widget.onChanged,
+        decoration: InputDecoration(
+          labelText: 'Модель (необовʼязково)',
+          hintText: hint,
+          prefixIcon: const Icon(Icons.memory_rounded, size: 20),
+        ),
       ),
     );
   }

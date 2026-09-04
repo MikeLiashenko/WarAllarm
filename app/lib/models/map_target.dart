@@ -5,6 +5,8 @@
 class MapTarget {
   final String label;
   final String cat; // shahed | missile | balist | kab | avia | other
+  final String zone; // e.g. "Харків" / "Київ" / "UA"
+  final String stage; // Approaching | Imminent | Overhead | Impact | Passed
   final double lat;
   final double lon;
   final double? heading; // degrees, 0 = North
@@ -12,32 +14,49 @@ class MapTarget {
   final String place;
   final String dir;
   final String stageLabel;
+  final String icon;
   final double? distKm;
   final double? etaMin;
   final int seenMs; // last time this position was observed
   final List<List<double>> trail; // [[lat,lon], ...]
+
+  /// Per-place distance, filled in by the situation logic.
+  final double? pdist;
 
   const MapTarget({
     required this.label,
     required this.cat,
     required this.lat,
     required this.lon,
+    this.zone = 'UA',
+    this.stage = 'Approaching',
     this.heading,
     this.amount = 1,
     this.place = '',
     this.dir = '',
     this.stageLabel = '',
+    this.icon = '',
     this.distKm,
     this.etaMin,
     this.seenMs = 0,
     this.trail = const [],
+    this.pdist,
   });
+
+  MapTarget withPdist(double? d) => MapTarget(
+        label: label, cat: cat, lat: lat, lon: lon, zone: zone, stage: stage,
+        heading: heading, amount: amount, place: place, dir: dir,
+        stageLabel: stageLabel, icon: icon, distKm: distKm, etaMin: etaMin,
+        seenMs: seenMs, trail: trail, pdist: d,
+      );
 
   factory MapTarget.fromMap(Map<dynamic, dynamic> m) {
     double? d(dynamic v) => v == null ? null : (v as num).toDouble();
     return MapTarget(
       label: (m['label'] ?? 'Ціль').toString(),
       cat: (m['cat'] ?? 'other').toString(),
+      zone: (m['zone'] ?? 'UA').toString(),
+      stage: (m['stage'] ?? 'Approaching').toString(),
       lat: (m['lat'] as num).toDouble(),
       lon: (m['lon'] as num).toDouble(),
       heading: d(m['heading']),
@@ -45,6 +64,7 @@ class MapTarget {
       place: (m['place'] ?? '').toString(),
       dir: (m['dir'] ?? '').toString(),
       stageLabel: (m['stageLabel'] ?? '').toString(),
+      icon: (m['icon'] ?? '').toString(),
       distKm: d(m['dist']),
       etaMin: d(m['eta']),
       seenMs: (m['seen'] as num?)?.toInt() ?? 0,

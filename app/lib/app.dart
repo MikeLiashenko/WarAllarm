@@ -8,7 +8,6 @@ import 'controllers/map_data_controller.dart';
 import 'controllers/nav_controller.dart';
 import 'controllers/places_controller.dart';
 import 'controllers/settings_controller.dart';
-import 'controllers/threat_controller.dart';
 import 'services/local_store.dart';
 import 'services/rtdb_service.dart';
 import 'screens/home_shell.dart';
@@ -35,14 +34,11 @@ class WarAlarmApp extends StatelessWidget {
         Provider<LocalStore>.value(value: store),
         ChangeNotifierProvider<NavController>(create: (_) => NavController()),
         ChangeNotifierProvider<SettingsController>.value(value: settings),
-        ChangeNotifierProvider<ThreatController>(
-          create: (_) => ThreatController(rtdb)..start(),
-        ),
         ChangeNotifierProvider<PlacesController>(
           create: (_) => PlacesController(store),
         ),
         ChangeNotifierProvider<MapDataController>(
-          create: (_) => MapDataController(rtdb)..start(),
+          create: (_) => MapDataController(rtdb, store)..start(),
         ),
         ChangeNotifierProvider<ChatController>(
           create: (_) =>

@@ -12,6 +12,8 @@ class SettingsController extends ChangeNotifier {
     _keepScreenOn = _store.getBool('set_keep_screen', fallback: false);
     _compactFeed = _store.getBool('set_compact_feed', fallback: false);
     _displayName = _store.getString('set_name', fallback: 'Guest');
+    _aiApiKey = _store.getString('ai_api_key');
+    _aiModel = _store.getString('ai_model');
   }
 
   final LocalStore _store;
@@ -23,6 +25,8 @@ class SettingsController extends ChangeNotifier {
   bool _keepScreenOn = false;
   bool _compactFeed = false;
   String _displayName = 'Guest';
+  String _aiApiKey = '';
+  String _aiModel = '';
 
   bool get pushNotifications => _pushNotifications;
   bool get soundAlerts => _soundAlerts;
@@ -31,6 +35,9 @@ class SettingsController extends ChangeNotifier {
   bool get keepScreenOn => _keepScreenOn;
   bool get compactFeed => _compactFeed;
   String get displayName => _displayName;
+  String get aiApiKey => _aiApiKey;
+  String get aiModel => _aiModel;
+  bool get aiConfigured => _aiApiKey.trim().isNotEmpty;
 
   void _setBool(String key, bool value, void Function(bool) apply) {
     apply(value);
@@ -52,6 +59,18 @@ class SettingsController extends ChangeNotifier {
   void setDisplayName(String value) {
     _displayName = value.trim().isEmpty ? 'Guest' : value.trim();
     _store.setString('set_name', _displayName);
+    notifyListeners();
+  }
+
+  void setAiApiKey(String value) {
+    _aiApiKey = value.trim();
+    _store.setString('ai_api_key', _aiApiKey);
+    notifyListeners();
+  }
+
+  void setAiModel(String value) {
+    _aiModel = value.trim();
+    _store.setString('ai_model', _aiModel);
     notifyListeners();
   }
 }

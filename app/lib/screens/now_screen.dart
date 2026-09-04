@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../controllers/settings_controller.dart';
-import '../controllers/threat_controller.dart';
-import '../models/alert_event.dart';
+import '../controllers/map_data_controller.dart';
+import '../domain/situation.dart';
+import '../models/map_target.dart';
+import '../models/monitored_place.dart';
 import '../theme/app_colors.dart';
-import '../utils/formatting.dart';
-import '../widgets/analytics_charts.dart';
+import '../widgets/analytics_dashboard.dart';
 import '../widgets/glass_container.dart';
+import '../widgets/place_selector.dart';
 import '../widgets/responsive.dart';
 import '../widgets/threat_circle.dart';
 import 'home_shell.dart';
@@ -15,139 +16,252 @@ import 'home_shell.dart';
 class NowScreen extends StatelessWidget {
   const NowScreen({super.key});
 
+  /// Union of place-relevant threats across the selected places (deduped).
+  List<MapTarget> _selThreats(MapDataController d) {
+    final seen = <String>{};
+    final out = <MapTarget>[];
+    for (final pl in d.selectedPlaces) {
+      for (final t in placeThreats(pl, d.targets)) {
+        final k = '${t.zone}|${t.place}|${t.label}';
+        if (seen.add(k)) out.add(t);
+      }
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final threat = context.watch<ThreatController>();
-    final compactFeed = context.watch<SettingsController>().compactFeed;
-    final visibleFeed = context.select<SettingsController, bool>(
-            (s) => s.threatOnly)
-        ? threat.feed.where((e) => e.isThreat).toList()
-        : threat.feed;
+    final data = context.watch<MapDataController>();
+    final sel = _selThreats(data);
+    final worst = worstOf(sel);
+    final rank = worst == null ? 0 : (kRank[worst.stage] ?? 0);
+    final active = rank >= 3;
+    final region = data.selectedId == 'all'
+        ? data.homeName
+        : data.selectedPlaces.isEmpty
+            ? data.homeName
+            : data.selectedPlaces.first.name;
+
+    String message;
+    if (active) {
+      message = 'В УКРИТТЯ — ${worst!.label} поруч';
+    } else if (worst != null) {
+      message = '${worst.label} · ${worst.pdist?.round() ?? '?'} км · '
+          '${fmtEta(etaNow(worst, data.stateTs))}';
+    } else {
+      message = data.targets.isEmpty
+          ? 'Загроз для ваших місць немає'
+          : 'По країні цілей: ${data.targets.length} (далеко)';
+    }
 
     return PageBody(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const PlaceSelector(),
+          const SizedBox(height: 14),
+
           // Status hero
           GlassContainer(
-            padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 24),
+            padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
             child: Column(
               children: [
                 ThreatCircle(
-                  active: threat.threatActive,
-                  label: threat.threatActive ? 'THREAT' : 'CALM',
-                  sublabel: threat.region,
-                  size: Responsive.isCompact(context) ? 210 : 250,
+                  active: active,
+                  label: active ? 'ТРИВОГА' : (worst != null ? 'ЗАГРОЗА' : 'СПОКІЙ'),
+                  sublabel: region,
+                  size: Responsive.isCompact(context) ? 200 : 236,
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
                 Text(
-                  threat.statusLabel,
+                  active
+                      ? 'ТРИВОГА · ${worst!.stageLabel}'
+                      : worst != null
+                          ? 'Загроза поруч'
+                          : 'Спокійно',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 17,
                     fontWeight: FontWeight.w700,
-                    color: threat.threatActive
-                        ? AppColors.threatDark
-                        : AppColors.textPrimary,
+                    color: active ? AppColors.threatDark : AppColors.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  threat.threatActive
-                      ? 'Take shelter and stay updated.'
-                      : 'No active threats in your region.',
-                  style: const TextStyle(
-                      fontSize: 13.5, color: AppColors.textSecondary),
-                ),
+                Text(message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 13.5, color: AppColors.textSecondary)),
               ],
             ),
           ),
           const SizedBox(height: 18),
 
-          // Analytics above the feed
-          AnalyticsSection(
-            hourly: threat.hourlyBuckets,
-            eventsToday: threat.eventsToday,
-            threatsToday: threat.threatsToday,
-            connected: threat.connected,
-          ),
-          const SizedBox(height: 22),
+          // Place status cards
+          _sectionLabel('Мої місця'),
+          const SizedBox(height: 10),
+          ...data.selectedPlaces
+              .map((p) => _PlaceCard(place: p, data: data)),
+          const SizedBox(height: 18),
 
-          // Feed heading
+          // Analytics
+          AnalyticsDashboard(rows: data.rows, targetsNow: data.targets.length),
+          const SizedBox(height: 20),
+
+          // Active targets
           Row(
             children: [
-              const Text(
-                'Live feed',
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
+              _sectionLabel(data.selectedId == 'all'
+                  ? 'Активні цілі · вся Україна'
+                  : 'Цілі поруч'),
               const SizedBox(width: 8),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: AppColors.primarySoft,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  '${visibleFeed.length}',
+                  '${data.selectedId == 'all' ? data.targets.length : sel.length}',
                   style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primaryDark,
-                  ),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primaryDark),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-
-          if (visibleFeed.isEmpty)
-            const _EmptyFeed()
-          else
-            ...visibleFeed.map(
-              (e) => Padding(
+          const SizedBox(height: 10),
+          ..._targetList(data, sel).map((t) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: _FeedTile(event: e, compact: compactFeed),
+                child: _TargetRow(t: t, stateTs: data.stateTs),
+              )),
+          if (_targetList(data, sel).isEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 22),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.safeSoft,
+                borderRadius: BorderRadius.circular(14),
               ),
+              child: const Text('✅ Наразі чисто — активних цілей немає',
+                  style: TextStyle(
+                      color: AppColors.safe, fontWeight: FontWeight.w600)),
             ),
           const SizedBox(height: 20),
         ],
       ),
     );
   }
+
+  List<MapTarget> _targetList(MapDataController d, List<MapTarget> sel) =>
+      d.selectedId == 'all' ? d.targets : sel;
+
+  Widget _sectionLabel(String text) => Text(
+        text.toUpperCase(),
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.6,
+          color: AppColors.textMuted,
+        ),
+      );
 }
 
-class _FeedTile extends StatelessWidget {
-  const _FeedTile({required this.event, required this.compact});
-  final AlertEvent event;
-  final bool compact;
+class _PlaceCard extends StatelessWidget {
+  const _PlaceCard({required this.place, required this.data});
+  final MonitoredPlace place;
+  final MapDataController data;
 
   @override
   Widget build(BuildContext context) {
-    final threat = event.isThreat;
-    final accent = threat ? AppColors.threat : AppColors.primary;
+    final arr = placeThreats(place, data.targets);
+    final s = statusOf(worstOf(arr));
+    final accent = s.cls == 'alarm'
+        ? AppColors.threat
+        : s.cls == 'warn'
+            ? const Color(0xFFF4B740)
+            : AppColors.safe;
+
+    String detail;
+    if (arr.isNotEmpty) {
+      final n = arr.first;
+      detail = 'найближча: ${n.label}${n.amount > 1 ? ' ×${n.amount}' : ''} · '
+          '${n.pdist?.round() ?? '?'} км · ${fmtEta(etaNow(n, data.stateTs))} · ${n.stageLabel}'
+          '${arr.length > 1 ? ' · ще ${arr.length - 1} поруч' : ''}';
+    } else {
+      detail = 'Загроз поруч немає — спокійно ✅';
+    }
+
     return Container(
-      padding: EdgeInsets.all(compact ? 12 : 16),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: threat ? AppColors.threatSoft : AppColors.border,
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0A1B3A66),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-            spreadRadius: -8,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 9,
+                height: 9,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+              ),
+              Flexible(
+                child: Text('${place.icon} ${place.name}',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+              ),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(s.title,
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: accent)),
+              ),
+            ],
           ),
+          const SizedBox(height: 5),
+          Text(detail,
+              style: const TextStyle(
+                  fontSize: 12.5, color: AppColors.textSecondary)),
         ],
       ),
+    );
+  }
+}
+
+class _TargetRow extends StatelessWidget {
+  const _TargetRow({required this.t, required this.stateTs});
+  final MapTarget t;
+  final int stateTs;
+
+  @override
+  Widget build(BuildContext context) {
+    final threat = (kRank[t.stage] ?? 0) >= 3;
+    final accent = threat ? AppColors.threat : AppColors.primary;
+    final dist = t.pdist ?? t.distKm;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: threat ? AppColors.threatSoft : AppColors.border),
+      ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 42,
@@ -157,80 +271,58 @@ class _FeedTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
-              threat ? Icons.warning_amber_rounded : Icons.check_circle_rounded,
-              color: accent,
-              size: 22,
-            ),
+                threat ? Icons.warning_amber_rounded : Icons.navigation_rounded,
+                color: accent,
+                size: 20),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 13),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Expanded(
+                    Flexible(
                       child: Text(
-                        event.title,
+                        '${t.label}${t.amount > 1 ? '  ×${t.amount}' : ''}',
                         style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: threat
-                              ? AppColors.threatDark
-                              : AppColors.textPrimary,
-                        ),
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w700,
+                            color: threat
+                                ? AppColors.threatDark
+                                : AppColors.textPrimary),
                       ),
                     ),
-                    Text(
-                      timeAgo(event.timestamp),
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.textMuted),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(t.stageLabel,
+                          style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: accent)),
                     ),
                   ],
                 ),
-                if (!compact && event.message.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    event.message,
-                    style: const TextStyle(
-                        fontSize: 13.5, color: AppColors.textSecondary),
-                  ),
-                ],
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(Icons.place_rounded,
-                        size: 13, color: AppColors.textMuted),
-                    const SizedBox(width: 3),
-                    Text(
-                      event.region,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.textMuted),
-                    ),
-                  ],
+                const SizedBox(height: 3),
+                Text(
+                  [
+                    if (dist != null) '${dist.round()} км',
+                    fmtEta(etaNow(t, stateTs)),
+                    if (t.dir.isNotEmpty) 'напрям ${t.dir}',
+                    if (t.place.isNotEmpty) t.place,
+                  ].join(' · '),
+                  style: const TextStyle(
+                      fontSize: 12.5, color: AppColors.textSecondary),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyFeed extends StatelessWidget {
-  const _EmptyFeed();
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassContainer(
-      padding: const EdgeInsets.symmetric(vertical: 40),
-      child: Column(
-        children: const [
-          Icon(Icons.inbox_rounded, size: 40, color: AppColors.textMuted),
-          SizedBox(height: 10),
-          Text('No events to show',
-              style: TextStyle(color: AppColors.textSecondary)),
         ],
       ),
     );

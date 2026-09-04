@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/map_data_controller.dart';
 import '../controllers/nav_controller.dart';
-import '../controllers/threat_controller.dart';
 import '../theme/app_colors.dart';
 
 /// Fixed left navigation. Shows a smooth animated active-tab indicator and a
@@ -26,7 +26,7 @@ class AppSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final width = collapsed ? 76.0 : 248.0;
     final nav = context.watch<NavController>();
-    final threat = context.watch<ThreatController>();
+    final threat = context.watch<MapDataController>();
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 240),
@@ -101,7 +101,7 @@ class AppSidebar extends StatelessWidget {
     );
   }
 
-  Widget _threatPill(ThreatController threat, bool collapsed) {
+  Widget _threatPill(MapDataController threat, bool collapsed) {
     final active = threat.threatActive;
     final color = active ? AppColors.threat : AppColors.safe;
     final bg = active ? AppColors.threatSoft : AppColors.safeSoft;

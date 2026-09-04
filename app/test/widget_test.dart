@@ -5,8 +5,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:waralarm/models/alert_event.dart';
 import 'package:waralarm/models/api_key.dart';
+import 'package:waralarm/models/map_target.dart';
+import 'package:waralarm/models/monitored_place.dart';
+import 'package:waralarm/domain/situation.dart';
 import 'package:waralarm/widgets/section_header.dart';
 
 void main() {
@@ -26,18 +28,25 @@ void main() {
     expect(find.byIcon(Icons.map_rounded), findsOneWidget);
   });
 
-  test('AlertEvent.fromMap parses threat flag and timestamp', () {
-    final event = AlertEvent.fromMap('id1', {
-      'title': 'Shahed drones',
-      'message': 'UAV activity',
-      'region': 'Kharkiv',
-      'threat': true,
-      'timestamp': 1700000000000,
-    });
+  test('placeThreats keeps targets within 40km and sorts by distance', () {
+    const kharkiv = MonitoredPlace(
+        id: 'home', icon: '🏠', name: 'Харків', lat: 49.99, lon: 36.23);
+    final near = MapTarget(
+        label: 'Shahed', cat: 'shahed', lat: 50.10, lon: 36.30, stage: 'Imminent');
+    final far = MapTarget(
+        label: 'Missile', cat: 'missile', lat: 48.0, lon: 30.0, zone: 'UA');
 
-    expect(event.title, 'Shahed drones');
-    expect(event.isThreat, isTrue);
-    expect(event.region, 'Kharkiv');
+    final result = placeThreats(kharkiv, [far, near]);
+    expect(result.first.label, 'Shahed'); // nearest first
+    expect(result.any((t) => t.label == 'Missile'), isFalse); // >40km, other zone
+  });
+
+  test('riskOf returns a high score for an imminent nearby threat', () {
+    const kharkiv = MonitoredPlace(
+        id: 'home', icon: '🏠', name: 'Харків', lat: 49.99, lon: 36.23);
+    final t = MapTarget(
+        label: 'Балістика', cat: 'balist', lat: 50.0, lon: 36.25, stage: 'Imminent');
+    expect(riskOf(kharkiv, [t]).score, greaterThanOrEqualTo(85));
   });
 
   test('ApiKey.masked hides the middle of the key', () {

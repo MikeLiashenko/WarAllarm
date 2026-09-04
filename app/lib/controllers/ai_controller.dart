@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/ai_session.dart';
+import '../services/ai_service.dart';
 import '../services/local_store.dart';
 
 /// Manages multi-session AI conversations with persisted history.
@@ -17,6 +18,10 @@ class AiController extends ChangeNotifier {
   static const _key = 'ai_sessions';
   final LocalStore _store;
   final _uuid = const Uuid();
+  final _ai = AiService();
+
+  /// True on the last turn if a real LLM produced the reply (vs local fallback).
+  bool lastReplyWasLive = false;
 
   List<AiSession> _sessions = [];
   List<AiSession> get sessions => List.unmodifiable(_sessions);
@@ -76,7 +81,15 @@ class AiController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> sendMessage(String text) async {
+  /// Sends a message. When [apiKey] is set, calls the real LLM (Claude/Gemini)
+  /// with the WarAlarm system prompt + live [situation]; otherwise falls back
+  /// to the local rule-based responder.
+  Future<void> sendMessage(
+    String text, {
+    String apiKey = '',
+    String model = '',
+    String situation = '',
+  }) async {
     final trimmed = text.trim();
     final session = active;
     if (trimmed.isEmpty || session == null || _thinking) return;
@@ -95,11 +108,41 @@ class AiController extends ChangeNotifier {
     _resort();
     notifyListeners();
 
-    // Simulated async assistant reply.
-    await Future<void>.delayed(const Duration(milliseconds: 650));
+    String reply;
+    if (apiKey.trim().isNotEmpty) {
+      // Real LLM call with the WarAlarm system prompt + live situation.
+      final system =
+          'Ти — асистент застосунку повітряної тривоги WarAlarm для мешканця '
+          'України. Тобі дають зведення про поточні повітряні загрози (тип, '
+          'місце, відстань, ETA, стадія, напрямок). Відповідай КОРОТКО, '
+          'спокійно і по суті українською, як досвідчений фахівець із безпеки. '
+          'Без вступів і markdown. Ніколи не вигадуй загроз, яких немає у зведенні.'
+          '${situation.isEmpty ? '' : '\n\nПоточна обстановка:\n$situation'}';
+      try {
+        reply = await _ai.complete(
+          apiKey: apiKey,
+          model: model.trim().isNotEmpty ? model : AiService.defaultModel(apiKey),
+          systemPrompt: system,
+          history: session.messages,
+        );
+        lastReplyWasLive = true;
+      } on AiException catch (e) {
+        reply = '⚠ ${e.message}\n\n(Перевір ключ/модель у Налаштуваннях. '
+            'Поки що — локальна відповідь.)\n\n${_generateReply(trimmed)}';
+        lastReplyWasLive = false;
+      } catch (e) {
+        reply = '⚠ Помилка звʼязку з ІІ: $e\n\n${_generateReply(trimmed)}';
+        lastReplyWasLive = false;
+      }
+    } else {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      reply = _generateReply(trimmed);
+      lastReplyWasLive = false;
+    }
+
     session.messages.add(AiMessage(
       role: 'assistant',
-      content: _generateReply(trimmed),
+      content: reply,
       timestamp: DateTime.now(),
     ));
     session.updatedAt = DateTime.now();
