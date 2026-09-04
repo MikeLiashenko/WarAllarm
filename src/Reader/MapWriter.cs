@@ -308,6 +308,7 @@ nav.tabs .b.show{display:inline-flex}
 .fig{animation:figp 1.7s ease-in-out infinite;filter:drop-shadow(0 .4px .9px rgba(0,0,0,.55))}
 .fig path{stroke-linejoin:round}
 .tlabel{font-size:8px;font-weight:700;font-family:var(--mono);fill:var(--tx);paint-order:stroke;stroke:#0a1020;stroke-width:1px}
+.plabel{font-size:3.4px;font-weight:600;font-family:var(--sans);paint-order:stroke;stroke:#0a1020;stroke-width:.8px}
 .zoomc{position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:6px}
 .zoomc button{width:30px;height:30px;border-radius:8px;border:1px solid var(--line2);background:rgba(11,20,36,.85);
   color:var(--tx);font-size:17px;line-height:1;cursor:pointer;display:grid;place-items:center;font-family:var(--sans)}
@@ -456,6 +457,25 @@ function figParts(cat){
   }
 }
 function figScale(cat){return cat==='balist'?1.12:cat==='missile'?1.0:cat==='avia'?1.0:cat==='kab'?0.98:cat==='shahed'?0.9:0.8;}
+// Міста за рівнями деталізації [назва,lon,lat,tier]: 0 — великі (завжди), 1 — обл. центри (зум≥1.7),
+// 2 — містечка Харківщини та Київщини (зум≥2.8). З'являються при наближенні.
+var CITY=[
+ ['Київ',30.52,50.45,0],['Харків',36.23,49.99,0],['Дніпро',35.05,48.47,0],['Одеса',30.73,46.48,0],
+ ['Львів',24.03,49.84,0],['Запоріжжя',35.14,47.84,0],['Донецьк',37.80,48.00,0],['Миколаїв',31.99,46.98,0],
+ ['Полтава',34.55,49.59,1],['Суми',34.80,50.91,1],['Чернігів',31.29,51.50,1],['Черкаси',32.06,49.44,1],
+ ['Житомир',28.66,50.25,1],['Вінниця',28.47,49.23,1],['Хмельницький',26.99,49.42,1],['Рівне',26.25,50.62,1],
+ ['Луцьк',25.34,50.75,1],['Тернопіль',25.59,49.55,1],['Ів.-Франківськ',24.71,48.92,1],['Ужгород',22.29,48.62,1],
+ ['Чернівці',25.94,48.29,1],['Кропивницький',32.26,48.51,1],['Кривий Ріг',33.39,47.91,1],['Херсон',32.61,46.64,1],
+ ['Маріуполь',37.54,47.10,1],['Кременчук',33.42,49.07,1],['Мелітополь',35.37,46.85,1],['Бердянськ',36.79,46.76,1],
+ ['Чугуїв',36.68,49.84,2],['Ізюм',37.25,49.21,2],['Лозова',36.32,48.89,2],["Куп'янськ",37.62,49.71,2],
+ ['Балаклія',36.86,49.46,2],['Богодухів',35.53,50.16,2],['Первомайський',36.22,49.39,2],['Люботин',35.94,49.94,2],
+ ['Дергачі',36.12,50.10,2],['Мерефа',36.05,49.82,2],['Пісочин',36.03,49.98,2],['Вовчанськ',36.94,50.29,2],
+ ['Золочів',35.98,50.28,2],['Валки',35.62,49.83,2],['Красноград',35.44,49.38,2],
+ ['Бровари',30.79,50.51,2],['Бориспіль',30.95,50.35,2],['Біла Церква',30.11,49.80,2],['Фастів',29.92,50.08,2],
+ ['Ірпінь',30.25,50.52,2],['Буча',30.22,50.54,2],['Вишневе',30.37,50.39,2],['Васильків',30.31,50.18,2],
+ ['Обухів',30.62,50.11,2],['Вишгород',30.49,50.58,2],['Славутич',30.75,51.52,2],['Переяслав',31.45,50.07,2]
+];
+var figNodes=[],cityNodes=[],homeNode=null; // для контр-масштабу при зумі (розмір цілей/підписів фіксований)
 
 // Проекция контура (те же границы Украины, что в концепте) — совмещаем overlay с path.
 let P=null;
@@ -483,16 +503,21 @@ function build(){
     var d=o.r.map(function(ring){ if(ring.length<3)return ''; return 'M'+ring.map(function(p){var q=P(p[0],p[1]);return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join(' L')+'Z'; }).join(' ');
     el('path',{'class':'obl',d:d,fill:fill});
   });
-  // Города — точки + приглушённые подписи крупнейших (как на реальной карте).
-  [['Київ',30.52,50.45],['Харків',36.23,49.99],['Дніпро',35.05,48.47],['Одеса',30.73,46.48],['Львів',24.03,49.84],['Запоріжжя',35.14,47.84],['Донецьк',37.80,48.00],['Миколаїв',31.99,46.98]].forEach(function(c){
-    var p=P(c[1],c[2]); el('circle',{'class':'city',cx:p[0],cy:p[1],r:1.1});
-    el('text',{'class':'clabel2',x:p[0],y:p[1]-2},c[0]);
+  // Города (3 рівні деталізації) — точки+підписи; видимість/розмір керує applyZoom за зумом.
+  cityNodes=[];
+  CITY.forEach(function(c){
+    var p=P(c[1],c[2]);
+    var dot=el('circle',{'class':'city',cx:p[0],cy:p[1],r:1});
+    var lab=el('text',{'class':'clabel2',x:p[0],y:p[1]},c[0]);
+    cityNodes.push({dot:dot,lab:lab,x:p[0],y:p[1],tier:c[3],
+      bf:(c[3]===0?5.4:c[3]===1?4.4:3.6), br:(c[3]===0?1.15:c[3]===1?0.95:0.72)});
   });
-  // цели: ДЕТАЛЬНИЙ СИЛУЕТ типу (шахед/крилата/балістика/КАБ/авіація) у точці цілі,
-  // ніс — куди летить (heading, 0°=Пн). Фігура складається з кількох частин.
+  // цели: ДЕТАЛЬНИЙ СИЛУЕТ типу (шахед/крилата/балістика/КАБ/авіація) у точці цілі, ніс — куди летить.
+  // Розмір ФІКСОВАНИЙ на екрані (не роздувається при зумі) — applyZoom робить контр-масштаб.
+  figNodes=[];
   S.threats.forEach(function(t){
     var col=C[t.cat]||C.other, b=P(t.lon,t.lat), rot=(t.heading==null?0:t.heading);
-    var g=el('g',{'class':'fig',transform:'translate('+b[0].toFixed(2)+' '+b[1].toFixed(2)+') rotate('+rot.toFixed(1)+') scale('+figScale(t.cat)+')'});
+    var g=el('g',{'class':'fig'});
     figParts(t.cat).forEach(function(p){
       var pa=document.createElementNS(NS,'path');
       pa.setAttribute('d',p.d);
@@ -500,18 +525,42 @@ function build(){
       if(!p.s){ pa.setAttribute('stroke','rgba(10,15,25,.6)'); pa.setAttribute('stroke-width','0.35'); }
       g.appendChild(pa);
     });
-    // ×N (не обертаємо — читабельно)
-    if(t.n>1) el('text',{'class':'tlabel',x:b[0]+5,y:b[1]-5,fill:col},'×'+t.n);
+    var nlab = t.n>1 ? el('text',{'class':'tlabel',fill:col},'×'+t.n) : null;   // ×N
+    var plab = t.place ? el('text',{'class':'plabel',fill:col},esc(t.place)) : null; // назва міста цілі (за зумом)
+    figNodes.push({g:g,x:b[0],y:b[1],rot:rot,base:figScale(t.cat),nlab:nlab,plab:plab});
   });
   // дом
   var hp=P(S.home.lon,S.home.lat);
-  el('circle',{'class':'you-ring',cx:hp[0],cy:hp[1],r:4});
-  el('circle',{'class':'you',cx:hp[0],cy:hp[1],r:1.7});
-  // По умолчанию — вся Украина (ua-fit уже вписал контур). Zoom/pan — вручную.
+  var hr=el('circle',{'class':'you-ring',cx:hp[0],cy:hp[1],r:4});
+  var hd=el('circle',{'class':'you',cx:hp[0],cy:hp[1],r:1.7});
+  homeNode={ring:hr,dot:hd,x:hp[0],y:hp[1]};
+  applyZoom(); // застосувати рівні деталізації та контр-масштаб під поточний зум
 }
 // Автозум на дом+цели (в SVG-координатах группы #zoom).
 let scale=1,tx=0,ty=0;
-function applyZoom(){document.getElementById('zoom').setAttribute('transform','translate('+tx+' '+ty+') scale('+scale+')');try{localStorage.setItem('wa_zoom',JSON.stringify({s:scale,tx:tx,ty:ty}));}catch(e){}}
+function applyZoom(){
+  document.getElementById('zoom').setAttribute('transform','translate('+tx+' '+ty+') scale('+scale+')');
+  try{localStorage.setItem('wa_zoom',JSON.stringify({s:scale,tx:tx,ty:ty}));}catch(e){}
+  var inv=1/scale; // контр-масштаб: екранний розмір лишається сталим попри зум (розмір/обводку задаємо через style)
+  // Цілі: фіксований розмір + підпис міста цілі з'являється при наближенні (scale≥2.4).
+  figNodes.forEach(function(f){
+    f.g.setAttribute('transform','translate('+f.x.toFixed(2)+' '+f.y.toFixed(2)+') rotate('+f.rot.toFixed(1)+') scale('+(f.base*inv).toFixed(3)+')');
+    if(f.nlab){ f.nlab.setAttribute('x',(f.x+5*inv).toFixed(2)); f.nlab.setAttribute('y',(f.y-5*inv).toFixed(2)); f.nlab.style.fontSize=(7*inv).toFixed(2)+'px'; f.nlab.style.strokeWidth=(1.0*inv).toFixed(2)+'px'; }
+    if(f.plab){ var sp=scale>=2.4; f.plab.setAttribute('display',sp?'':'none');
+      if(sp){ f.plab.setAttribute('x',(f.x+5*inv).toFixed(2)); f.plab.setAttribute('y',(f.y+6.5*inv).toFixed(2)); f.plab.style.fontSize=(3.6*inv).toFixed(2)+'px'; f.plab.style.strokeWidth=(0.7*inv).toFixed(2)+'px'; } }
+  });
+  // Міста: рівні деталізації за зумом; точки/підписи не роздуваються (розмір через style).
+  cityNodes.forEach(function(c){
+    var show = c.tier===0 || (c.tier===1 && scale>=1.7) || (c.tier===2 && scale>=2.8);
+    c.dot.setAttribute('display',show?'':'none'); c.lab.setAttribute('display',show?'':'none');
+    if(show){
+      c.dot.setAttribute('r',(c.br*inv).toFixed(3));
+      c.lab.setAttribute('x',c.x.toFixed(2)); c.lab.setAttribute('y',(c.y-(c.br+1.6)*inv).toFixed(2));
+      c.lab.style.fontSize=(c.bf*inv).toFixed(2)+'px'; c.lab.style.strokeWidth=(1.0*inv).toFixed(2)+'px';
+    }
+  });
+  if(homeNode){ homeNode.ring.setAttribute('r',(3.4*inv).toFixed(3)); homeNode.dot.setAttribute('r',(1.5*inv).toFixed(3)); }
+}
 function autoFocus(){
   if(!P) return;
   var lons=[S.home.lon],lats=[S.home.lat];
