@@ -19,14 +19,16 @@ class WarAlarmApp extends StatelessWidget {
     super.key,
     required this.store,
     required this.rtdb,
+    this.secrets = const {},
   });
 
   final LocalStore store;
   final RtdbService rtdb;
+  final Map<String, String> secrets;
 
   @override
   Widget build(BuildContext context) {
-    final settings = SettingsController(store);
+    final settings = SettingsController(store, externalSecrets: secrets);
 
     return MultiProvider(
       providers: [

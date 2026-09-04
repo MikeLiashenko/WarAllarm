@@ -4,7 +4,8 @@ import '../services/local_store.dart';
 
 /// App preferences, persisted locally. Independent of the website design.
 class SettingsController extends ChangeNotifier {
-  SettingsController(this._store) {
+  SettingsController(this._store,
+      {Map<String, String> externalSecrets = const {}}) {
     _pushNotifications = _store.getBool('set_push', fallback: true);
     _soundAlerts = _store.getBool('set_sound', fallback: true);
     _threatOnly = _store.getBool('set_threat_only', fallback: false);
@@ -12,9 +13,17 @@ class SettingsController extends ChangeNotifier {
     _keepScreenOn = _store.getBool('set_keep_screen', fallback: false);
     _compactFeed = _store.getBool('set_compact_feed', fallback: false);
     _displayName = _store.getString('set_name', fallback: 'Guest');
+    // Prefer an in-app override; otherwise reuse the Reader's secrets.local.txt.
     _aiApiKey = _store.getString('ai_api_key');
+    if (_aiApiKey.isEmpty) _aiApiKey = externalSecrets['ai_api_key'] ?? '';
     _aiModel = _store.getString('ai_model');
+    if (_aiModel.isEmpty) _aiModel = externalSecrets['ai_model'] ?? '';
+    _keyFromSecrets = _store.getString('ai_api_key').isEmpty && _aiApiKey.isNotEmpty;
   }
+
+  /// True when the active key came from the Reader's secrets file (not typed in).
+  bool _keyFromSecrets = false;
+  bool get keyFromSecrets => _keyFromSecrets;
 
   final LocalStore _store;
 

@@ -77,12 +77,38 @@ class SettingsScreen extends StatelessWidget {
           _Group(
             title: 'ШІ · AI',
             children: [
+              if (s.keyFromSecrets)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.safeSoft,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check_circle_rounded,
+                            color: AppColors.safe, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Ключ ІІ взято з secrets.local.txt (${AiService.providerLabel(s.aiApiKey)}). '
+                            'Нижче можна перевизначити для цього пристрою.',
+                            style: const TextStyle(
+                                fontSize: 12.5, color: AppColors.textSecondary),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               _AiKeyField(
-                value: s.aiApiKey,
+                value: s.keyFromSecrets ? '' : s.aiApiKey,
                 onChanged: s.setAiApiKey,
               ),
               _AiModelField(
-                value: s.aiModel,
+                value: s.keyFromSecrets ? '' : s.aiModel,
                 apiKey: s.aiApiKey,
                 onChanged: s.setAiModel,
               ),

@@ -171,7 +171,9 @@ class _AiScreenState extends State<AiScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  configured ? 'ключ підключено' : 'ключ не задано',
+                  configured
+                      ? (settings.keyFromSecrets ? 'ключ з secrets' : 'ключ підключено')
+                      : 'ключ не задано',
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w700,
