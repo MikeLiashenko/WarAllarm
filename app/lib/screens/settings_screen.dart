@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/alarm_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/settings_controller.dart';
 import '../firebase_config.dart';
@@ -72,6 +73,7 @@ class SettingsScreen extends StatelessWidget {
                 onChanged: s.setThreatOnly,
                 accent: AppColors.threat,
               ),
+              const _TestSirenButton(),
             ],
           ),
           const SizedBox(height: 14),
@@ -176,6 +178,39 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
         ],
+      ),
+    );
+  }
+}
+
+class _TestSirenButton extends StatelessWidget {
+  const _TestSirenButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: () {
+            context.read<AlarmController>().testSiren();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Тест сирени · 4 секунди'),
+                duration: Duration(seconds: 4),
+              ),
+            );
+          },
+          icon: const Icon(Icons.campaign_rounded, color: AppColors.threat),
+          label: const Text('Перевірити сирену',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.threatDark,
+            side: const BorderSide(color: AppColors.threatSoft),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+        ),
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'controllers/ai_controller.dart';
+import 'controllers/alarm_controller.dart';
 import 'controllers/api_keys_controller.dart';
 import 'controllers/chat_controller.dart';
 import 'controllers/map_data_controller.dart';
@@ -41,6 +42,13 @@ class WarAlarmApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<MapDataController>(
           create: (_) => MapDataController(rtdb, store)..start(),
+        ),
+        // The real alarm: watches live threats + settings and drives the siren.
+        ChangeNotifierProvider<AlarmController>(
+          create: (ctx) => AlarmController(
+            ctx.read<MapDataController>(),
+            ctx.read<SettingsController>(),
+          ),
         ),
         ChangeNotifierProvider<ChatController>(
           create: (_) =>

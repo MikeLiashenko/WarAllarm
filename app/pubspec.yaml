@@ -40,6 +40,10 @@ dependencies:
   fl_chart: ^1.2.0
   intl: ^0.20.3
   uuid: ^4.6.0
+  # --- Real alarm: sound + vibration + keep the screen awake during an alert ---
+  audioplayers: ^6.1.0
+  vibration: ^2.0.0
+  wakelock_plus: ^1.2.8
 
 dev_dependencies:
   flutter_test:
@@ -62,6 +66,10 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/siren.wav
+    - assets/ping.wav
 
   # To add assets to your application, add an assets section, like this:
   # assets:

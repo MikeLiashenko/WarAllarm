@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/alarm_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../domain/situation.dart';
 import '../models/map_target.dart';
@@ -32,10 +33,13 @@ class NowScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = context.watch<MapDataController>();
+    final alarm = context.watch<AlarmController>();
     final sel = _selThreats(data);
     final worst = worstOf(sel);
     final rank = worst == null ? 0 : (kRank[worst.stage] ?? 0);
-    final active = rank >= 3;
+    // Red when the real alarm logic (distance to the selected place) fires,
+    // not only when the home-relative stage says so.
+    final active = alarm.level == 'alarm' || rank >= 3;
     final region = data.selectedId == 'all'
         ? data.homeName
         : data.selectedPlaces.isEmpty
@@ -63,6 +67,9 @@ class NowScreen extends StatelessWidget {
 
           if (data.isDemo) ...[
             _DemoBanner(),
+            const SizedBox(height: 14),
+          ] else if (!data.live) ...[
+            const _ConnBanner(),
             const SizedBox(height: 14),
           ],
 
@@ -193,6 +200,42 @@ class _DemoBanner extends StatelessWidget {
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
                   color: Color(0xFF6B540A)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConnBanner extends StatelessWidget {
+  const _ConnBanner();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.primarySoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.primaryTint),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+                strokeWidth: 2.2, color: AppColors.primaryDark),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Очікую монітор… Дані ще не отримано. Це не означає «чисто» — '
+              'звук тривоги вмикається, коли надійдуть живі дані.',
+              style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.primaryDark),
             ),
           ),
         ],

@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "com.waralarm"
-    compileSdk = flutter.compileSdkVersion
+    // Pinned to 36: audioplayers/vibration deps require compileSdk >= 34.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

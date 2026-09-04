@@ -18,7 +18,9 @@ import '../services/rtdb_service.dart';
 class MapDataController extends ChangeNotifier {
   MapDataController(this._rtdb, this._store) {
     _selectedId = _store.getString('sel_place', fallback: 'all');
-    _showDemo = _store.getBool('show_demo', fallback: true);
+    // Demo is OFF by default: an alarm app must never show sample threats that
+    // could be mistaken for real ones. It can be turned on in Settings.
+    _showDemo = _store.getBool('show_demo', fallback: false);
   }
 
   final RtdbService _rtdb;

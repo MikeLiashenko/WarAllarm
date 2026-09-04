@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../controllers/nav_controller.dart';
 import '../theme/app_colors.dart';
+import '../widgets/alarm_overlay.dart';
 import '../widgets/app_sidebar.dart';
 import '../widgets/responsive.dart';
 import 'ai_screen.dart';
@@ -35,38 +36,44 @@ class HomeShell extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: Row(
+      body: Stack(
         children: [
-          AppSidebar(collapsed: collapsed),
-          Expanded(
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [AppColors.background, Color(0xFFFFFFFF)],
-                ),
-              ),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                switchInCurve: Curves.easeOut,
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 0.02),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
+          Row(
+            children: [
+              AppSidebar(collapsed: collapsed),
+              Expanded(
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [AppColors.background, Color(0xFFFFFFFF)],
+                    ),
+                  ),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    switchInCurve: Curves.easeOut,
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, 0.02),
+                          end: Offset.zero,
+                        ).animate(animation),
+                        child: child,
+                      ),
+                    ),
+                    child: KeyedSubtree(
+                      key: ValueKey(nav.tab),
+                      child: _screens[nav.tab.index],
+                    ),
                   ),
                 ),
-                child: KeyedSubtree(
-                  key: ValueKey(nav.tab),
-                  child: _screens[nav.tab.index],
-                ),
               ),
-            ),
+            ],
           ),
+          // Siren overlay + snooze bar, above every screen.
+          const AlarmOverlay(),
         ],
       ),
     );
