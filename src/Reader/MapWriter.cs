@@ -23,18 +23,37 @@ public static class MapWriter
 
     static string N(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
 
+    // «Сімейство» цілі для кластеризації на карті: шахед/ціль/невідоме — фактично одне й те саме
+    // (різні джерела звуть по-різному), тож зливаємо їх разом; ракети/балістика/КАБ/авіація — окремо.
+    static int Family(ThreatKind k) => k switch
+    {
+        ThreatKind.Drone or ThreatKind.Target or ThreatKind.Unknown => 0,
+        ThreatKind.Missile => 1,
+        ThreatKind.Ballistic => 2,
+        ThreatKind.Kab => 3,
+        ThreatKind.Aviation => 4,
+        _ => 5,
+    };
+
     public static void Write(string path, ThreatTracker tracker, string homeName, DateTime now)
     {
         var home = tracker.Home;
         var rawThreats = tracker.Active.Where(t => t.Pos is not null).ToList();
 
-        // Дедупликация: если на одну точку (< 12 км) есть цель из локального монитора и из UA-радара,
-        // отдаём приоритет локальному монитору, чтобы не рисовать две одинаковые стрелки друг на друге.
-        var threats = new List<Threat>();
-        foreach (var t in rawThreats.OrderByDescending(t => t.Zone != "UA").ThenByDescending(t => t.LastUpdate))
+        // Кластеризація: цілі одного «сімейства» (шахед/ціль/невідоме — це одне й те саме, просто
+        // різні джерела: локальний монітор і всеукраїнський радар) у межах ~16 км зливаємо в ОДНУ
+        // стрілку та підсумовуємо ×N. Так карта не «засмічується» накладеними стрілками над одним
+        // містом (Київ, Харків…). Представник кластера — конкретніший тип, ближчий до дому.
+        var merged = new List<(Threat t, int amount)>();
+        foreach (var t in rawThreats
+                     .OrderBy(t => t.Kind is ThreatKind.Target or ThreatKind.Unknown ? 1 : 0) // конкретний тип — представник
+                     .ThenByDescending(t => t.Zone != "UA")                                    // локальний монітор точніший за місцем
+                     .ThenBy(t => t.DistKm ?? double.MaxValue))                                 // ближча до дому — важливіша
         {
-            if (!threats.Any(d => d.Kind == t.Kind && d.Pos.HasValue && ThreatGeo.Km(d.Pos.Value, t.Pos!.Value) < 12))
-                threats.Add(t);
+            int idx = merged.FindIndex(m => Family(m.t.Kind) == Family(t.Kind)
+                && m.t.Pos is { } mp && ThreatGeo.Km(mp, t.Pos!.Value) < 16);
+            if (idx >= 0) merged[idx] = (merged[idx].t, merged[idx].amount + t.Amount); // ×N кластера = сума
+            else merged.Add((t, t.Amount));
         }
 
         var sb = new StringBuilder();
@@ -42,9 +61,9 @@ public static class MapWriter
         sb.Append(",\"homeName\":\"").Append(Esc(homeName)).Append('"');
         sb.Append(",\"home\":{\"lat\":").Append(N(home.lat)).Append(",\"lon\":").Append(N(home.lon)).Append('}');
         sb.Append(",\"threats\":[");
-        for (int i = 0; i < threats.Count; i++)
+        for (int i = 0; i < merged.Count; i++)
         {
-            var t = threats[i];
+            var (t, amount) = merged[i];
             if (i > 0) sb.Append(',');
             sb.Append("{\"label\":\"").Append(Esc(ThreatTracker.Label(t))).Append('"');
             sb.Append(",\"zone\":\"").Append(Esc(t.Zone)).Append('"');
@@ -56,7 +75,7 @@ public static class MapWriter
             sb.Append(",\"dist\":").Append(t.DistKm is { } d ? N(d) : "null");
             sb.Append(",\"eta\":").Append(t.EtaMin is { } e ? N(e) : "null");
             sb.Append(",\"dir\":\"").Append(Esc(t.Dir)).Append('"');
-            sb.Append(",\"n\":").Append(t.Amount);
+            sb.Append(",\"n\":").Append(amount);
             sb.Append(",\"heading\":").Append(t.Heading is { } h ? N(h) : "null");
             sb.Append(",\"place\":\"").Append(Esc(t.LastPlace)).Append('"');
             sb.Append(",\"trail\":[");
