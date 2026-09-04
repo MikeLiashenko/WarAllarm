@@ -26,7 +26,16 @@ public static class MapWriter
     public static void Write(string path, ThreatTracker tracker, string homeName, DateTime now)
     {
         var home = tracker.Home;
-        var threats = tracker.Active.Where(t => t.Pos is not null).ToList();
+        var rawThreats = tracker.Active.Where(t => t.Pos is not null).ToList();
+
+        // Дедупликация: если на одну точку (< 12 км) есть цель из локального монитора и из UA-радара,
+        // отдаём приоритет локальному монитору, чтобы не рисовать две одинаковые стрелки друг на друге.
+        var threats = new List<Threat>();
+        foreach (var t in rawThreats.OrderByDescending(t => t.Zone != "UA").ThenByDescending(t => t.LastUpdate))
+        {
+            if (!threats.Any(d => d.Kind == t.Kind && d.Pos.HasValue && ThreatGeo.Km(d.Pos.Value, t.Pos!.Value) < 12))
+                threats.Add(t);
+        }
 
         var sb = new StringBuilder();
         sb.Append("{\"ts\":").Append(((DateTimeOffset)now.ToUniversalTime()).ToUnixTimeMilliseconds());
@@ -185,7 +194,6 @@ public static class MapWriter
     const string Template = """
 <!doctype html><html lang="uk"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="4">
 <link rel="icon" id="fav" href="/*__ICON__*/">
 <title>WarAlarm · карта загроз</title>
 <style>
@@ -463,8 +471,8 @@ function fmt(m){if(m==null)return '?';return m<1?'<1 хв':'~'+Math.round(m)+' �
 function esc(s){return (s==null?'':''+s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
 var RANK={Impact:5,Overhead:4,Imminent:3,Approaching:2,Passed:1};
 var SEL='all';                 // выбранное место ('all' | id)
-// Список моих мест (расширяемо). Дом из настроек + Киев-гость, у каждого координаты.
-function myPlaces(){
+// Все места. Дом из настроек + Киев-гость + збережені (cfg) + пользовательские.
+function allPlaces(){
   var cfg=S.cfg||{}, ps=[];
   ps.push({id:'home',icon:'🏠',name:cfg.district||S.homeName||'Дім',sub:cfg.city||'',lat:S.home.lat,lon:S.home.lon,zone:'Харків'});
   if(cfg.watchKyiv) ps.push({id:'kyiv',icon:'🏙',name:'Київ',sub:'гість',lat:50.45,lon:30.52,zone:'Київ'});
@@ -472,9 +480,23 @@ function myPlaces(){
   userPlaces().forEach(function(p,i){ps.push({id:'u'+i,icon:'📍',name:p.name,sub:'моє',lat:p.lat,lon:p.lon});});
   return ps;
 }
+// видимі місця (без видалених/прихованих), з позначкою paused
+function myPlaces(){ return allPlaces().filter(function(p){return !isHidden(p.id);}).map(function(p){p.paused=isPaused(p.id);return p;}); }
+// місця, що беруть участь у моніторингу (без тих, що на паузі)
+function activePlaces(){ return myPlaces().filter(function(p){return !p.paused;}); }
 var _up=null; // кэш/фолбэк, если localStorage недоступен
 function userPlaces(){ if(_up)return _up; try{_up=JSON.parse(localStorage.getItem('wa_places')||'[]');}catch(e){_up=[];} return _up; }
 function saveUserPlaces(a){ _up=a; try{localStorage.setItem('wa_places',JSON.stringify(a));}catch(e){} }
+// ── Пауза місця: сповіщення/аналіз тимчасово вимкнені, місце лишається у списку ──
+var _paused=null;
+function pausedList(){ if(_paused)return _paused; try{_paused=JSON.parse(localStorage.getItem('wa_paused')||'[]');}catch(e){_paused=[];} return _paused; }
+function savePausedList(a){ _paused=a; try{localStorage.setItem('wa_paused',JSON.stringify(a));}catch(e){} }
+function isPaused(id){ return pausedList().indexOf(id)>=0; }
+// ── Видалення місця: похідні (дім/Київ/збережені) ховаємо (можна відновити) ──
+var _hidden=null;
+function hiddenList(){ if(_hidden)return _hidden; try{_hidden=JSON.parse(localStorage.getItem('wa_hidden')||'[]');}catch(e){_hidden=[];} return _hidden; }
+function saveHiddenList(a){ _hidden=a; try{localStorage.setItem('wa_hidden',JSON.stringify(a));}catch(e){} }
+function isHidden(id){ return hiddenList().indexOf(id)>=0; }
 // расстояние цель→место (км) в браузере из координат цели — работает для любого места
 function kmTo(t,pl){ if(t.lat==null||pl.lat==null)return null; var R=6371,rad=Math.PI/180;
   var dLa=(pl.lat-t.lat)*rad,dLo=(pl.lon-t.lon)*rad,la1=t.lat*rad,la2=pl.lat*rad;
@@ -487,7 +509,7 @@ function placeThreats(pl){
     .map(function(o){var c=Object.assign({},o.t);c.pdist=(o.d!=null?o.d:o.t.dist);return c;})
     .sort(function(a,b){return (a.pdist==null?1e9:a.pdist)-(b.pdist==null?1e9:b.pdist);});
 }
-function selectedPlaces(){var ps=myPlaces();return SEL==='all'?ps:ps.filter(function(p){return p.id===SEL;});}
+function selectedPlaces(){var ps=activePlaces();return SEL==='all'?ps:ps.filter(function(p){return p.id===SEL;});}
 function selThreats(){var seen={},out=[];selectedPlaces().forEach(function(pl){placeThreats(pl).forEach(function(t){var k=t.zone+'|'+t.place+'|'+t.label;if(!seen[k]){seen[k]=1;out.push(t);}});});return out;}
 function selZone(){if(SEL==='all')return null;var p=myPlaces().filter(function(x){return x.id===SEL;})[0];return p?p.zone:null;}
 function worstOf(arr){var w=null;arr.forEach(function(t){var r=RANK[t.stage]||0;if(!w||r>w.r)w={r:r,t:t};});return w;}
@@ -505,7 +527,7 @@ function placeCard(pl){
 }
 // Селектор мест — пересобираем каждый render (места могут добавляться в интерфейсе).
 function renderSelectors(){
-  var ps=myPlaces();
+  var ps=activePlaces();
   var html='<span class="plab">Місце:</span><button data-p="all">Всі місця</button>'
     + ps.map(function(p){return '<button data-p="'+p.id+'">'+p.icon+' '+esc(p.name)+'</button>';}).join('');
   ['selNow','selAn'].forEach(function(id){var box=document.getElementById(id);if(!box)return;
@@ -612,13 +634,25 @@ var CITIES=[['Харків',49.99,36.23],['Київ',50.45,30.52],['Одеса',
 // Мои места: карточки со статусом + редактор (додати/видалити место, GPS, вибір міста).
 function renderPlaces(){
   var box=document.getElementById('places'); if(!box) return;
+  // Зберегти ввід форми + фокус/каретку, щоб щосекундний render() не скидав заповнення.
+  var focId=(document.activeElement||{}).id||'', ss=null,se=null, fe=focId&&document.getElementById(focId);
+  if(fe&&fe.setSelectionRange){try{ss=fe.selectionStart;se=fe.selectionEnd;}catch(e){}}
+  var keep={}; ['wpName','wpLat','wpLon','wpCity'].forEach(function(id){var el=document.getElementById(id); if(el)keep[id]=el.value;});
   var html=myPlaces().map(function(pl){
-    var arr=placeThreats(pl), s=statusOf(worstOf(arr));
-    var pill='<span class="pill '+(s.cls==='calm'?'on':s.cls)+'">'+s.title+'</span>';
-    var del = pl.id&&pl.id.charAt(0)==='u' ? '<button class="mini" title="видалити" onclick="waDelPlace('+pl.id.slice(1)+')">✕</button>' : '';
-    return '<div class="card '+s.cls+'"><div class="top">'+pl.icon+' '+esc(pl.name)+pill+del+'</div>'+
-      '<div class="meta">'+(pl.sub?esc(pl.sub)+' · ':'')+(arr.length?arr.length+' ціль(ей) поруч':'чисто')+'</div></div>';
+    var arr=pl.paused?[]:placeThreats(pl), s=statusOf(worstOf(arr));
+    var pill=pl.paused?'<span class="pill off">⏸ на паузі</span>':'<span class="pill '+(s.cls==='calm'?'on':s.cls)+'">'+s.title+'</span>';
+    var pauseB='<button class="mini" title="'+(pl.paused?'відновити':'пауза')+'" onclick="waTogglePause(\''+pl.id+'\')">'+(pl.paused?'▶':'⏸')+'</button>';
+    var delB='<button class="mini" title="видалити" onclick="waDelPlace(\''+pl.id+'\')">✕</button>';
+    var meta=pl.paused?'на паузі — сповіщення та аналіз вимкнені':(pl.sub?esc(pl.sub)+' · ':'')+(arr.length?arr.length+' ціль(ей) поруч':'чисто');
+    return '<div class="card '+(pl.paused?'calm':s.cls)+'"'+(pl.paused?' style="opacity:.5"':'')+'><div class="top">'+pl.icon+' '+esc(pl.name)+pill+pauseB+delB+'</div>'+
+      '<div class="meta">'+meta+'</div></div>';
   }).join('');
+  var hid=allPlaces().filter(function(p){return isHidden(p.id);});
+  if(hid.length){
+    html+='<div class="card" style="margin-top:14px"><div class="top">🗑 Видалені місця ('+hid.length+')</div><div class="meta">'
+      + hid.map(function(p){return '<span style="white-space:nowrap;margin-right:12px;display:inline-block">'+p.icon+' '+esc(p.name)+' <button class="mini" title="відновити" onclick="waRestore(\''+p.id+'\')">↩</button></span>';}).join('')
+      + '</div></div>';
+  }
   html+='<div class="card" style="margin-top:14px"><div class="top">➕ Додати місце</div><div class="frm">'
     + '<input id="wpName" placeholder="Назва (напр. Дача, Бабуся, Робота)">'
     + '<select id="wpCity"><option value="">— обрати місто зі списку —</option>'
@@ -631,6 +665,9 @@ function renderPlaces(){
   if(sel) sel.onchange=function(){ if(!sel.value)return; var v=sel.value.split(',');
     document.getElementById('wpLat').value=v[0]; document.getElementById('wpLon').value=v[1];
     var nm=document.getElementById('wpName'); if(!nm.value) nm.value=sel.options[sel.selectedIndex].text; };
+  // Відновити збережений ввід і фокус/каретку.
+  ['wpName','wpLat','wpLon','wpCity'].forEach(function(id){ if(keep[id]!=null){var el=document.getElementById(id); if(el)el.value=keep[id];}});
+  if(focId){var el=document.getElementById(focId); if(el){try{el.focus(); if(ss!=null&&el.setSelectionRange)el.setSelectionRange(ss,se);}catch(e){}}}
 }
 window.waGps=function(){ var m=document.getElementById('wpMsg');
   if(!navigator.geolocation){ m.textContent='GPS недоступний на цьому пристрої'; return; }
@@ -648,7 +685,20 @@ window.waAddPlace=function(){ var m=document.getElementById('wpMsg');
   if(isNaN(la)||isNaN(lo)||la<44||la>53||lo<22||lo>41){ m.textContent='Потрібні коректні координати (обери місто, GPS або вручну)'; return; }
   var a=userPlaces(); a.push({name:nm,lat:la,lon:lo}); saveUserPlaces(a); render();
 };
-window.waDelPlace=function(i){ var a=userPlaces(); a.splice(i,1); saveUserPlaces(a); render(); };
+window.waDelPlace=function(id){ id=''+id;
+  if(id.charAt(0)==='u'){ var a=userPlaces(); a.splice(+id.slice(1),1); saveUserPlaces(a); }
+  else { var h=hiddenList(); if(h.indexOf(id)<0){ h.push(id); saveHiddenList(h); } } // похідне місце — ховаємо (відновлюється)
+  var p=pausedList(), pi=p.indexOf(id); if(pi>=0){ p.splice(pi,1); savePausedList(p); }
+  if(SEL===id) setSel('all'); else render();
+};
+window.waTogglePause=function(id){ id=''+id; var p=pausedList(), i=p.indexOf(id);
+  if(i>=0) p.splice(i,1); else p.push(id);
+  savePausedList(p);
+  if(SEL===id) setSel('all'); else render();
+};
+window.waRestore=function(id){ id=''+id; var h=hiddenList(), i=h.indexOf(id);
+  if(i>=0){ h.splice(i,1); saveHiddenList(h); } render();
+};
 function renderSettings(){
   var box=document.getElementById('settings'); if(!box) return;
   var c=S.cfg; if(!c){box.innerHTML='<div class="note">Налаштування недоступні.</div>';return;}
@@ -706,7 +756,7 @@ function renderAI(){
       llm.innerHTML='<div class="note">🤖 Щоб увімкнути справжній ІІ (Claude): додай у <b>secrets.local.txt</b> рядок <b>ai_api_key=…</b> (ключ Anthropic). Модель — <b>ai_model=</b> (за замовч. claude-opus-5; дешевша — claude-haiku-4-5). Нижче — евристичний аналіз, що працює завжди.</div>';
     }
   }
-  var risks=myPlaces().map(riskOf);
+  var risks=activePlaces().map(riskOf);
   var worst=risks.slice().sort(function(a,b){return b.score-a.score;})[0];
   if(worst&&worst.score>=55){
     nowBox.innerHTML='<div class="card alarm"><div class="top" style="font-size:16px">🔴 Зараз небезпечно — '+esc(worst.place.name)+'</div>'+
@@ -728,7 +778,7 @@ function renderAI(){
       '<div class="meta">'+esc(r.adv)+'</div></div>';
   }).join('');
   var fc=[];
-  myPlaces().forEach(function(pl){
+  activePlaces().forEach(function(pl){
     var best=null;
     S.threats.forEach(function(t){ if(t.lat==null||t.heading==null)return; var ca=closest(t,pl); if(!best||ca.min<best.ca.min)best={t:t,ca:ca,d:kmTo(t,pl)}; });
     if(!best)return;
@@ -796,6 +846,12 @@ render();
 requestAnimationFrame(function(){ showView(savedTab); });
 window.addEventListener('load',function(){ showView(savedTab); });
 setInterval(render,1000);
+// Авто-оновлення даних (заміна meta-refresh), але НЕ перезавантажуємо, поки заповнюють поле/форму.
+setInterval(function(){
+  var a=document.activeElement, tag=a&&a.tagName;
+  if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA') return; // користувач вводить — не заважаємо
+  location.reload();
+},4000);
 </script></body></html>
 """;
 }
