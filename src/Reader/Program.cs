@@ -501,7 +501,13 @@ if (args.Length >= 1 && args[0].Equals("check", StringComparison.OrdinalIgnoreCa
             }
             else
             {
-                foreach (var ev in ThreatParser.Parse(msg.message))
+                var events = ThreatParser.Parse(msg.message);
+                bool hasAllClear = events.Any(e => e.Kind == ThreatKind.AllClear);
+                bool hasDrones = events.Any(e => e.Kind is ThreatKind.Drone or ThreatKind.Target);
+                if (hasAllClear) tracker.Sweep("UA");
+                else if (hasDrones) tracker.SweepKind("UA", ThreatKind.Drone, ThreatKind.Target);
+
+                foreach (var ev in events)
                 {
                     tracker.IngestUa(ev, DateTime.Now); // на карту — вся країна
                     var rel = ThreatParser.Relevance(ev, MyOblast, MyCity);
@@ -556,7 +562,14 @@ Console.WriteLine($"🏠 Дім: {MyDistrict} р-н, {MyCity}    🏙 Київ: 
 Ui.Line(ConsoleColor.Gray, "🔴/🟠 сирена+пуш · 🟡/🟢 сусід. район (тихіше) · ✅ відбій · Ctrl+C — вихід");
 Console.WriteLine($"🗺  Карта загроз: {Path.GetFullPath(MapPath)}  (відкрий у браузері)");
 Console.WriteLine();
-MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // стартова (пуста) карта
+// Тёплый старт: сразу восстановить актуальную картину из свежих постов, чтобы карта
+// при открытии не была пустой до следующего поста. Сбой сети — просто пустая карта.
+try { await WarmStart(); }
+catch (Exception ex)
+{
+    Ui.Line(ConsoleColor.DarkYellow, "⚠ тёплий старт пропущено: " + ex.Message);
+    MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // фолбэк: стартова (пуста) карта
+}
 
 // Фоновый пульс трекера: раз в секунду пересчитывает ETA/стадии, «пикает» на подлёте
 // с нужной частотой, гасит пролетевшие цели и обновляет карту.
@@ -621,8 +634,26 @@ async Task OnUpdate(Update update)
     // ── Всеукраинский → город/область ─────────────────────────────────────────
     if (uname != null && uaChannels.Contains(uname))
     {
+        var events = ThreatParser.Parse(m.message);
+        if (events.Count == 0) return;
+
+        bool hasAllClear = events.Any(e => e.Kind == ThreatKind.AllClear);
+        bool hasDrones = events.Any(e => e.Kind is ThreatKind.Drone or ThreatKind.Target);
+
+        // Если в посте отбой — сбрасываем цели по стране
+        if (hasAllClear)
+        {
+            tracker.Sweep("UA");
+        }
+        // С каждым новым сообщением от всеукраинского радара — сбрасываем старые UA-цели
+        // и наносим актуальный срез заново (чтобы не копились старые стрелки)
+        else if (hasDrones)
+        {
+            tracker.SweepKind("UA", ThreatKind.Drone, ThreatKind.Target);
+        }
+
         bool drew = false;
-        foreach (var ev in ThreatParser.Parse(m.message))
+        foreach (var ev in events)
         {
             if (tracker.IngestUa(ev, DateTime.Now) is not null) drew = true; // на карту — вся країна
             var rel = ThreatParser.Relevance(ev, MyOblast, MyCity);
@@ -633,7 +664,7 @@ async Task OnUpdate(Update update)
             else
                 Ui.Line(ConsoleColor.Yellow, $"[{time}] {src} · {head}  (тихо)");
         }
-        if (drew) { MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); await MaybeAi(false); }
+        if (drew || hasAllClear || hasDrones) { MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); await MaybeAi(false); }
         return;
     }
 
@@ -706,6 +737,63 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
     Ui.Line(ConsoleColor.Green, $"{emoji} [{time}] {src} · {label}");
     if (tracker.Sweep(zone).Count > 0) MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
     await Notify(zone, new AlarmInfo(time, src, $"✅ Відбій — {zone} чисто", oneLine, ThreatKind.AllClear, false), clear: true);
+}
+
+// ── Тёплый старт: восстановить активную картину из свежих постов каналов ──────
+// Тихо (без звука/пуша), с РЕАЛЬНЫМ временем постов — трекер сам погасит устаревшие
+// (>4 хв) на первом Tick. Тот же разбор, что и в live/`check`, но при запуске.
+async Task WarmStart()
+{
+    var sources = Enumerable.Empty<(string uname, string kind)>();
+    if (WatchKharkiv) sources = sources.Concat(khChannels.Select(u => (uname: u, kind: "kh")));
+    if (WatchKyiv) sources = sources.Concat(kyChannels.Select(u => (uname: u, kind: "ky")));
+    sources = sources.Concat(uaChannels.Select(u => (uname: u, kind: "ua")));
+
+    foreach (var (uname, kind) in sources)
+    {
+        Channel? channel = null;
+        try
+        {
+            var resolved = await client.Contacts_ResolveUsername(uname);
+            channel = resolved.chats.Values.OfType<Channel>().FirstOrDefault();
+        }
+        catch { continue; } // канал недоступен — пропускаем, старт не роняем
+        if (channel is null) continue;
+
+        Message[] msgs;
+        try { msgs = (await client.Messages_GetHistory(channel, limit: 12)).Messages.OfType<Message>().Reverse().ToArray(); }
+        catch { continue; }
+
+        foreach (var msg in msgs) // хронологический порядок (старые → новые)
+        {
+            if (string.IsNullOrWhiteSpace(msg.message)) continue;
+            var when = msg.date.ToLocalTime(); // реальное время поста → корректное старение
+
+            if (kind != "ua")
+            {
+                var e = kind == "kh" ? KharkivMonitor.Analyze(msg.message, MyDistrict) : KyivMonitor.Analyze(msg.message);
+                if (e.Signal == KhSignal.News) continue;
+                var zone = kind == "kh" ? "Харків" : "Київ";
+                if (e.Signal is KhSignal.AlarmOff or KhSignal.Clear) tracker.Sweep(zone);
+                else tracker.Ingest(e, zone, when);
+            }
+            else
+            {
+                var events = ThreatParser.Parse(msg.message);
+                if (events.Any(x => x.Kind == ThreatKind.AllClear)) tracker.Sweep("UA");
+                else if (events.Any(x => x.Kind is ThreatKind.Drone or ThreatKind.Target)) tracker.SweepKind("UA", ThreatKind.Drone, ThreatKind.Target);
+                foreach (var ev in events) tracker.IngestUa(ev, when);
+            }
+        }
+    }
+
+    tracker.Tick(DateTime.Now);                                  // погасить устаревшее по реальному времени
+    MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // нарисовать актуальную картину
+    var live = tracker.Active.Count;
+    Ui.Line(live > 0 ? ConsoleColor.Yellow : ConsoleColor.Gray,
+        live > 0 ? $"🗺  Тёплий старт: відновлено активних цілей — {live}"
+                 : "🗺  Тёплий старт: зараз чисто (свіжих загроз немає)");
+    await MaybeAi(false); // ИИ-совет по восстановленной обстановке (троттлинг/только близкие — внутри)
 }
 
 // ── конфиг/секреты ───────────────────────────────────────────────────────────

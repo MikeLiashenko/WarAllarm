@@ -34,11 +34,11 @@ public sealed class Threat
     public DateTime LastPing;             // когда последний раз пикнули (для каденции)
     public TrackStage Stage = TrackStage.Approaching;
     public bool MyArea;                   // назван ТВОЙ район
-    public HashSet<string> Hits = new();  // РАЗНЫЕ названные места (реальное кол-во целей, не повторы)
-    public int Count;                     // явна к-сть з поста («5 шахедів») — максимум
+    public HashSet<string> Hits = new();  // названные места по этой цели (для истории/траектории)
+    public int Count;                     // явная к-сть из текста поста («2 БпЛА»)
     public List<(string place, double? dist, DateTime t)> Trail = new();
-    // ×N = реальное число целей: разные места ИЛИ явная к-сть; повторы одного места НЕ раздувают.
-    public int Amount => Math.Max(1, Math.Max(Hits.Count, Count));
+    // ×N = число целей строго из текста поста («2 БпЛА»), не раздувая по числу упомянутых мест
+    public int Amount => Math.Max(1, Count);
 }
 
 public readonly record struct TrackUpdate(Threat Threat, bool StageChanged, TrackSound Sound, string Note);
@@ -85,12 +85,11 @@ public sealed class ThreatTracker
 
         lock (_gate)
         {
-        // Ключ цели: зона+место+тип — каждое НАЗВАННОЕ место = своя стрелка на карте
-        // (репосты того же места сливаются). Обобщённый пост («вибух…», «ціль») без типа —
-        // цепляем к самой свежей цели этой зоны.
+        // Ключ цели: зона+место+тип — каждое НАЗВАННОЕ место = своя стрелка на карте.
+        // Обобщённый пост БЕЗ места («вибух…», «тривога») цепляем к самой свежей цели этой зоны.
         var placeKey = place.Length > 0 ? place : zone;
         string key;
-        if (e.Kind is ThreatKind.Target or ThreatKind.Unknown
+        if (place.Length == 0
             && _active.Values.Where(a => a.Zone == zone).OrderByDescending(a => a.LastUpdate).FirstOrDefault() is { } recent)
             key = recent.Id;
         else
@@ -104,10 +103,11 @@ public sealed class ThreatTracker
         }
         t!.Ammo ??= e.Extra;
         t.LastUpdate = now;
-        foreach (var pn in e.Places) t.Hits.Add(pn);   // разные названные места = разные цели
+        foreach (var pn in e.Places) t.Hits.Add(pn);
         if (place.Length > 0) t.Hits.Add(place);
         var cm = Regex.Match(e.Raw, @"(\d+)\s*(шахед|шахід|дрон|бпла|ракет|ціл|каб)", RegexOptions.IgnoreCase);
-        if (cm.Success && int.TryParse(cm.Groups[1].Value, out var cnt)) t.Count = Math.Max(t.Count, cnt);
+        if (cm.Success && int.TryParse(cm.Groups[1].Value, out var cnt)) t.Count = cnt;
+        else if (t.Count == 0) t.Count = 1;
         if (e.Tier == KhTier.MyArea) t.MyArea = true;
 
         if (pos is { } p)
@@ -159,8 +159,8 @@ public sealed class ThreatTracker
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
             t!.Ammo ??= ev.Extra;
             t.LastUpdate = now;
-            t.Hits.Add(ev.City ?? gp.name);            // разный город = отдельная цель (в области суммируются)
-            t.Count = Math.Max(t.Count, ev.Count);
+            t.Hits.Add(ev.City ?? gp.name);
+            t.Count = ev.Count > 0 ? ev.Count : 1;
             t.PrevDistKm = t.DistKm;
             t.Pos = pos; t.LastPlace = place;
             t.DistKm = ThreatGeo.Km(pos, _home);
@@ -240,6 +240,19 @@ public sealed class ThreatTracker
         lock (_gate)
         {
             var gone = _active.Values.Where(t => t.Zone == zone).ToList();
+            foreach (var t in gone) _active.Remove(t.Id);
+            return gone;
+        }
+    }
+
+    // Погасить цели зоны по типам (например, сбросить старые дроны при выходе новой всеукраинской сводки).
+    public List<Threat> SweepKind(string zone, params ThreatKind[] kinds)
+    {
+        lock (_gate)
+        {
+            var gone = _active.Values
+                .Where(t => t.Zone == zone && (kinds.Length == 0 || kinds.Contains(t.Kind)))
+                .ToList();
             foreach (var t in gone) _active.Remove(t.Id);
             return gone;
         }
