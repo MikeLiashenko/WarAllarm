@@ -102,9 +102,23 @@ class AppSidebar extends StatelessWidget {
   }
 
   Widget _threatPill(MapDataController threat, bool collapsed) {
+    final demo = threat.isDemo;
     final active = threat.threatActive;
-    final color = active ? AppColors.threat : AppColors.safe;
-    final bg = active ? AppColors.threatSoft : AppColors.safeSoft;
+    final color = demo
+        ? const Color(0xFFB8860B)
+        : active
+            ? AppColors.threat
+            : AppColors.safe;
+    final bg = demo
+        ? const Color(0xFFFFF2D6)
+        : active
+            ? AppColors.threatSoft
+            : AppColors.safeSoft;
+    final label = demo
+        ? 'Демо-дані'
+        : active
+            ? 'Активна загроза'
+            : 'Все чисто';
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: collapsed ? 14 : 18),
       child: Container(
@@ -127,11 +141,15 @@ class AppSidebar extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  active ? 'Active threat' : 'All clear',
+                  label,
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
-                    color: active ? AppColors.threatDark : AppColors.textPrimary,
+                    color: demo
+                        ? const Color(0xFF8A6D0B)
+                        : active
+                            ? AppColors.threatDark
+                            : AppColors.textPrimary,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),

@@ -93,6 +93,34 @@ class _AiScreenState extends State<AiScreen> {
           ),
           const SizedBox(height: 18),
 
+          if (data.isDemo) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF2D6),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE9B949)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.science_rounded, color: Color(0xFFB8860B), size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Аналіз нижче — на ДЕМО-даних (приклад). Реальний ІІ-аналіз '
+                      'зʼявиться, коли монітор підключено.',
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6B540A)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // 1 — Live LLM assistant (Claude / Gemini)
           _llmCard(context, data, settings, ai),
           const SizedBox(height: 22),

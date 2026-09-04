@@ -23,46 +23,84 @@ class MapScreen extends StatelessWidget {
         children: [
           SectionHeader(
             title: 'Карта загроз',
-            subtitle: 'Живі цілі, курс та ІІ-прогноз · ${map.homeName}',
+            subtitle: map.isDemo
+                ? 'Приклад даних · монітор не підключено'
+                : map.live
+                    ? 'Живі цілі, курс та ІІ-прогноз · ${map.homeName}'
+                    : 'Монітор не підключено · немає даних',
             icon: Icons.map_rounded,
-            trailing: _liveBadge(map.live, map.targets.length),
+            trailing: _liveBadge(map),
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: Container(
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: AppColors.border),
-                gradient: const LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xFF0B1424), Color(0xFF0A1020)],
-                ),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x1A123A6B),
-                    blurRadius: 30,
-                    spreadRadius: -6,
-                    offset: Offset(0, 14),
+            child: Stack(
+              children: [
+                Container(
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: AppColors.border),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0xFF0B1424), Color(0xFF0A1020)],
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x1A123A6B),
+                        blurRadius: 30,
+                        spreadRadius: -6,
+                        offset: Offset(0, 14),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: UkraineMap(
-                targets: map.targets,
-                home: map.home,
-                homeName: map.homeName,
-              ),
+                  child: UkraineMap(
+                    targets: map.targets,
+                    home: map.home,
+                    homeName: map.homeName,
+                  ),
+                ),
+                if (map.isDemo)
+                  Positioned(
+                    top: 12,
+                    left: 0,
+                    right: 0,
+                    child: Center(child: _demoRibbon()),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 12),
-          _TargetStrip(targets: map.targets),
+          _TargetStrip(targets: map.targets, live: map.live),
         ],
       ),
     );
   }
 
-  Widget _liveBadge(bool live, int count) {
+  Widget _liveBadge(MapDataController map) {
+    if (map.isDemo) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF2D6),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFE9B949)),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.science_rounded, size: 14, color: Color(0xFFB8860B)),
+            SizedBox(width: 6),
+            Text('ДЕМО',
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF8A6D0B))),
+          ],
+        ),
+      );
+    }
+    final count = map.targets.length;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
@@ -94,6 +132,32 @@ class MapScreen extends StatelessWidget {
     );
   }
 
+  Widget _demoRibbon() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xE6B8860B),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(color: Color(0x33000000), blurRadius: 10, offset: Offset(0, 3)),
+        ],
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.science_rounded, size: 15, color: Colors.white),
+          SizedBox(width: 7),
+          Text('ДЕМО-ДАНІ · не реальні загрози',
+              style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                  letterSpacing: 0.2)),
+        ],
+      ),
+    );
+  }
+
   String _plural(int n) {
     final m10 = n % 10, m100 = n % 100;
     if (m10 == 1 && m100 != 11) return 'ціль';
@@ -104,22 +168,29 @@ class MapScreen extends StatelessWidget {
 
 /// Horizontal strip of active targets under the map.
 class _TargetStrip extends StatelessWidget {
-  const _TargetStrip({required this.targets});
+  const _TargetStrip({required this.targets, required this.live});
   final List<MapTarget> targets;
+  final bool live;
 
   @override
   Widget build(BuildContext context) {
     if (targets.isEmpty) {
+      final honest = live; // only claim "clear" when we actually have a feed
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 14),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: AppColors.safeSoft,
+          color: honest ? AppColors.safeSoft : AppColors.primarySoft,
           borderRadius: BorderRadius.circular(14),
         ),
-        child: const Text('✅ Наразі чисто — активних цілей немає',
-            style: TextStyle(
-                color: AppColors.safe, fontWeight: FontWeight.w600)),
+        child: Text(
+          honest
+              ? '✅ Наразі чисто — активних цілей немає'
+              : 'Немає підключення до монітора — даних поки немає',
+          style: TextStyle(
+              color: honest ? AppColors.safe : AppColors.primaryDark,
+              fontWeight: FontWeight.w600),
+        ),
       );
     }
     return SizedBox(

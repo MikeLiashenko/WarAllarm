@@ -18,6 +18,7 @@ import '../services/rtdb_service.dart';
 class MapDataController extends ChangeNotifier {
   MapDataController(this._rtdb, this._store) {
     _selectedId = _store.getString('sel_place', fallback: 'all');
+    _showDemo = _store.getBool('show_demo', fallback: true);
   }
 
   final RtdbService _rtdb;
@@ -53,13 +54,32 @@ class MapDataController extends ChangeNotifier {
   bool _live = false;
   bool get live => _live;
 
+  bool _showDemo = true;
+  bool get showDemo => _showDemo;
+
+  /// True when what's on screen is sample data, not a live feed — so the UI can
+  /// label it clearly and it is never mistaken for real threats.
+  bool get isDemo => !_live && _showDemo && _targets.isNotEmpty;
+
   String _selectedId = 'all';
   String get selectedId => _selectedId;
 
   void start() {
-    _targets = _demoTargets();
-    _rows = _demoRows();
+    if (_showDemo) {
+      _targets = _demoTargets();
+      _rows = _demoRows();
+    }
     _sub = _rtdb.stream('state').listen(_onData, onError: (_) {});
+  }
+
+  void setShowDemo(bool value) {
+    _showDemo = value;
+    _store.setBool('show_demo', value);
+    if (!_live) {
+      _targets = value ? _demoTargets() : const [];
+      _rows = value ? _demoRows() : const [];
+    }
+    notifyListeners();
   }
 
   void select(String id) {

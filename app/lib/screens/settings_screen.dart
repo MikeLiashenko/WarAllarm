@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/map_data_controller.dart';
 import '../controllers/settings_controller.dart';
 import '../firebase_config.dart';
 import '../services/ai_service.dart';
@@ -15,6 +16,7 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.watch<SettingsController>();
+    final map = context.watch<MapDataController>();
 
     return PageBody(
       child: Column(
@@ -119,6 +121,23 @@ class SettingsScreen extends StatelessWidget {
                   'справжній ІІ у вкладці ШІ. Зберігається лише на цьому пристрої.',
                   style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                 ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          _Group(
+            title: 'Дані',
+            children: [
+              _ToggleRow(
+                icon: Icons.science_rounded,
+                title: 'Демо-дані',
+                subtitle: map.live
+                    ? 'Підключено до монітора — реальні дані'
+                    : 'Показувати приклад загроз (вимкни для чистого екрана)',
+                value: map.showDemo,
+                onChanged: map.setShowDemo,
+                accent: const Color(0xFFB8860B),
               ),
             ],
           ),

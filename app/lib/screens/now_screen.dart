@@ -61,6 +61,11 @@ class NowScreen extends StatelessWidget {
           const PlaceSelector(),
           const SizedBox(height: 14),
 
+          if (data.isDemo) ...[
+            _DemoBanner(),
+            const SizedBox(height: 14),
+          ],
+
           // Status hero
           GlassContainer(
             padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
@@ -164,6 +169,36 @@ class NowScreen extends StatelessWidget {
           color: AppColors.textMuted,
         ),
       );
+}
+
+class _DemoBanner extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF2D6),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE9B949)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.science_rounded, color: Color(0xFFB8860B), size: 20),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'ДЕМО-ДАНІ — це приклад, а не реальні загрози. '
+              'Монітор не підключено.',
+              style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6B540A)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _PlaceCard extends StatelessWidget {
