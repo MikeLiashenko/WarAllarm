@@ -10,6 +10,8 @@ map.html
 *.session
 updates.state
 WTelegram.log
+run.out
+index.html
 
 # --- сборки дизайна (Electron) и зависимости ---
 node_modules/
