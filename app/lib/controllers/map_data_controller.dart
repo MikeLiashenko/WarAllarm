@@ -182,22 +182,25 @@ class MapDataController extends ChangeNotifier {
       _watchKyiv = cfg['watchKyiv'] == true;
     }
 
+    // A live snapshot is authoritative — replace demo entirely, even when the
+    // live state is an empty "all clear".
     final rawT = data['threats'];
     final t = <MapTarget>[];
     if (rawT is List) {
       for (final e in rawT) {
         if (e is Map) t.add(MapTarget.fromMap(e));
       }
+    } else if (rawT is Map) {
+      rawT.forEach((_, v) {
+        if (v is Map) t.add(MapTarget.fromMap(v));
+      });
     }
-    if (t.isNotEmpty) _targets = t;
+    _targets = t;
 
     final rawR = data['rows'];
-    if (rawR is List) {
-      _rows = rawR
-          .whereType<Map>()
-          .map(AnalyticsRow.fromMap)
-          .toList();
-    }
+    _rows = rawR is List
+        ? rawR.whereType<Map>().map(AnalyticsRow.fromMap).toList()
+        : const [];
 
     _aiText = (data['aiText'] ?? '').toString();
     final aiAt = data['aiAt'];

@@ -35,7 +35,23 @@ public static class MapWriter
         _ => 5,
     };
 
+    /// Optional live publisher. When set, [Write] also pushes the same state
+    /// JSON to Firebase RTDB (node "state"), so the Flutter app reads live data.
+    public static FirebasePublisher? Publisher;
+
     public static void Write(string path, ThreatTracker tracker, string homeName, DateTime now)
+    {
+        var state = BuildState(tracker, homeName, now);
+        var html = Template.Replace("/*__STATE__*/", state)
+                           .Replace("/*__ICON__*/", IconUri)
+                           .Replace("/*__OBLASTS__*/", MapOblasts.Json);
+        try { File.WriteAllText(path, html, new UTF8Encoding(false)); } catch { /* карта не критична */ }
+        if (Publisher is { } pub) { _ = pub.Publish("state", state); } // fire-and-forget
+    }
+
+    /// Builds the live state JSON (threats + stats + rows + cfg + aiText).
+    /// Shared by the offline map.html and the Firebase publisher.
+    public static string BuildState(ThreatTracker tracker, string homeName, DateTime now)
     {
         var home = tracker.Home;
         var rawThreats = tracker.Active.Where(t => t.Pos is not null).ToList();
@@ -120,11 +136,7 @@ public static class MapWriter
         sb.Append(",\"aiText\":\"").Append(Esc(AiText)).Append('"');
         sb.Append(",\"aiAt\":").Append(AiAt is { } aa ? ((DateTimeOffset)aa.ToUniversalTime()).ToUnixTimeMilliseconds().ToString() : "null");
         sb.Append('}');
-
-        var html = Template.Replace("/*__STATE__*/", sb.ToString())
-                           .Replace("/*__ICON__*/", IconUri)
-                           .Replace("/*__OBLASTS__*/", MapOblasts.Json);
-        try { File.WriteAllText(path, html, new UTF8Encoding(false)); } catch { /* карта не критична */ }
+        return sb.ToString();
     }
 
     // Категория для цвета/формы блипа (как в концепте).

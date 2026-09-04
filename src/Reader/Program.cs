@@ -87,6 +87,20 @@ AiAdvisor? advisor = aiKey is { Length: > 0 }
 MapWriter.Config = MapWriter.Config! with { Ai = advisor is not null };
 var aiLast = DateTime.MinValue;
 
+// ── Міст до Firebase: публікуємо живий стан у RTDB для застосунку ─────────────
+var fbUrl = SecretOpt("firebase_db_url")
+    ?? "https://waralarm-c8c1f-default-rtdb.europe-west1.firebasedatabase.app";
+var fbSecret = SecretOpt("firebase_db_secret");
+if (!string.IsNullOrWhiteSpace(fbSecret))
+{
+    MapWriter.Publisher = new FirebasePublisher(fbUrl, fbSecret);
+    Console.WriteLine($"🔥 Firebase ВКЛ → публікую стан у {fbUrl}/state.json (застосунок бачитиме живі дані).\n");
+}
+else
+{
+    Console.WriteLine("🔥 Firebase ВИКЛ. Щоб застосунок бачив живі дані — додай  firebase_db_secret=...  у secrets.local.txt\n");
+}
+
 // Собирает текстовое зведение обстановки для ИИ.
 string BuildSituation()
 {
