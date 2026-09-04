@@ -305,6 +305,8 @@ nav.tabs .b.show{display:inline-flex}
 .traj{stroke-width:1.4;fill:none;stroke-dasharray:4 5;stroke-linecap:round;opacity:.9;animation:flow 1.3s linear infinite}
 .blip{transform-box:fill-box;transform-origin:center;animation:pip 1.6s ease-in-out infinite}
 .arrow{animation:pip 1.5s ease-in-out infinite;stroke-linecap:round}
+.fig{animation:figp 1.7s ease-in-out infinite;filter:drop-shadow(0 .4px .9px rgba(0,0,0,.55))}
+.fig path{stroke-linejoin:round}
 .tlabel{font-size:8px;font-weight:700;font-family:var(--mono);fill:var(--tx);paint-order:stroke;stroke:#0a1020;stroke-width:1px}
 .zoomc{position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:6px}
 .zoomc button{width:30px;height:30px;border-radius:8px;border:1px solid var(--line2);background:rgba(11,20,36,.85);
@@ -329,6 +331,7 @@ h3{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);
 .empty{color:var(--calm);padding:22px;text-align:center;border:1px dashed var(--line);border-radius:12px}
 @keyframes flow{to{stroke-dashoffset:-18}}
 @keyframes pip{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes figp{0%,100%{opacity:1}50%{opacity:.62}}
 </style></head><body>
 <header>
   <span class="mark" id="mark"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M12 2l7 3v6c0 4.5-3 8-7 11-4-3-7-6.5-7-11V5l7-3z" fill="currentColor"/></svg></span>
@@ -414,6 +417,15 @@ if(ICON){var mk=document.getElementById('mark');if(mk){mk.style.background='none
 const NS='http://www.w3.org/2000/svg';
 const C={balist:'#FF3B30',missile:'#FF5A3C',shahed:'#FF9F45',kab:'#FF6B4A',other:'#F4C550'};
 function el(n,at,txt){var e=document.createElementNS(NS,n);for(var k in at)e.setAttribute(k,at[k]);if(txt!=null)e.textContent=txt;document.getElementById('ua-overlay').appendChild(e);return e;}
+// Силуэты целей (нос смотрит вверх, 0°=Пн; поворот по heading). Координаты в юнитах ~±8.
+function figPath(cat){
+  if(cat==='balist'||cat==='missile')                                   // ракета/балістика: гострий ніс, корпус, хвостові стабілізатори
+    return 'M0,-9 C1.5,-6 1.5,-2 1.4,2.6 L3.1,7 L1,5.6 L1,8.2 L-1,8.2 L-1,5.6 L-3.1,7 L-1.4,2.6 C-1.5,-2 -1.5,-6 0,-9 Z';
+  if(cat==='kab')                                                        // КАБ: коротша «бомба» з оперенням
+    return 'M0,-6.4 C2.1,-5.6 2,-1 1.6,3 L3.3,6 L1,5 L1,7 L-1,7 L-1,5 L-3.3,6 L-1.6,3 C-2,-1 -2.1,-5.6 0,-6.4 Z';
+  return 'M0,-7.6 L5.9,5 L1,3.6 L1.5,7.2 L-1.5,7.2 L-1,3.6 L-5.9,5 Z';   // шахед/ціль: дельта-крило дрона зі «жалом»
+}
+function figScale(cat){return cat==='balist'?1.5:cat==='missile'?1.28:cat==='kab'?1.05:cat==='shahed'?1.08:0.9;}
 
 // Проекция контура (те же границы Украины, что в концепте) — совмещаем overlay с path.
 let P=null;
@@ -446,22 +458,19 @@ function build(){
     var p=P(c[1],c[2]); el('circle',{'class':'city',cx:p[0],cy:p[1],r:1.1});
     el('text',{'class':'clabel2',x:p[0],y:p[1]-2},c[0]);
   });
-  // цели: СТРЕЛКА в точке цели, направление = куда летит, длина = по типу
-  // (ракеты/балістика — длинные и быстрые, шахеди/КАБ — короткие).
+  // цели: РЕАЛЬНИЙ СИЛУЕТ (шахед/ракета/КАБ) у точці цілі, ніс — куди летить (heading, 0°=Пн).
   S.threats.forEach(function(t){
-    var col=C[t.cat]||C.other, b=P(t.lon,t.lat);
-    var long_=(t.cat==='balist'||t.cat==='missile');
-    var len=long_?24:13, w=long_?3.0:2.4;               // крупные, заметные стрелки
-    var deg=(t.heading==null?0:t.heading)*Math.PI/180;
-    var dx=Math.sin(deg), dy=-Math.cos(deg);            // 0°=Пн (вверх), по часовой
-    var tail=[b[0]-dx*len*0.35,b[1]-dy*len*0.35], tip=[b[0]+dx*len*0.65,b[1]+dy*len*0.65];
-    el('line',{'class':'arrow',x1:tail[0],y1:tail[1],x2:tip[0],y2:tip[1],stroke:col,'stroke-width':w});
-    // наконечник
-    var ah=long_?6.5:5, a1=deg+Math.PI*0.82, a2=deg-Math.PI*0.82;
-    el('line',{x1:tip[0],y1:tip[1],x2:tip[0]+Math.sin(a1)*ah,y2:tip[1]-Math.cos(a1)*ah,stroke:col,'stroke-width':w,'stroke-linecap':'round'});
-    el('line',{x1:tip[0],y1:tip[1],x2:tip[0]+Math.sin(a2)*ah,y2:tip[1]-Math.cos(a2)*ah,stroke:col,'stroke-width':w,'stroke-linecap':'round'});
-    // Подпись цели на карте НЕ рисуем (название есть в данных и в панелі). Только ×N, если налёт.
-    if(t.n>1) el('text',{'class':'tlabel',x:b[0]+3,y:b[1]-2,fill:col},'×'+t.n);
+    var col=C[t.cat]||C.other, b=P(t.lon,t.lat), rot=(t.heading==null?0:t.heading);
+    var g=el('g',{'class':'fig',transform:'translate('+b[0].toFixed(2)+' '+b[1].toFixed(2)+') rotate('+rot.toFixed(1)+')'});
+    var fig=document.createElementNS(NS,'path');
+    fig.setAttribute('d',figPath(t.cat));
+    fig.setAttribute('fill',col);
+    fig.setAttribute('stroke','rgba(10,15,25,.55)');
+    fig.setAttribute('stroke-width','0.5');
+    fig.setAttribute('transform','scale('+figScale(t.cat)+')');
+    g.appendChild(fig);
+    // ×N (не обертаємо — читабельно)
+    if(t.n>1) el('text',{'class':'tlabel',x:b[0]+4,y:b[1]-4,fill:col},'×'+t.n);
   });
   // дом
   var hp=P(S.home.lon,S.home.lat);
