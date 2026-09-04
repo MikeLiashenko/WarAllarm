@@ -113,12 +113,12 @@ class _UkraineMapState extends State<UkraineMap>
     }
     final cx = (lons.reduce(math.min) + lons.reduce(math.max)) / 2;
     final cy = (lats.reduce(math.min) + lats.reduce(math.max)) / 2;
-    final lo = math.max(6.0, (lons.reduce(math.max) - lons.reduce(math.min)) * 1.6);
-    final la = math.max(4.2, (lats.reduce(math.max) - lats.reduce(math.min)) * 1.6);
+    final lo = math.max(4.4, (lons.reduce(math.max) - lons.reduce(math.min)) * 1.5);
+    final la = math.max(3.2, (lats.reduce(math.max) - lats.reduce(math.min)) * 1.5);
     final a = fit.project(cx - lo / 2, cy + la / 2);
     final b = fit.project(cx + lo / 2, cy - la / 2);
     final bw = (b.dx - a.dx).abs(), bh = (b.dy - a.dy).abs();
-    _scale = math.max(1, math.min(2.6, math.min(size.width / bw, size.height / bh)));
+    _scale = math.max(1, math.min(3.4, math.min(size.width / bw, size.height / bh)));
     final mid = fit.project(cx, cy);
     _tx = size.width / 2 - mid.dx * _scale;
     _ty = size.height / 2 - mid.dy * _scale;
@@ -297,7 +297,10 @@ class _MapPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final fit = _fit(size);
-    final K = size.width / 300 * 1.35; // fixed on-screen figure size
+    // Pixels-per-unit for the target silhouettes (fig coords are ~±10 units,
+    // so a shahed ≈ 19 units × figScale). Fixed on-screen size, independent of
+    // zoom; a touch larger on wide desktop windows.
+    final ppu = (size.width / 340).clamp(2.6, 4.2);
 
     // --- Hot-zone glow under target clusters ---
     for (final t in targets) {
@@ -401,26 +404,27 @@ class _MapPainter extends CustomPainter {
               ..color = color.withValues(alpha: 0.55)
               ..strokeWidth = 1.3
               ..strokeCap = StrokeCap.round);
-        _drawFig(canvas, ps, t.heading!, cat, color, K * 0.92, ghost: true);
+        _drawFig(canvas, ps, t.heading!, cat, color, ppu * 0.85, ghost: true);
         final nc = _nearestCity(pd.dx, pd.dy);
         if (nc != null) {
-          _text(canvas, '→ ${nc.name}?', ps + Offset(6, -6), 8.5,
-              color.withValues(alpha: 0.9), stroke: true);
+          _text(canvas, '→ ${nc.name}?', ps + const Offset(9, -9), 11,
+              color.withValues(alpha: 0.95), stroke: true, bold: true);
         }
       }
 
       // Main silhouette.
-      _drawFig(canvas, scr, t.heading ?? 0, cat, color, K);
+      final figH = 19 * figScale(cat) * ppu; // approx on-screen height
+      _drawFig(canvas, scr, t.heading ?? 0, cat, color, ppu);
 
       // ×N cluster label.
       if (t.amount > 1) {
-        _text(canvas, '×${t.amount}', scr + Offset(K * 6, -K * 6),
-            11, color, stroke: true, bold: true);
+        _text(canvas, '×${t.amount}', scr + Offset(figH * 0.42, -figH * 0.5),
+            14, color, stroke: true, bold: true);
       }
       // Place label when zoomed in.
-      if (scale >= 2.4 && t.place.isNotEmpty) {
-        _text(canvas, t.place, scr + Offset(K * 6, K * 7), 8,
-            color, stroke: true);
+      if (scale >= 2.2 && t.place.isNotEmpty) {
+        _text(canvas, t.place, scr + Offset(figH * 0.42, figH * 0.36), 10,
+            color, stroke: true, bold: true);
       }
     }
   }
@@ -442,12 +446,12 @@ class _MapPainter extends CustomPainter {
   }
 
   void _drawFig(Canvas canvas, Offset at, double headingDeg, String cat,
-      Color color, double k,
+      Color color, double ppu,
       {bool ghost = false}) {
     canvas.save();
     canvas.translate(at.dx, at.dy);
     canvas.rotate(headingDeg * math.pi / 180);
-    canvas.scale(figScale(cat) * k / 10); // fig coords are ~±10 units
+    canvas.scale(figScale(cat) * ppu); // fig coords are ~±10 units → px
     final parts = figs[cat]!;
     for (final part in parts) {
       if (ghost && !part.body) continue;
