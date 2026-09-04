@@ -88,9 +88,11 @@ MapWriter.Config = MapWriter.Config! with { Ai = advisor is not null };
 var aiLast = DateTime.MinValue;
 
 // ── Міст до Firebase: публікуємо живий стан у RTDB для застосунку ─────────────
+// Ключ шукаємо в secrets.local.txt АБО settings.local.txt (cfg) — де зручніше.
 var fbUrl = SecretOpt("firebase_db_url")
+    ?? (cfg.TryGetValue("firebase_db_url", out var fu) && fu.Length > 0 ? fu : null)
     ?? "https://waralarm-c8c1f-default-rtdb.europe-west1.firebasedatabase.app";
-var fbSecret = SecretOpt("firebase_db_secret");
+var fbSecret = SecretOpt("firebase_db_secret") ?? cfg.GetValueOrDefault("firebase_db_secret");
 if (!string.IsNullOrWhiteSpace(fbSecret))
 {
     MapWriter.Publisher = new FirebasePublisher(fbUrl, fbSecret);
@@ -98,7 +100,7 @@ if (!string.IsNullOrWhiteSpace(fbSecret))
 }
 else
 {
-    Console.WriteLine("🔥 Firebase ВИКЛ. Щоб застосунок бачив живі дані — додай  firebase_db_secret=...  у secrets.local.txt\n");
+    Console.WriteLine("🔥 Firebase ВИКЛ. Щоб застосунок бачив живі дані — додай  firebase_db_secret=...  у secrets.local.txt або settings.local.txt\n");
 }
 
 // Собирает текстовое зведение обстановки для ИИ.
