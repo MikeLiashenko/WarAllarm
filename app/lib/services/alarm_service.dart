@@ -13,6 +13,10 @@ class AlarmService {
   final AudioPlayer _siren = AudioPlayer(playerId: 'wa_siren');
   final AudioPlayer _ping = AudioPlayer(playerId: 'wa_ping');
 
+  // Loud enough to alert, not painful. 0..1.
+  static const double _sirenVolume = 0.5;
+  static const double _pingVolume = 0.4;
+
   bool _sirenOn = false;
   bool _vibrating = false;
   bool _wakelock = false;
@@ -29,9 +33,9 @@ class AlarmService {
     if (sound && !_sirenOn) {
       _sirenOn = true;
       try {
-        await _siren.setVolume(1.0);
+        await _siren.setVolume(_sirenVolume);
         await _siren.setReleaseMode(ReleaseMode.loop);
-        await _siren.play(AssetSource('siren.wav'), volume: 1.0);
+        await _siren.play(AssetSource('siren.wav'), volume: _sirenVolume);
       } catch (e) {
         _sirenOn = false;
         debugPrint('siren play failed: $e');
@@ -45,7 +49,7 @@ class AlarmService {
     if (!sound || _sirenOn) return; // no pips over a full siren
     try {
       await _ping.stop();
-      await _ping.play(AssetSource('ping.wav'), volume: 0.9);
+      await _ping.play(AssetSource('ping.wav'), volume: _pingVolume);
     } catch (_) {}
   }
 
