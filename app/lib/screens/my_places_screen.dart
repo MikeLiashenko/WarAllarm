@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/places_controller.dart';
-import '../data/ukraine_geo.dart';
+import '../data/places_gazetteer.dart';
 import '../models/saved_place.dart';
 import '../theme/app_colors.dart';
 import '../widgets/glass_container.dart';
@@ -108,15 +108,15 @@ class _AddPlaceDialogState extends State<_AddPlaceDialog> {
     super.dispose();
   }
 
-  List<MapCity> get _matches {
+  List<GeoPlace> get _matches {
     final q = _q.trim().toLowerCase();
     if (q.isEmpty) {
-      // Show the biggest cities as a starting point.
-      return kCities.where((c) => c.tier == 0).toList();
+      // A relevant starting set: our home area first.
+      return kGazetteer.take(12).toList();
     }
-    final starts = <MapCity>[];
-    final contains = <MapCity>[];
-    for (final c in kCities) {
+    final starts = <GeoPlace>[];
+    final contains = <GeoPlace>[];
+    for (final c in kGazetteer) {
       final n = c.name.toLowerCase();
       if (n.startsWith(q)) {
         starts.add(c);
@@ -124,10 +124,10 @@ class _AddPlaceDialogState extends State<_AddPlaceDialog> {
         contains.add(c);
       }
     }
-    return [...starts, ...contains].take(8).toList();
+    return [...starts, ...contains].take(12).toList();
   }
 
-  void _pick(MapCity c) {
+  void _pick(GeoPlace c) {
     widget.controller.add(name: c.name, region: '', lat: c.lat, lng: c.lon);
     Navigator.pop(context);
   }
