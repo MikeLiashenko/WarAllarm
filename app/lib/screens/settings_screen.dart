@@ -73,6 +73,7 @@ class SettingsScreen extends StatelessWidget {
                 onChanged: s.setThreatOnly,
                 accent: AppColors.threat,
               ),
+              const _VolumeSlider(),
               const _TestSirenButton(),
             ],
           ),
@@ -177,6 +178,66 @@ class SettingsScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+}
+
+class _VolumeSlider extends StatelessWidget {
+  const _VolumeSlider();
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<SettingsController>();
+    final pct = (s.alarmVolume * 100).round();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.graphic_eq_rounded,
+                color: AppColors.primary, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text('Гучність сирени',
+                        style: TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary)),
+                    const Spacer(),
+                    Text('$pct%',
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.primaryDark)),
+                  ],
+                ),
+                Slider(
+                  value: s.alarmVolume.clamp(0.0, 1.0),
+                  min: 0.0,
+                  max: 1.0,
+                  divisions: 20,
+                  activeColor: AppColors.primary,
+                  label: '$pct%',
+                  onChanged: (v) =>
+                      context.read<SettingsController>().setAlarmVolume(v),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

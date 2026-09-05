@@ -13,9 +13,8 @@ class AlarmService {
   final AudioPlayer _siren = AudioPlayer(playerId: 'wa_siren');
   final AudioPlayer _ping = AudioPlayer(playerId: 'wa_ping');
 
-  // Loud enough to alert, not painful. 0..1.
-  static const double _sirenVolume = 0.5;
-  static const double _pingVolume = 0.4;
+  // Alarm loudness, 0..1 (relative to the device volume). User-adjustable.
+  double _volume = 0.5;
 
   bool _sirenOn = false;
   bool _vibrating = false;
@@ -27,15 +26,30 @@ class AlarmService {
     _siren.setPlayerMode(PlayerMode.mediaPlayer);
   }
 
+  /// Live-adjust the alarm loudness (also updates an in-progress siren).
+  Future<void> setVolume(double v) async {
+    _volume = v.clamp(0.0, 1.0);
+    if (_sirenOn) {
+      try {
+        await _siren.setVolume(_volume);
+      } catch (_) {}
+    }
+  }
+
   /// Start the continuous air-raid siren + vibration + keep the screen awake.
-  Future<void> startSiren({required bool sound, required bool vibrate}) async {
+  Future<void> startSiren({
+    required bool sound,
+    required bool vibrate,
+    double? volume,
+  }) async {
+    if (volume != null) _volume = volume.clamp(0.0, 1.0);
     await _keepAwake(true);
     if (sound && !_sirenOn) {
       _sirenOn = true;
       try {
-        await _siren.setVolume(_sirenVolume);
+        await _siren.setVolume(_volume);
         await _siren.setReleaseMode(ReleaseMode.loop);
-        await _siren.play(AssetSource('siren.wav'), volume: _sirenVolume);
+        await _siren.play(AssetSource('siren.wav'), volume: _volume);
       } catch (e) {
         _sirenOn = false;
         debugPrint('siren play failed: $e');
@@ -49,7 +63,7 @@ class AlarmService {
     if (!sound || _sirenOn) return; // no pips over a full siren
     try {
       await _ping.stop();
-      await _ping.play(AssetSource('ping.wav'), volume: _pingVolume);
+      await _ping.play(AssetSource('ping.wav'), volume: (_volume * 0.8).clamp(0.0, 1.0));
     } catch (_) {}
   }
 

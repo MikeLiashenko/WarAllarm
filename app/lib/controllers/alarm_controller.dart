@@ -75,7 +75,10 @@ class AlarmController extends ChangeNotifier {
   /// alarm is already ringing.
   Future<void> testSiren() async {
     if (_ringing) return;
-    await _svc.startSiren(sound: true, vibrate: _settings.vibration);
+    await _svc.startSiren(
+        sound: true,
+        vibrate: _settings.vibration,
+        volume: _settings.alarmVolume);
     await Future<void>.delayed(const Duration(seconds: 4));
     if (!_ringing) await _svc.stopAll();
   }
@@ -101,6 +104,7 @@ class AlarmController extends ChangeNotifier {
 
     final sound = _settings.soundAlerts;
     final vibrate = _settings.vibration;
+    _svc.setVolume(_settings.alarmVolume); // keep loudness in sync live
 
     // A strike or overhead is critical: override any active snooze.
     final critical = (worst?.score ?? 0) >= 85;
@@ -110,7 +114,8 @@ class AlarmController extends ChangeNotifier {
       if (critical) _snoozeUntil = null; // cancel snooze on escalation
       if (!_ringing) {
         _ringing = true;
-        _svc.startSiren(sound: sound, vibrate: vibrate);
+        _svc.startSiren(
+            sound: sound, vibrate: vibrate, volume: _settings.alarmVolume);
       }
     } else {
       if (_ringing) {

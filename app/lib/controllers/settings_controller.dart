@@ -10,6 +10,7 @@ class SettingsController extends ChangeNotifier {
     _soundAlerts = _store.getBool('set_sound', fallback: true);
     _threatOnly = _store.getBool('set_threat_only', fallback: false);
     _vibration = _store.getBool('set_vibration', fallback: true);
+    _alarmVolume = _store.getDouble('set_volume', fallback: 0.5).clamp(0.0, 1.0);
     _keepScreenOn = _store.getBool('set_keep_screen', fallback: false);
     _compactFeed = _store.getBool('set_compact_feed', fallback: false);
     _displayName = _store.getString('set_name', fallback: 'Guest');
@@ -31,6 +32,7 @@ class SettingsController extends ChangeNotifier {
   bool _soundAlerts = true;
   bool _threatOnly = false;
   bool _vibration = true;
+  double _alarmVolume = 0.5;
   bool _keepScreenOn = false;
   bool _compactFeed = false;
   String _displayName = 'Guest';
@@ -41,6 +43,7 @@ class SettingsController extends ChangeNotifier {
   bool get soundAlerts => _soundAlerts;
   bool get threatOnly => _threatOnly;
   bool get vibration => _vibration;
+  double get alarmVolume => _alarmVolume;
   bool get keepScreenOn => _keepScreenOn;
   bool get compactFeed => _compactFeed;
   String get displayName => _displayName;
@@ -60,6 +63,12 @@ class SettingsController extends ChangeNotifier {
       _setBool('set_threat_only', v, (x) => _threatOnly = x);
   void setVibration(bool v) =>
       _setBool('set_vibration', v, (x) => _vibration = x);
+
+  void setAlarmVolume(double v) {
+    _alarmVolume = v.clamp(0.0, 1.0);
+    _store.setDouble('set_volume', _alarmVolume);
+    notifyListeners();
+  }
   void setKeepScreenOn(bool v) =>
       _setBool('set_keep_screen', v, (x) => _keepScreenOn = x);
   void setCompactFeed(bool v) =>
