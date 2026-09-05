@@ -62,7 +62,21 @@ class PlacesController extends ChangeNotifier {
   Future<void> _persist() =>
       _store.writeJsonList(_key, _places.map((p) => p.toJson()).toList());
 
-  // No default places — home (Kharkiv) and the Kyiv guest place are built in,
-  // so seeding "Kharkiv"/"Kyiv" here just created confusing duplicates.
-  List<SavedPlace> _seed() => const [];
+  List<SavedPlace> _seed() => [
+        SavedPlace(
+          id: _uuid.v4(),
+          name: 'Kharkiv',
+          region: 'Kharkiv Oblast',
+          lat: 49.9935,
+          lng: 36.2304,
+        ),
+        SavedPlace(
+          id: _uuid.v4(),
+          name: 'Kyiv',
+          region: 'Kyiv City',
+          lat: 50.4501,
+          lng: 30.5234,
+          notify: false,
+        ),
+      ];
 }

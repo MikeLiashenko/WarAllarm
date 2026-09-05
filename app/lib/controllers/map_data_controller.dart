@@ -114,22 +114,18 @@ class MapDataController extends ChangeNotifier {
           zone: 'Київ',
         ),
     ];
+    // Show every saved place — the built-in home + Kyiv guest AND all of the
+    // user's own places. Nothing is hidden.
     final saved = _store.readJsonList('saved_places');
     for (var i = 0; i < saved.length; i++) {
       final p = saved[i];
-      final lat = (p['lat'] as num).toDouble();
-      final lon = (p['lng'] ?? p['lon'] as num).toDouble();
-      // Skip saved places that duplicate a built-in one (home / Kyiv guest) —
-      // e.g. an old auto-seeded "Kharkiv"/"Kyiv" sitting on top of them.
-      final dup = list.any((e) => _closeKm(e.lat, e.lon, lat, lon) < 15);
-      if (dup) continue;
       list.add(MonitoredPlace(
         id: 'u$i',
         icon: '📍',
         name: (p['name'] ?? 'Місце').toString(),
         sub: (p['region'] ?? '').toString(),
-        lat: lat,
-        lon: lon,
+        lat: (p['lat'] as num).toDouble(),
+        lon: (p['lng'] ?? p['lon'] as num).toDouble(),
       ));
     }
     return list;
@@ -144,16 +140,6 @@ class MapDataController extends ChangeNotifier {
   static const _rank = {
     'Impact': 5, 'Overhead': 4, 'Imminent': 3, 'Approaching': 2, 'Passed': 1,
   };
-
-  /// Distance between two lat/lon points (km), haversine.
-  static double _closeKm(double la1, double lo1, double la2, double lo2) {
-    const r = 6371.0, rad = math.pi / 180;
-    final dLa = (la2 - la1) * rad, dLo = (lo2 - lo1) * rad;
-    final h = math.sin(dLa / 2) * math.sin(dLa / 2) +
-        math.cos(la1 * rad) * math.cos(la2 * rad) *
-            math.sin(dLo / 2) * math.sin(dLo / 2);
-    return r * 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
-  }
 
   /// Distance target→place (km), haversine.
   static double _km(MapTarget t, MonitoredPlace p) {
