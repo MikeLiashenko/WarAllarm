@@ -35,10 +35,6 @@ class MapDataController extends ChangeNotifier {
   String _homeName = 'Харків · Салтівка';
   String get homeName => _homeName;
 
-  String _district = 'Салтівський';
-  String _city = 'Харків';
-  bool _watchKyiv = true;
-
   List<MapTarget> _targets = const [];
   List<MapTarget> get targets => _targets;
 
@@ -92,30 +88,10 @@ class MapDataController extends ChangeNotifier {
 
   // --- Places (home + Kyiv guest + user-saved) --------------------------------
 
+  /// Only the user's own places (from "Мої місця"). The selector shows
+  /// "Всі місця" + each of these separately — no built-in home/Kyiv chips.
   List<MonitoredPlace> get places {
-    final list = <MonitoredPlace>[
-      MonitoredPlace(
-        id: 'home',
-        icon: '🏠',
-        name: _district,
-        sub: _city,
-        lat: _home.lat,
-        lon: _home.lon,
-        zone: 'Харків',
-      ),
-      if (_watchKyiv)
-        const MonitoredPlace(
-          id: 'kyiv',
-          icon: '🏙',
-          name: 'Київ',
-          sub: 'гість',
-          lat: 50.45,
-          lon: 30.52,
-          zone: 'Київ',
-        ),
-    ];
-    // Show every saved place — the built-in home + Kyiv guest AND all of the
-    // user's own places. Nothing is hidden.
+    final list = <MonitoredPlace>[];
     final saved = _store.readJsonList('saved_places');
     for (var i = 0; i < saved.length; i++) {
       final p = saved[i];
@@ -134,7 +110,9 @@ class MapDataController extends ChangeNotifier {
   List<MonitoredPlace> get selectedPlaces {
     final all = places;
     if (_selectedId == 'all') return all;
-    return all.where((p) => p.id == _selectedId).toList();
+    final picked = all.where((p) => p.id == _selectedId).toList();
+    // A stale selection (e.g. an old 'home'/'kyiv' id) falls back to all.
+    return picked.isEmpty ? all : picked;
   }
 
   static const _rank = {
@@ -179,13 +157,6 @@ class MapDataController extends ChangeNotifier {
         lon: (home['lon'] as num).toDouble(),
       );
     }
-    final cfg = data['cfg'];
-    if (cfg is Map) {
-      _district = (cfg['district'] ?? _district).toString();
-      _city = (cfg['city'] ?? _city).toString();
-      _watchKyiv = cfg['watchKyiv'] == true;
-    }
-
     // A live snapshot is authoritative — replace demo entirely, even when the
     // live state is an empty "all clear".
     final rawT = data['threats'];
