@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/places_controller.dart';
+import '../data/ukraine_geo.dart';
 import '../models/saved_place.dart';
 import '../theme/app_colors.dart';
 import '../widgets/glass_container.dart';
@@ -27,7 +28,7 @@ class MyPlacesScreen extends StatelessWidget {
             trailing: ElevatedButton.icon(
               onPressed: () => _showAddDialog(context, controller),
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add place'),
+              label: const Text('Додати'),
             ),
           ),
           const SizedBox(height: 18),
@@ -80,78 +81,120 @@ class MyPlacesScreen extends StatelessWidget {
   }
 
   void _showAddDialog(BuildContext context, PlacesController controller) {
-    final nameCtl = TextEditingController();
-    final regionCtl = TextEditingController();
-    final latCtl = TextEditingController();
-    final lngCtl = TextEditingController();
-
     showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Add place'),
-        content: SizedBox(
-          width: 360,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtl,
-                decoration: const InputDecoration(hintText: 'City name'),
+      builder: (context) => _AddPlaceDialog(controller: controller),
+    );
+  }
+}
+
+/// Add a place by typing a city name — coordinates are resolved automatically
+/// from the built-in Ukrainian city list. No manual latitude/longitude.
+class _AddPlaceDialog extends StatefulWidget {
+  const _AddPlaceDialog({required this.controller});
+  final PlacesController controller;
+
+  @override
+  State<_AddPlaceDialog> createState() => _AddPlaceDialogState();
+}
+
+class _AddPlaceDialogState extends State<_AddPlaceDialog> {
+  final _ctl = TextEditingController();
+  String _q = '';
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  List<MapCity> get _matches {
+    final q = _q.trim().toLowerCase();
+    if (q.isEmpty) {
+      // Show the biggest cities as a starting point.
+      return kCities.where((c) => c.tier == 0).toList();
+    }
+    final starts = <MapCity>[];
+    final contains = <MapCity>[];
+    for (final c in kCities) {
+      final n = c.name.toLowerCase();
+      if (n.startsWith(q)) {
+        starts.add(c);
+      } else if (n.contains(q)) {
+        contains.add(c);
+      }
+    }
+    return [...starts, ...contains].take(8).toList();
+  }
+
+  void _pick(MapCity c) {
+    widget.controller.add(name: c.name, region: '', lat: c.lat, lng: c.lon);
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final matches = _matches;
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Text('Додати місто'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _ctl,
+              autofocus: true,
+              onChanged: (v) => setState(() => _q = v),
+              decoration: const InputDecoration(
+                hintText: 'Почни писати місто…',
+                prefixIcon: Icon(Icons.search_rounded, size: 20),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: regionCtl,
-                decoration: const InputDecoration(hintText: 'Region / oblast'),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: latCtl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true, signed: true),
-                      decoration: const InputDecoration(hintText: 'Latitude'),
+            ),
+            const SizedBox(height: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 260),
+              child: matches.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 20),
+                      child: Text(
+                        'Не знайшов такого міста 🤔\nСпробуй іншу назву українською.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: matches.length,
+                      separatorBuilder: (_, _) =>
+                          const Divider(height: 1, color: AppColors.divider),
+                      itemBuilder: (context, i) {
+                        final c = matches[i];
+                        return ListTile(
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 6),
+                          leading: const Icon(Icons.location_on_rounded,
+                              color: AppColors.primary),
+                          title: Text(c.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary)),
+                          onTap: () => _pick(c),
+                        );
+                      },
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: lngCtl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true, signed: true),
-                      decoration: const InputDecoration(hintText: 'Longitude'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final name = nameCtl.text.trim();
-              if (name.isEmpty) return;
-              controller.add(
-                name: name,
-                region: regionCtl.text.trim(),
-                lat: double.tryParse(latCtl.text.trim()) ?? 49.9935,
-                lng: double.tryParse(lngCtl.text.trim()) ?? 36.2304,
-              );
-              Navigator.pop(context);
-            },
-            child: const Text('Add'),
-          ),
-        ],
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Скасувати'),
+        ),
+      ],
     );
   }
 }
