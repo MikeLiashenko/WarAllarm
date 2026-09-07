@@ -43,11 +43,11 @@ class MapScreen extends StatelessWidget {
                     gradient: const LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Color(0xFF0B1424), Color(0xFF0A1020)],
+                      colors: [Color(0xFFEAF3FF), Color(0xFFF7FAFF)],
                     ),
                     boxShadow: const [
                       BoxShadow(
-                        color: Color(0x1A123A6B),
+                        color: Color(0x14123A6B),
                         blurRadius: 30,
                         spreadRadius: -6,
                         offset: Offset(0, 14),

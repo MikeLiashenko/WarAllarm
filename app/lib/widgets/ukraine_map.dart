@@ -104,6 +104,14 @@ class _UkraineMapState extends State<UkraineMap>
   }
 
   void _autoFocus(Size size) {
+    // No targets → show the whole country, centred (recognisable Ukraine),
+    // instead of zooming onto an empty area around home.
+    if (widget.targets.isEmpty) {
+      _scale = 1;
+      _tx = 0;
+      _ty = 0;
+      return;
+    }
     final fit = _fit(size);
     final lons = <double>[widget.home.lon];
     final lats = <double>[widget.home.lat];
@@ -210,10 +218,12 @@ class _UkraineMapState extends State<UkraineMap>
 
   Widget _zoomButton(IconData icon, VoidCallback onTap) {
     return Material(
-      color: const Color(0xE60B1424),
+      color: Colors.white,
+      elevation: 2,
+      shadowColor: const Color(0x22123A6B),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(9),
-        side: const BorderSide(color: Color(0x1FFFFFFF)),
+        side: const BorderSide(color: Color(0xFFE4ECF5)),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(9),
@@ -221,7 +231,7 @@ class _UkraineMapState extends State<UkraineMap>
         child: SizedBox(
           width: 34,
           height: 34,
-          child: Icon(icon, color: Colors.white, size: 18),
+          child: Icon(icon, color: const Color(0xFF1E7BE0), size: 18),
         ),
       ),
     );
@@ -324,15 +334,15 @@ class _MapPainter extends CustomPainter {
       outline,
       Paint()
         ..style = PaintingStyle.fill
-        ..color = const Color(0xFF0E1A2E),
+        ..color = const Color(0xFFFFFFFF), // white land on light-blue sea
     );
     canvas.drawPath(
       outline,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.1 / a
+        ..strokeWidth = 1.6 / a
         ..strokeJoin = StrokeJoin.round
-        ..color = const Color(0x9E7896BE),
+        ..color = const Color(0xFF3B9EFF),
     );
     canvas.restore();
 
@@ -343,11 +353,16 @@ class _MapPainter extends CustomPainter {
           (c.tier == 2 && scale >= 2.8);
       if (!show) continue;
       final p = _toScreen(fit.project(c.lon, c.lat));
-      final r = c.tier == 0 ? 2.1 : c.tier == 1 ? 1.7 : 1.3;
-      canvas.drawCircle(p, r, Paint()..color = const Color(0xFF8792A6));
+      final r = c.tier == 0 ? 2.4 : c.tier == 1 ? 1.9 : 1.4;
+      canvas.drawCircle(p, r, Paint()..color = const Color(0xFF3B9EFF));
+      canvas.drawCircle(p, r,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..color = const Color(0xFFFFFFFF));
       final fs = c.tier == 0 ? 10.5 : c.tier == 1 ? 9.0 : 7.5;
       _text(canvas, c.name, p + Offset(0, -(r + 3)),
-          fs, const Color(0x99E6EDF3), center: true, stroke: true);
+          fs, const Color(0xE60F2035), center: true, stroke: true);
     }
 
     // --- Home marker (pulsing) ---
@@ -498,7 +513,10 @@ class _MapPainter extends CustomPainter {
       ..pushStyle(ui.TextStyle(
         color: color,
         shadows: stroke
-            ? const [Shadow(color: Color(0xFF0A1020), blurRadius: 2)]
+            ? const [
+                Shadow(color: Color(0xFFFFFFFF), blurRadius: 3),
+                Shadow(color: Color(0xFFFFFFFF), blurRadius: 2),
+              ]
             : null,
       ))
       ..addText(s);
@@ -528,9 +546,12 @@ class _Legend extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xCC0B1424),
+        color: const Color(0xF2FFFFFF),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0x1FFFFFFF)),
+        border: Border.all(color: const Color(0xFFE4ECF5)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x14123A6B), blurRadius: 10, offset: Offset(0, 3)),
+        ],
       ),
       child: Wrap(
         spacing: 12,
@@ -551,7 +572,9 @@ class _Legend extends StatelessWidget {
                 const SizedBox(width: 5),
                 Text(it.$1,
                     style: const TextStyle(
-                        color: Color(0xFF8792A6), fontSize: 11)),
+                        color: Color(0xFF5B6B7F),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600)),
               ],
             ),
         ],
