@@ -11,6 +11,10 @@ class SettingsController extends ChangeNotifier {
     _threatOnly = _store.getBool('set_threat_only', fallback: false);
     _vibration = _store.getBool('set_vibration', fallback: true);
     _alarmVolume = _store.getDouble('set_volume', fallback: 0.5).clamp(0.0, 1.0);
+    _alarmRadiusKm = _store.getDouble('set_alarm_radius', fallback: 25).clamp(5, 100);
+    _audibilityKm = _store.getDouble('set_audibility_km', fallback: 15).clamp(3, 60);
+    _showAudibility = _store.getBool('set_audibility_show', fallback: true);
+    _snoozeSeconds = _store.getDouble('set_snooze_sec', fallback: 90).round();
     _keepScreenOn = _store.getBool('set_keep_screen', fallback: false);
     _compactFeed = _store.getBool('set_compact_feed', fallback: false);
     _displayName = _store.getString('set_name', fallback: 'Guest');
@@ -33,6 +37,10 @@ class SettingsController extends ChangeNotifier {
   bool _threatOnly = false;
   bool _vibration = true;
   double _alarmVolume = 0.5;
+  double _alarmRadiusKm = 25;
+  double _audibilityKm = 15;
+  bool _showAudibility = true;
+  int _snoozeSeconds = 90;
   bool _keepScreenOn = false;
   bool _compactFeed = false;
   String _displayName = 'Guest';
@@ -44,6 +52,10 @@ class SettingsController extends ChangeNotifier {
   bool get threatOnly => _threatOnly;
   bool get vibration => _vibration;
   double get alarmVolume => _alarmVolume;
+  double get alarmRadiusKm => _alarmRadiusKm;
+  double get audibilityKm => _audibilityKm;
+  bool get showAudibility => _showAudibility;
+  int get snoozeSeconds => _snoozeSeconds;
   bool get keepScreenOn => _keepScreenOn;
   bool get compactFeed => _compactFeed;
   String get displayName => _displayName;
@@ -67,6 +79,27 @@ class SettingsController extends ChangeNotifier {
   void setAlarmVolume(double v) {
     _alarmVolume = v.clamp(0.0, 1.0);
     _store.setDouble('set_volume', _alarmVolume);
+    notifyListeners();
+  }
+
+  void setAlarmRadiusKm(double v) {
+    _alarmRadiusKm = v.clamp(5, 100);
+    _store.setDouble('set_alarm_radius', _alarmRadiusKm);
+    notifyListeners();
+  }
+
+  void setAudibilityKm(double v) {
+    _audibilityKm = v.clamp(3, 60);
+    _store.setDouble('set_audibility_km', _audibilityKm);
+    notifyListeners();
+  }
+
+  void setShowAudibility(bool v) =>
+      _setBool('set_audibility_show', v, (x) => _showAudibility = x);
+
+  void setSnoozeSeconds(int v) {
+    _snoozeSeconds = v;
+    _store.setDouble('set_snooze_sec', v.toDouble());
     notifyListeners();
   }
   void setKeepScreenOn(bool v) =>

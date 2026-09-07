@@ -126,7 +126,7 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(18)),
                     ),
-                    child: const Text('Я в укритті — стоп звук (90 с)',
+                    child: const Text('Я в укритті — стоп звук',
                         style: TextStyle(
                             fontSize: 17, fontWeight: FontWeight.w800)),
                   ),

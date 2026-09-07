@@ -80,6 +80,16 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 14),
 
           _Group(
+            title: 'Тривога та карта',
+            children: const [
+              _AlarmRadiusSlider(),
+              _SnoozeChoice(),
+              _AudibilitySetting(),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          _Group(
             title: 'ШІ · AI',
             children: [
               if (s.keyFromSecrets)
@@ -237,6 +247,185 @@ class _VolumeSlider extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingSlider extends StatelessWidget {
+  const _SettingSlider({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.divisions,
+    required this.valueLabel,
+    required this.onChanged,
+  });
+  final IconData icon;
+  final String title;
+  final double value, min, max;
+  final int divisions;
+  final String valueLabel;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: AppColors.primary, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary)),
+                    const Spacer(),
+                    Text(valueLabel,
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.primaryDark)),
+                  ],
+                ),
+                Slider(
+                  value: value.clamp(min, max),
+                  min: min,
+                  max: max,
+                  divisions: divisions,
+                  activeColor: AppColors.primary,
+                  label: valueLabel,
+                  onChanged: onChanged,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlarmRadiusSlider extends StatelessWidget {
+  const _AlarmRadiusSlider();
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<SettingsController>();
+    return _SettingSlider(
+      icon: Icons.crisis_alert_rounded,
+      title: 'Радіус тривоги',
+      value: s.alarmRadiusKm,
+      min: 5,
+      max: 100,
+      divisions: 19,
+      valueLabel: '${s.alarmRadiusKm.round()} км',
+      onChanged: (v) => context.read<SettingsController>().setAlarmRadiusKm(v),
+    );
+  }
+}
+
+class _AudibilitySetting extends StatelessWidget {
+  const _AudibilitySetting();
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<SettingsController>();
+    return Column(
+      children: [
+        _ToggleRow(
+          icon: Icons.hearing_rounded,
+          title: 'Радіус чутності на карті',
+          subtitle: 'Коло навколо дому — що ти реально почуєш',
+          value: s.showAudibility,
+          onChanged: context.read<SettingsController>().setShowAudibility,
+        ),
+        if (s.showAudibility)
+          _SettingSlider(
+            icon: Icons.graphic_eq_rounded,
+            title: 'Радіус чутності',
+            value: s.audibilityKm,
+            min: 3,
+            max: 60,
+            divisions: 57,
+            valueLabel: '${s.audibilityKm.round()} км',
+            onChanged: (v) =>
+                context.read<SettingsController>().setAudibilityKm(v),
+          ),
+      ],
+    );
+  }
+}
+
+class _SnoozeChoice extends StatelessWidget {
+  const _SnoozeChoice();
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<SettingsController>();
+    const opts = [(30, '30 с'), (90, '1½ хв'), (300, '5 хв')];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.snooze_rounded,
+                color: AppColors.primary, size: 20),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Text('Пауза звуку',
+                style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+          ),
+          Wrap(
+            spacing: 6,
+            children: [
+              for (final o in opts)
+                ChoiceChip(
+                  label: Text(o.$2),
+                  selected: s.snoozeSeconds == o.$1,
+                  onSelected: (_) =>
+                      context.read<SettingsController>().setSnoozeSeconds(o.$1),
+                  selectedColor: AppColors.primary,
+                  labelStyle: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: s.snoozeSeconds == o.$1
+                        ? Colors.white
+                        : AppColors.textSecondary,
+                  ),
+                  backgroundColor: AppColors.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: const BorderSide(color: AppColors.border),
+                  ),
+                ),
+            ],
           ),
         ],
       ),

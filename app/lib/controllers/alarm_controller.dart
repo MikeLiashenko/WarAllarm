@@ -57,7 +57,8 @@ class AlarmController extends ChangeNotifier {
   /// automatically afterwards (safety: never silence forever), and immediately
   /// if the danger gets worse (a strike / overhead).
   void hush() {
-    _snoozeUntil = DateTime.now().add(const Duration(seconds: 90));
+    _snoozeUntil =
+        DateTime.now().add(Duration(seconds: _settings.snoozeSeconds));
     _svc.stopAll();
     _ringing = false;
     notifyListeners();
@@ -89,11 +90,19 @@ class AlarmController extends ChangeNotifier {
 
   void _reevaluate() {
     // Never alarm on sample/demo data — it must never be mistaken for real.
-    final worst = _map.isDemo ? null : _worstRisk();
+    final demo = _map.isDemo;
+    final worst = demo ? null : _worstRisk();
 
     final score = worst?.score ?? 0;
-    final newLevel =
-        score >= 55 ? 'alarm' : (score >= 35 ? 'warn' : 'calm');
+    final nearestKm = demo ? double.infinity : _nearestKm();
+    final radius = _settings.alarmRadiusKm;
+    // Alarm if the situation is severe OR a target is within the user's chosen
+    // alarm radius of a selected place.
+    final newLevel = (score >= 55 || nearestKm <= radius)
+        ? 'alarm'
+        : (score >= 35 || nearestKm <= radius * 1.7)
+            ? 'warn'
+            : 'calm';
 
     _title = switch (newLevel) {
       'alarm' => 'ТРИВОГА',
@@ -139,6 +148,18 @@ class AlarmController extends ChangeNotifier {
       _level = newLevel;
     }
     notifyListeners();
+  }
+
+  /// Nearest target distance (km) to any selected place, or infinity.
+  double _nearestKm() {
+    var best = double.infinity;
+    for (final pl in _map.selectedPlaces) {
+      for (final t in placeThreats(pl, _map.targets)) {
+        final d = t.pdist ?? double.infinity;
+        if (d < best) best = d;
+      }
+    }
+    return best;
   }
 
   /// Worst per-place risk across the currently selected places.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/map_data_controller.dart';
+import '../controllers/settings_controller.dart';
 import '../data/ukraine_geo.dart';
 import '../models/map_target.dart';
 import '../theme/app_colors.dart';
@@ -15,6 +16,7 @@ class MapScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final map = context.watch<MapDataController>();
+    final settings = context.watch<SettingsController>();
 
     return PageBody(
       scrollable: false,
@@ -58,6 +60,8 @@ class MapScreen extends StatelessWidget {
                     targets: map.targets,
                     home: map.home,
                     homeName: map.homeName,
+                    audibilityKm: settings.audibilityKm,
+                    showAudibility: settings.showAudibility,
                   ),
                 ),
                 if (map.isDemo)

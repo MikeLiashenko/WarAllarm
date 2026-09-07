@@ -22,11 +22,15 @@ class UkraineMap extends StatefulWidget {
     required this.targets,
     required this.home,
     required this.homeName,
+    this.audibilityKm = 0,
+    this.showAudibility = false,
   });
 
   final List<MapTarget> targets;
   final ({double lat, double lon}) home;
   final String homeName;
+  final double audibilityKm;
+  final bool showAudibility;
 
   @override
   State<UkraineMap> createState() => _UkraineMapState();
@@ -213,6 +217,8 @@ class _UkraineMapState extends State<UkraineMap>
                     nowMs: DateTime.now().millisecondsSinceEpoch,
                     textDir: Directionality.of(context),
                     oblasts: _oblasts,
+                    audibilityKm:
+                        widget.showAudibility ? widget.audibilityKm : 0,
                   ),
                 ),
               ),
@@ -306,6 +312,7 @@ class _MapPainter extends CustomPainter {
     required this.nowMs,
     required this.textDir,
     required this.oblasts,
+    required this.audibilityKm,
   });
 
   final Path outline;
@@ -316,6 +323,7 @@ class _MapPainter extends CustomPainter {
   final int nowMs;
   final TextDirection textDir;
   final List<_Oblast> oblasts;
+  final double audibilityKm;
 
   Offset _toScreen(Offset base) => Offset(tx + scale * base.dx, ty + scale * base.dy);
 
@@ -445,6 +453,30 @@ class _MapPainter extends CustomPainter {
       final fs = c.tier == 0 ? 10.5 : c.tier == 1 ? 9.0 : 7.5;
       _text(canvas, c.name, p + Offset(0, -(r + 3)),
           fs, const Color(0xE60F2035), center: true, stroke: true);
+    }
+
+    // --- Audibility radius around home ("what we can hear") ---
+    if (audibilityKm > 0) {
+      final hpc = _toScreen(fit.project(home.lon, home.lat));
+      final edge =
+          _toScreen(fit.project(home.lon, home.lat + audibilityKm / 111));
+      final rPx = (hpc - edge).distance;
+      canvas.drawCircle(
+          hpc,
+          rPx,
+          Paint()
+            ..style = PaintingStyle.fill
+            ..color = const Color(0xFF3B9EFF).withValues(alpha: 0.08));
+      canvas.drawCircle(
+          hpc,
+          rPx,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.4
+            ..color = const Color(0xFF3B9EFF).withValues(alpha: 0.55));
+      _text(canvas, '~${audibilityKm.round()} км чутно',
+          hpc + Offset(0, -rPx - 5), 9.5, const Color(0xCC1E7BE0),
+          center: true, stroke: true);
     }
 
     // --- Home marker (pulsing) ---
