@@ -1,9 +1,12 @@
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../data/ukraine_geo.dart';
+import '../data/ukraine_oblasts.dart';
 import '../data/ukraine_path.dart';
 import '../models/map_target.dart';
 import '../utils/svg_path.dart';
@@ -34,6 +37,7 @@ class _UkraineMapState extends State<UkraineMap>
   late final Path _outline; // world-space Ukraine outline
   late final Rect _fb; // world-space bbox
   late final Map<String, List<_FigPathPart>> _figs;
+  late final List<_Oblast> _oblasts;
   late final AnimationController _anim;
 
   double _scale = 1;
@@ -52,6 +56,7 @@ class _UkraineMapState extends State<UkraineMap>
     _outline = _buildOutline();
     _fb = _outline.getBounds();
     _figs = _buildFigs();
+    _oblasts = _parseOblasts();
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
@@ -65,6 +70,22 @@ class _UkraineMapState extends State<UkraineMap>
       ..translateByDouble(0.0, 1024.0, 0.0, 1.0)
       ..scaleByDouble(0.1, -0.1, 1.0, 1.0);
     return raw.transform(m.storage);
+  }
+
+  List<_Oblast> _parseOblasts() {
+    final data = jsonDecode(kOblastsJson) as List;
+    final out = <_Oblast>[];
+    for (final o in data) {
+      final rings = <List<Offset>>[];
+      for (final ring in (o['r'] as List)) {
+        rings.add([
+          for (final p in (ring as List))
+            Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()),
+        ]);
+      }
+      out.add(_Oblast((o['n'] ?? '').toString(), rings));
+    }
+    return out;
   }
 
   Map<String, List<_FigPathPart>> _buildFigs() {
@@ -156,7 +177,14 @@ class _UkraineMapState extends State<UkraineMap>
         }
         return Stack(
           children: [
-            GestureDetector(
+            Listener(
+              onPointerSignal: (s) {
+                if (s is PointerScrollEvent) {
+                  final f = s.scrollDelta.dy < 0 ? 1.15 : 1 / 1.15;
+                  _zoomAt(s.localPosition, f);
+                }
+              },
+              child: GestureDetector(
               onScaleStart: (d) {
                 _startScale = _scale;
                 _startT = Offset(_tx, _ty);
@@ -184,9 +212,11 @@ class _UkraineMapState extends State<UkraineMap>
                     pulse: _anim.value,
                     nowMs: DateTime.now().millisecondsSinceEpoch,
                     textDir: Directionality.of(context),
+                    oblasts: _oblasts,
                   ),
                 ),
               ),
+            ),
             ),
             Positioned(
               right: 12,
@@ -245,6 +275,12 @@ class _FigPathPart {
   _FigPathPart(this.path, this.overrideColor, this.body);
 }
 
+class _Oblast {
+  final String name;
+  final List<List<Offset>> rings; // [outer, holes...] in (lon,lat)
+  _Oblast(this.name, this.rings);
+}
+
 class _Fit {
   final double s, pw, ph, oX, oY;
   final Rect fb;
@@ -269,6 +305,7 @@ class _MapPainter extends CustomPainter {
     required this.pulse,
     required this.nowMs,
     required this.textDir,
+    required this.oblasts,
   });
 
   final Path outline;
@@ -278,8 +315,22 @@ class _MapPainter extends CustomPainter {
   final double scale, tx, ty, pulse;
   final int nowMs;
   final TextDirection textDir;
+  final List<_Oblast> oblasts;
 
   Offset _toScreen(Offset base) => Offset(tx + scale * base.dx, ty + scale * base.dy);
+
+  // Ray-casting point-in-polygon on (lon,lat) for the oblast outer ring.
+  static bool _pip(List<Offset> poly, double lon, double lat) {
+    var inside = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      final xi = poly[i].dx, yi = poly[i].dy, xj = poly[j].dx, yj = poly[j].dy;
+      if (((yi > lat) != (yj > lat)) &&
+          (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
 
   static Offset _moveKm(double lon, double lat, double brgDeg, double dkm) {
     const rad = math.pi / 180;
@@ -345,6 +396,37 @@ class _MapPainter extends CustomPainter {
         ..color = const Color(0xFF3B9EFF),
     );
     canvas.restore();
+
+    // --- Oblast shading: red where targets are (more targets → deeper red) ---
+    if (targets.isNotEmpty) {
+      for (final ob in oblasts) {
+        var cnt = 0;
+        for (final t in targets) {
+          if (_pip(ob.rings.first, t.lon, t.lat)) cnt++;
+        }
+        if (cnt == 0) continue;
+        final path = Path()..fillType = PathFillType.evenOdd;
+        for (final ring in ob.rings) {
+          for (var i = 0; i < ring.length; i++) {
+            final s = _toScreen(fit.project(ring[i].dx, ring[i].dy));
+            i == 0 ? path.moveTo(s.dx, s.dy) : path.lineTo(s.dx, s.dy);
+          }
+          path.close();
+        }
+        final alpha = (0.14 + 0.07 * math.min(cnt, 4)).clamp(0.0, 0.42);
+        canvas.drawPath(
+            path,
+            Paint()
+              ..style = PaintingStyle.fill
+              ..color = const Color(0xFFFF3B30).withValues(alpha: alpha));
+        canvas.drawPath(
+            path,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.2
+              ..color = const Color(0xFFFF3B30).withValues(alpha: 0.55));
+      }
+    }
 
     // --- Cities (tiered by zoom) ---
     for (final c in kCities) {
