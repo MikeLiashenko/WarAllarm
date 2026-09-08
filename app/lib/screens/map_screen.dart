@@ -29,13 +29,30 @@ Future<void> _shareMap(BuildContext context) async {
     final image = await bnd.toImage(pixelRatio: 2.5);
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
     if (data == null) return;
-    final dir = await getTemporaryDirectory();
-    final f = File('${dir.path}/waralarm_map.png');
-    await f.writeAsBytes(data.buffer.asUint8List(), flush: true);
-    await Share.shareXFiles([XFile(f.path)], text: 'WarAlarm — карта загроз');
-  } catch (_) {
+    final bytes = data.buffer.asUint8List();
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+
+    if (Platform.isAndroid || Platform.isIOS) {
+      // Phone: open the share sheet (Telegram, save to gallery, …).
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/waralarm_map_$stamp.png');
+      await f.writeAsBytes(bytes, flush: true);
+      await Share.shareXFiles([XFile(f.path)], text: 'WarAlarm — карта загроз');
+    } else {
+      // Desktop: sharing files isn't supported — save to Downloads instead.
+      Directory? dir;
+      try {
+        dir = await getDownloadsDirectory();
+      } catch (_) {}
+      dir ??= await getApplicationDocumentsDirectory();
+      final f = File('${dir.path}/waralarm_map_$stamp.png');
+      await f.writeAsBytes(bytes, flush: true);
+      messenger.showSnackBar(
+          SnackBar(content: Text('Скрін збережено: ${f.path}')));
+    }
+  } catch (e) {
     messenger.showSnackBar(
-        const SnackBar(content: Text('Не вдалося зробити скрін карти')));
+        SnackBar(content: Text('Не вдалося зробити скрін: $e')));
   }
 }
 
