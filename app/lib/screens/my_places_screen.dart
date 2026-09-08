@@ -3,11 +3,27 @@ import 'package:provider/provider.dart';
 
 import '../controllers/places_controller.dart';
 import '../data/places_gazetteer.dart';
+import '../data/ukraine_geo.dart';
 import '../models/saved_place.dart';
 import '../theme/app_colors.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/section_header.dart';
 import 'home_shell.dart';
+
+/// Everything searchable when adding a place: all ~5300 cities/towns/villages
+/// (kCities, sorted big→small) plus our curated Kharkiv/Kyiv neighborhoods
+/// (kGazetteer), de-duplicated by name.
+final List<GeoPlace> _searchPlaces = () {
+  final out = <GeoPlace>[];
+  final seen = <String>{};
+  for (final c in kCities) {
+    if (seen.add(c.name.toLowerCase())) out.add(GeoPlace(c.name, c.lat, c.lon));
+  }
+  for (final g in kGazetteer) {
+    if (seen.add(g.name.toLowerCase())) out.add(g);
+  }
+  return out;
+}();
 
 class MyPlacesScreen extends StatelessWidget {
   const MyPlacesScreen({super.key});
@@ -111,20 +127,21 @@ class _AddPlaceDialogState extends State<_AddPlaceDialog> {
   List<GeoPlace> get _matches {
     final q = _q.trim().toLowerCase();
     if (q.isEmpty) {
-      // A relevant starting set: our home area first.
-      return kGazetteer.take(12).toList();
+      // Biggest cities as a starting set.
+      return _searchPlaces.take(12).toList();
     }
     final starts = <GeoPlace>[];
     final contains = <GeoPlace>[];
-    for (final c in kGazetteer) {
+    for (final c in _searchPlaces) {
       final n = c.name.toLowerCase();
       if (n.startsWith(q)) {
         starts.add(c);
       } else if (n.contains(q)) {
         contains.add(c);
       }
+      if (starts.length >= 30) break; // enough prefix matches
     }
-    return [...starts, ...contains].take(12).toList();
+    return [...starts, ...contains].take(20).toList();
   }
 
   void _pick(GeoPlace c) {
