@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 
 import '../data/ukraine_geo.dart';
 import '../data/ukraine_oblasts.dart';
@@ -49,7 +48,6 @@ class _UkraineMapState extends State<UkraineMap>
   late final Map<String, List<_FigPathPart>> _figs;
   late final List<_Oblast> _oblasts;
   late final AnimationController _anim;
-  ui.Image? _mapLight, _mapDark; // real map textures, clipped to the contour
 
   double _scale = 1;
   double _tx = 0, _ty = 0;
@@ -72,27 +70,6 @@ class _UkraineMapState extends State<UkraineMap>
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     )..repeat();
-    _loadTextures();
-  }
-
-  Future<void> _loadTextures() async {
-    Future<ui.Image?> load(String a) async {
-      try {
-        final d = await rootBundle.load(a);
-        final codec =
-            await ui.instantiateImageCodec(d.buffer.asUint8List());
-        return (await codec.getNextFrame()).image;
-      } catch (_) {
-        return null;
-      }
-    }
-
-    final l = await load('assets/ukraine_light.png');
-    final d = await load('assets/ukraine_dark.png');
-    if (mounted) setState(() {
-      _mapLight = l;
-      _mapDark = d;
-    });
   }
 
   Path _buildOutline() {
@@ -248,7 +225,6 @@ class _UkraineMapState extends State<UkraineMap>
                     audibilityKm:
                         widget.showAudibility ? widget.audibilityKm : 0,
                     oblastLevels: widget.oblastLevels,
-                    mapImage: AppColors.isDark ? _mapDark : _mapLight,
                   ),
                 ),
               ),
@@ -344,7 +320,6 @@ class _MapPainter extends CustomPainter {
     required this.oblasts,
     required this.audibilityKm,
     required this.oblastLevels,
-    required this.mapImage,
   });
 
   final Path outline;
@@ -357,7 +332,6 @@ class _MapPainter extends CustomPainter {
   final List<_Oblast> oblasts;
   final double audibilityKm;
   final Map<String, String> oblastLevels;
-  final ui.Image? mapImage;
 
   Offset _toScreen(Offset base) => Offset(tx + scale * base.dx, ty + scale * base.dy);
 
@@ -405,41 +379,17 @@ class _MapPainter extends CustomPainter {
     final a = scale * fit.s;
     final txO = tx + scale * fit.oX - a * fit.fb.left;
     final tyO = ty + scale * fit.oY - a * fit.fb.top;
-    final worldAffine = (Matrix4.identity()
+    canvas.save();
+    canvas.transform((Matrix4.identity()
           ..translateByDouble(txO, tyO, 0.0, 1.0)
           ..scaleByDouble(a, a, 1.0, 1.0))
-        .storage;
-    // Land fill (fallback / shows until the texture decodes).
-    canvas.save();
-    canvas.transform(worldAffine);
+        .storage);
     canvas.drawPath(
       outline,
       Paint()
         ..style = PaintingStyle.fill
         ..color = AppColors.mapLand,
     );
-    canvas.restore();
-
-    // Real map texture, clipped to the Ukraine contour (the "mask").
-    if (mapImage != null) {
-      final screenOutline = outline.transform(worldAffine);
-      final tl = _toScreen(fit.project(22.14, 52.38));
-      final br = _toScreen(fit.project(40.23, 44.39));
-      canvas.save();
-      canvas.clipPath(screenOutline);
-      canvas.drawImageRect(
-        mapImage!,
-        Rect.fromLTWH(
-            0, 0, mapImage!.width.toDouble(), mapImage!.height.toDouble()),
-        Rect.fromLTRB(tl.dx, tl.dy, br.dx, br.dy),
-        Paint()..filterQuality = FilterQuality.medium,
-      );
-      canvas.restore();
-    }
-
-    // Contour border on top of the texture.
-    canvas.save();
-    canvas.transform(worldAffine);
     canvas.drawPath(
       outline,
       Paint()
@@ -478,24 +428,69 @@ class _MapPainter extends CustomPainter {
             ..color = base.withValues(alpha: 0.6));
     }
 
-    // --- Cities (only when there's no real map texture — it has its own) ---
+    // --- Cities / towns / villages (tiered by zoom, thinned + de-cluttered) ---
+    // kCities is sorted big→small, so important places claim dots/labels first.
+    final placed = <Rect>[]; // label boxes already drawn (collision avoidance)
+    final dotCell = <int, int>{}; // per-grid-cell village dot cap (even density)
     for (final c in kCities) {
-      if (mapImage != null) break;
       final show = c.tier == 0 ||
           (c.tier == 1 && scale >= 1.7) ||
-          (c.tier == 2 && scale >= 2.8);
+          (c.tier == 2 && scale >= 2.8) ||
+          (c.tier == 3 && scale >= 4.2);
       if (!show) continue;
       final p = _toScreen(fit.project(c.lon, c.lat));
-      final r = c.tier == 0 ? 2.4 : c.tier == 1 ? 1.9 : 1.4;
-      canvas.drawCircle(p, r, Paint()..color = AppColors.primary);
+      if (p.dx < -30 || p.dx > size.width + 30 ||
+          p.dy < -20 || p.dy > size.height + 20) continue;
+      final village = c.tier == 3;
+
+      // Even out village dot density: cap per ~46px screen cell.
+      if (village) {
+        final cell = (p.dx ~/ 46) * 100000 + (p.dy ~/ 46);
+        final n = dotCell[cell] ?? 0;
+        if (n >= 2) continue;
+        dotCell[cell] = n + 1;
+      }
+
+      final r = c.tier == 0
+          ? 2.4
+          : c.tier == 1
+              ? 1.9
+              : c.tier == 2
+                  ? 1.4
+                  : 1.0;
+      canvas.drawCircle(
+          p, r, Paint()..color = village ? AppColors.textMuted : AppColors.primary);
       canvas.drawCircle(p, r,
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1
             ..color = AppColors.mapLand);
-      final fs = c.tier == 0 ? 10.5 : c.tier == 1 ? 9.0 : 7.5;
+
+      if (village && scale < 5.2) continue; // village labels only when close
+      final fs = c.tier == 0
+          ? 10.5
+          : c.tier == 1
+              ? 9.0
+              : c.tier == 2
+                  ? 7.5
+                  : 6.5;
+      // Skip a label if it would overlap one already drawn.
+      final w = c.name.length * fs * 0.6 + 4;
+      final h = fs * 1.2;
+      final box = Rect.fromCenter(
+          center: Offset(p.dx, p.dy - (r + 3) - h / 2), width: w, height: h);
+      var clash = false;
+      for (final o in placed) {
+        if (box.overlaps(o)) {
+          clash = true;
+          break;
+        }
+      }
+      if (clash) continue;
+      placed.add(box.inflate(1));
       _text(canvas, c.name, p + Offset(0, -(r + 3)),
-          fs, AppColors.textPrimary, center: true, stroke: true);
+          fs, village ? AppColors.textSecondary : AppColors.textPrimary,
+          center: true, stroke: true);
     }
 
     // --- Audibility radius around home ("what we can hear") ---
