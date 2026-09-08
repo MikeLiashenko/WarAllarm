@@ -59,10 +59,25 @@ class OfficialAlertsService {
         if (v is! Map) return;
         final en = _uaToEn[k.toString()];
         if (en == null) return;
-        if (v['enabled'] != true) return;
         final lvl = (v['alert_level'] ?? '').toString();
-        // enabled + explicitly yellow -> yellow; otherwise treat as red.
-        out[en] = lvl == 'yellow' ? 'yellow' : 'red';
+
+        // Count district (hromada) alerts inside this oblast.
+        var districtsOn = 0;
+        final ds = v['districts'];
+        if (ds is Map) {
+          ds.forEach((_, dv) {
+            if (dv is Map && dv['enabled'] == true) districtsOn++;
+          });
+        }
+
+        if (v['enabled'] == true) {
+          // Oblast-wide alarm: red, unless the feed marks it yellow (e.g. Kyiv).
+          out[en] = lvl == 'yellow' ? 'yellow' : 'red';
+        } else if (districtsOn > 0) {
+          // Only some districts under alarm → partial → yellow (matches the
+          // official map, which shows these oblasts orange/yellow).
+          out[en] = 'yellow';
+        }
       });
     }
     return out;
