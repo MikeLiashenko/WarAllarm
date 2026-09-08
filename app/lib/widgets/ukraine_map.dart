@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 import '../data/ukraine_geo.dart';
 import '../data/ukraine_oblasts.dart';
@@ -48,6 +49,7 @@ class _UkraineMapState extends State<UkraineMap>
   late final Map<String, List<_FigPathPart>> _figs;
   late final List<_Oblast> _oblasts;
   late final AnimationController _anim;
+  ui.Image? _mapLight, _mapDark; // real map textures, clipped to the contour
 
   double _scale = 1;
   double _tx = 0, _ty = 0;
@@ -70,6 +72,27 @@ class _UkraineMapState extends State<UkraineMap>
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     )..repeat();
+    _loadTextures();
+  }
+
+  Future<void> _loadTextures() async {
+    Future<ui.Image?> load(String a) async {
+      try {
+        final d = await rootBundle.load(a);
+        final codec =
+            await ui.instantiateImageCodec(d.buffer.asUint8List());
+        return (await codec.getNextFrame()).image;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final l = await load('assets/ukraine_light.png');
+    final d = await load('assets/ukraine_dark.png');
+    if (mounted) setState(() {
+      _mapLight = l;
+      _mapDark = d;
+    });
   }
 
   Path _buildOutline() {
@@ -225,6 +248,7 @@ class _UkraineMapState extends State<UkraineMap>
                     audibilityKm:
                         widget.showAudibility ? widget.audibilityKm : 0,
                     oblastLevels: widget.oblastLevels,
+                    mapImage: AppColors.isDark ? _mapDark : _mapLight,
                   ),
                 ),
               ),
@@ -320,6 +344,7 @@ class _MapPainter extends CustomPainter {
     required this.oblasts,
     required this.audibilityKm,
     required this.oblastLevels,
+    required this.mapImage,
   });
 
   final Path outline;
@@ -332,6 +357,7 @@ class _MapPainter extends CustomPainter {
   final List<_Oblast> oblasts;
   final double audibilityKm;
   final Map<String, String> oblastLevels;
+  final ui.Image? mapImage;
 
   Offset _toScreen(Offset base) => Offset(tx + scale * base.dx, ty + scale * base.dy);
 
@@ -379,17 +405,41 @@ class _MapPainter extends CustomPainter {
     final a = scale * fit.s;
     final txO = tx + scale * fit.oX - a * fit.fb.left;
     final tyO = ty + scale * fit.oY - a * fit.fb.top;
-    canvas.save();
-    canvas.transform((Matrix4.identity()
+    final worldAffine = (Matrix4.identity()
           ..translateByDouble(txO, tyO, 0.0, 1.0)
           ..scaleByDouble(a, a, 1.0, 1.0))
-        .storage);
+        .storage;
+    // Land fill (fallback / shows until the texture decodes).
+    canvas.save();
+    canvas.transform(worldAffine);
     canvas.drawPath(
       outline,
       Paint()
         ..style = PaintingStyle.fill
-        ..color = AppColors.mapLand, // land on the sea-tinted panel
+        ..color = AppColors.mapLand,
     );
+    canvas.restore();
+
+    // Real map texture, clipped to the Ukraine contour (the "mask").
+    if (mapImage != null) {
+      final screenOutline = outline.transform(worldAffine);
+      final tl = _toScreen(fit.project(22.14, 52.38));
+      final br = _toScreen(fit.project(40.23, 44.39));
+      canvas.save();
+      canvas.clipPath(screenOutline);
+      canvas.drawImageRect(
+        mapImage!,
+        Rect.fromLTWH(
+            0, 0, mapImage!.width.toDouble(), mapImage!.height.toDouble()),
+        Rect.fromLTRB(tl.dx, tl.dy, br.dx, br.dy),
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+      canvas.restore();
+    }
+
+    // Contour border on top of the texture.
+    canvas.save();
+    canvas.transform(worldAffine);
     canvas.drawPath(
       outline,
       Paint()
@@ -428,8 +478,9 @@ class _MapPainter extends CustomPainter {
             ..color = base.withValues(alpha: 0.6));
     }
 
-    // --- Cities (tiered by zoom) ---
+    // --- Cities (only when there's no real map texture — it has its own) ---
     for (final c in kCities) {
+      if (mapImage != null) break;
       final show = c.tier == 0 ||
           (c.tier == 1 && scale >= 1.7) ||
           (c.tier == 2 && scale >= 2.8);
