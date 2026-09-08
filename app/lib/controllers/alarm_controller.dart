@@ -87,8 +87,6 @@ class AlarmController extends ChangeNotifier {
 
   // --- core logic -------------------------------------------------------------
 
-  DateTime _lastPing = DateTime.fromMillisecondsSinceEpoch(0);
-
   void _reevaluate() {
     // Never alarm on sample/demo data — it must never be mistaken for real.
     final demo = _map.isDemo;
@@ -135,14 +133,7 @@ class AlarmController extends ChangeNotifier {
         _ringing = false;
         _svc.stopAll();
       }
-      // Gentle "approaching" pulse while a threat is near but not yet an alarm.
-      if (newLevel == 'warn' && sound && !snoozing) {
-        final now = DateTime.now();
-        if (now.difference(_lastPing) > const Duration(seconds: 6)) {
-          _lastPing = now;
-          _svc.ping(sound: true, cat: worst?.top?.cat);
-        }
-      }
+      // No "approaching" pings — only the full siren on a real alarm.
     }
 
     // Danger gone → drop any lingering snooze so the next threat rings clean.
