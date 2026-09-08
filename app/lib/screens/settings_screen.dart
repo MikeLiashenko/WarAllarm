@@ -447,8 +447,8 @@ class _TestSirenButton extends StatelessWidget {
             context.read<AlarmController>().testSiren();
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Тест сирени · 4 секунди'),
-                duration: Duration(seconds: 4),
+                content: Text('Тест сирени · 5 секунд'),
+                duration: Duration(seconds: 5),
               ),
             );
           },

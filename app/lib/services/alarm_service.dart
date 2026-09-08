@@ -16,6 +16,11 @@ class AlarmService {
   // Alarm loudness, 0..1 (relative to the device volume). User-adjustable.
   double _volume = 0.5;
 
+  // Which threat's siren/ping to play (per-kind, ported from the Reader).
+  static const _kinds = {'shahed', 'missile', 'balist', 'kab', 'avia', 'other'};
+  static String _norm(String? cat) =>
+      _kinds.contains(cat) ? cat! : 'other';
+
   bool _sirenOn = false;
   bool _vibrating = false;
   bool _wakelock = false;
@@ -37,10 +42,12 @@ class AlarmService {
   }
 
   /// Start the continuous air-raid siren + vibration + keep the screen awake.
+  /// [cat] picks the per-kind wail (shahed/missile/balist/kab/avia/other).
   Future<void> startSiren({
     required bool sound,
     required bool vibrate,
     double? volume,
+    String? cat,
   }) async {
     if (volume != null) _volume = volume.clamp(0.0, 1.0);
     await _keepAwake(true);
@@ -49,7 +56,8 @@ class AlarmService {
       try {
         await _siren.setVolume(_volume);
         await _siren.setReleaseMode(ReleaseMode.loop);
-        await _siren.play(AssetSource('siren.wav'), volume: _volume);
+        await _siren.play(AssetSource('siren_${_norm(cat)}.wav'),
+            volume: _volume);
       } catch (e) {
         _sirenOn = false;
         debugPrint('siren play failed: $e');
@@ -59,11 +67,12 @@ class AlarmService {
   }
 
   /// One short "approaching" blip (used to pulse while a threat is on the way).
-  Future<void> ping({required bool sound}) async {
+  Future<void> ping({required bool sound, String? cat}) async {
     if (!sound || _sirenOn) return; // no pips over a full siren
     try {
       await _ping.stop();
-      await _ping.play(AssetSource('ping.wav'), volume: (_volume * 0.8).clamp(0.0, 1.0));
+      await _ping.play(AssetSource('ping_${_norm(cat)}.wav'),
+          volume: (_volume * 0.8).clamp(0.0, 1.0));
     } catch (_) {}
   }
 

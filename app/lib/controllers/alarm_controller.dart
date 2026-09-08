@@ -79,8 +79,9 @@ class AlarmController extends ChangeNotifier {
     await _svc.startSiren(
         sound: true,
         vibrate: _settings.vibration,
-        volume: _settings.alarmVolume);
-    await Future<void>.delayed(const Duration(seconds: 4));
+        volume: _settings.alarmVolume,
+        cat: 'shahed');
+    await Future<void>.delayed(const Duration(seconds: 5));
     if (!_ringing) await _svc.stopAll();
   }
 
@@ -124,7 +125,10 @@ class AlarmController extends ChangeNotifier {
       if (!_ringing) {
         _ringing = true;
         _svc.startSiren(
-            sound: sound, vibrate: vibrate, volume: _settings.alarmVolume);
+            sound: sound,
+            vibrate: vibrate,
+            volume: _settings.alarmVolume,
+            cat: worst?.top?.cat);
       }
     } else {
       if (_ringing) {
@@ -136,7 +140,7 @@ class AlarmController extends ChangeNotifier {
         final now = DateTime.now();
         if (now.difference(_lastPing) > const Duration(seconds: 6)) {
           _lastPing = now;
-          _svc.ping(sound: true);
+          _svc.ping(sound: true, cat: worst?.top?.cat);
         }
       }
     }
