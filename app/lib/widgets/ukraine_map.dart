@@ -25,6 +25,7 @@ class UkraineMap extends StatefulWidget {
     required this.homeName,
     this.audibilityKm = 0,
     this.showAudibility = false,
+    this.oblastLevels = const {},
   });
 
   final List<MapTarget> targets;
@@ -32,6 +33,9 @@ class UkraineMap extends StatefulWidget {
   final String homeName;
   final double audibilityKm;
   final bool showAudibility;
+
+  /// Official air-raid status: oblast polygon name -> 'red' | 'yellow'.
+  final Map<String, String> oblastLevels;
 
   @override
   State<UkraineMap> createState() => _UkraineMapState();
@@ -220,6 +224,7 @@ class _UkraineMapState extends State<UkraineMap>
                     oblasts: _oblasts,
                     audibilityKm:
                         widget.showAudibility ? widget.audibilityKm : 0,
+                    oblastLevels: widget.oblastLevels,
                   ),
                 ),
               ),
@@ -314,6 +319,7 @@ class _MapPainter extends CustomPainter {
     required this.textDir,
     required this.oblasts,
     required this.audibilityKm,
+    required this.oblastLevels,
   });
 
   final Path outline;
@@ -325,21 +331,9 @@ class _MapPainter extends CustomPainter {
   final TextDirection textDir;
   final List<_Oblast> oblasts;
   final double audibilityKm;
+  final Map<String, String> oblastLevels;
 
   Offset _toScreen(Offset base) => Offset(tx + scale * base.dx, ty + scale * base.dy);
-
-  // Ray-casting point-in-polygon on (lon,lat) for the oblast outer ring.
-  static bool _pip(List<Offset> poly, double lon, double lat) {
-    var inside = false;
-    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      final xi = poly[i].dx, yi = poly[i].dy, xj = poly[j].dx, yj = poly[j].dy;
-      if (((yi > lat) != (yj > lat)) &&
-          (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
-        inside = !inside;
-      }
-    }
-    return inside;
-  }
 
   static Offset _moveKm(double lon, double lat, double brgDeg, double dkm) {
     const rad = math.pi / 180;
@@ -406,35 +400,32 @@ class _MapPainter extends CustomPainter {
     );
     canvas.restore();
 
-    // --- Oblast shading: red where targets are (more targets → deeper red) ---
-    if (targets.isNotEmpty) {
-      for (final ob in oblasts) {
-        var cnt = 0;
-        for (final t in targets) {
-          if (_pip(ob.rings.first, t.lon, t.lat)) cnt++;
+    // --- Oblast shading by OFFICIAL air-raid status (🔴 active / 🟡 warning) ---
+    for (final ob in oblasts) {
+      final lvl = oblastLevels[ob.name];
+      if (lvl == null) continue;
+      final base = lvl == 'red'
+          ? const Color(0xFFFF3B30)
+          : const Color(0xFFF4B740);
+      final path = Path()..fillType = PathFillType.evenOdd;
+      for (final ring in ob.rings) {
+        for (var i = 0; i < ring.length; i++) {
+          final s = _toScreen(fit.project(ring[i].dx, ring[i].dy));
+          i == 0 ? path.moveTo(s.dx, s.dy) : path.lineTo(s.dx, s.dy);
         }
-        if (cnt == 0) continue;
-        final path = Path()..fillType = PathFillType.evenOdd;
-        for (final ring in ob.rings) {
-          for (var i = 0; i < ring.length; i++) {
-            final s = _toScreen(fit.project(ring[i].dx, ring[i].dy));
-            i == 0 ? path.moveTo(s.dx, s.dy) : path.lineTo(s.dx, s.dy);
-          }
-          path.close();
-        }
-        final alpha = (0.14 + 0.07 * math.min(cnt, 4)).clamp(0.0, 0.42);
-        canvas.drawPath(
-            path,
-            Paint()
-              ..style = PaintingStyle.fill
-              ..color = const Color(0xFFFF3B30).withValues(alpha: alpha));
-        canvas.drawPath(
-            path,
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 1.2
-              ..color = const Color(0xFFFF3B30).withValues(alpha: 0.55));
+        path.close();
       }
+      canvas.drawPath(
+          path,
+          Paint()
+            ..style = PaintingStyle.fill
+            ..color = base.withValues(alpha: lvl == 'red' ? 0.30 : 0.24));
+      canvas.drawPath(
+          path,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.2
+            ..color = base.withValues(alpha: 0.6));
     }
 
     // --- Cities (tiered by zoom) ---

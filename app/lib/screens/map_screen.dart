@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/alerts_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/settings_controller.dart';
 import '../data/ukraine_geo.dart';
@@ -17,6 +18,7 @@ class MapScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final map = context.watch<MapDataController>();
     final settings = context.watch<SettingsController>();
+    final alerts = context.watch<AlertsController>();
 
     return PageBody(
       scrollable: false,
@@ -25,11 +27,9 @@ class MapScreen extends StatelessWidget {
         children: [
           SectionHeader(
             title: 'Карта загроз',
-            subtitle: map.isDemo
-                ? 'Приклад даних · монітор не підключено'
-                : map.live
-                    ? 'Живі цілі, курс та ІІ-прогноз · ${map.homeName}'
-                    : 'Монітор не підключено · немає даних',
+            subtitle: alerts.ok
+                ? 'Офіційні тривоги: 🔴 ${alerts.redCount} · 🟡 ${alerts.yellowCount} обл.'
+                : 'Офіційні тривоги — завантажую…',
             icon: Icons.map_rounded,
             trailing: _liveBadge(map),
           ),
@@ -62,6 +62,7 @@ class MapScreen extends StatelessWidget {
                     homeName: map.homeName,
                     audibilityKm: settings.audibilityKm,
                     showAudibility: settings.showAudibility,
+                    oblastLevels: alerts.levels,
                   ),
                 ),
                 if (map.isDemo)
