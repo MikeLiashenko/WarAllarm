@@ -1,5 +1,11 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../controllers/alerts_controller.dart';
 import '../controllers/map_data_controller.dart';
@@ -10,6 +16,28 @@ import '../theme/app_colors.dart';
 import '../widgets/section_header.dart';
 import '../widgets/ukraine_map.dart';
 import 'home_shell.dart';
+
+/// Key on the map container so we can capture it to a PNG for sharing.
+final GlobalKey _mapBoundaryKey = GlobalKey();
+
+Future<void> _shareMap(BuildContext context) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final bnd = _mapBoundaryKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (bnd == null) return;
+    final image = await bnd.toImage(pixelRatio: 2.5);
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (data == null) return;
+    final dir = await getTemporaryDirectory();
+    final f = File('${dir.path}/waralarm_map.png');
+    await f.writeAsBytes(data.buffer.asUint8List(), flush: true);
+    await Share.shareXFiles([XFile(f.path)], text: 'WarAlarm — карта загроз');
+  } catch (_) {
+    messenger.showSnackBar(
+        const SnackBar(content: Text('Не вдалося зробити скрін карти')));
+  }
+}
 
 class MapScreen extends StatelessWidget {
   const MapScreen({super.key});
@@ -37,32 +65,35 @@ class MapScreen extends StatelessWidget {
           Expanded(
             child: Stack(
               children: [
-                Container(
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: AppColors.border),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [AppColors.mapSea, AppColors.background],
-                    ),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x14123A6B),
-                        blurRadius: 30,
-                        spreadRadius: -6,
-                        offset: Offset(0, 14),
+                RepaintBoundary(
+                  key: _mapBoundaryKey,
+                  child: Container(
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: AppColors.border),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [AppColors.mapSea, AppColors.background],
                       ),
-                    ],
-                  ),
-                  child: UkraineMap(
-                    targets: map.targets,
-                    home: map.home,
-                    homeName: map.homeName,
-                    audibilityKm: settings.audibilityKm,
-                    showAudibility: settings.showAudibility,
-                    oblastLevels: alerts.levels,
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x14123A6B),
+                          blurRadius: 30,
+                          spreadRadius: -6,
+                          offset: Offset(0, 14),
+                        ),
+                      ],
+                    ),
+                    child: UkraineMap(
+                      targets: map.targets,
+                      home: map.home,
+                      homeName: map.homeName,
+                      audibilityKm: settings.audibilityKm,
+                      showAudibility: settings.showAudibility,
+                      oblastLevels: alerts.levels,
+                    ),
                   ),
                 ),
                 if (map.isDemo)
@@ -72,6 +103,30 @@ class MapScreen extends StatelessWidget {
                     right: 0,
                     child: Center(child: _demoRibbon()),
                   ),
+                // Share the current map view as a picture.
+                Positioned(
+                  left: 12,
+                  top: 12,
+                  child: Material(
+                    color: AppColors.surface,
+                    elevation: 2,
+                    shadowColor: const Color(0x22123A6B),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(9),
+                      side: BorderSide(color: AppColors.border),
+                    ),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(9),
+                      onTap: () => _shareMap(context),
+                      child: SizedBox(
+                        width: 34,
+                        height: 34,
+                        child: Icon(Icons.ios_share_rounded,
+                            color: AppColors.primaryDark, size: 18),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

@@ -19,7 +19,7 @@ class AppSidebar extends StatelessWidget {
     (AppTab.settings, Icons.settings_rounded),
     (AppTab.chat, Icons.chat_bubble_rounded),
     (AppTab.ai, Icons.auto_awesome_rounded),
-    (AppTab.apiKeys, Icons.vpn_key_rounded),
+    (AppTab.apiKeys, Icons.data_object_rounded),
   ];
 
   @override

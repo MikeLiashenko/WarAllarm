@@ -1,16 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
 
-import '../controllers/api_keys_controller.dart';
 import '../firebase_config.dart';
-import '../models/api_key.dart';
 import '../theme/app_colors.dart';
-import '../utils/formatting.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/section_header.dart';
 import 'home_shell.dart';
 
+/// API · Дані — the app's data as plain JSON over public HTTP (no key needed).
+/// The Reader publishes live state to Firebase RTDB; these endpoints return it.
 class ApiKeysScreen extends StatefulWidget {
   const ApiKeysScreen({super.key});
 
@@ -22,67 +20,63 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
   int _lang = 0; // 0=Python 1=JS 2=cURL
   static const _langs = ['Python', 'JavaScript', 'cURL'];
 
+  String get _base => FirebaseConfig.databaseUrl;
+  static const _alerts = 'https://vadimklimenko.com/map/statuses.json';
+
   @override
   Widget build(BuildContext context) {
-    final controller = context.watch<ApiKeysController>();
-    final keys = controller.keys;
-    final sampleKey = keys.isNotEmpty ? keys.first.key : 'wa_live_your_api_key';
-
     return PageBody(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SectionHeader(
-            title: 'API Keys',
-            subtitle: 'Generate keys and integrate the RTDB',
-            icon: Icons.vpn_key_rounded,
-            trailing: ElevatedButton.icon(
-              onPressed: () => _showGenerate(context, controller),
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Generate key'),
-            ),
+          const SectionHeader(
+            title: 'API · Дані',
+            subtitle: 'Живі дані у JSON — цілі, тривоги, стан. Без ключа.',
+            icon: Icons.data_object_rounded,
+          ),
+          const SizedBox(height: 16),
+
+          _InfoBanner(),
+          const SizedBox(height: 16),
+
+          _sectionLabel('Ендпоінти (GET · JSON)'),
+          const SizedBox(height: 10),
+          _Endpoint(
+            title: 'Стан і цілі',
+            desc: 'Все одразу: цілі (threats[]), дім, налаштування, аналітика.',
+            url: '$_base/state.json',
+            onCopy: _copy,
+          ),
+          _Endpoint(
+            title: 'Тільки цілі',
+            desc: 'Масив цілей: label, cat, lat, lon, place, dir, stage, '
+                'dist(км), eta(хв), n(×скільки). null = чисто.',
+            url: '$_base/state/threats.json',
+            onCopy: _copy,
+          ),
+          _Endpoint(
+            title: 'Аналітика (журнал тривог)',
+            desc: 'rows[]: d(дата), h(година), k(тип), z(зона), g(рівень).',
+            url: '$_base/state/rows.json',
+            onCopy: _copy,
+          ),
+          _Endpoint(
+            title: 'Офіційні тривоги по областях',
+            desc: 'states{}: по кожній області — enabled, alert_level '
+                '(red/yellow), districts{}. Джерело офіційної карти.',
+            url: _alerts,
+            onCopy: _copy,
           ),
           const SizedBox(height: 18),
 
-          // Keys list
-          GlassContainer(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Active keys',
-                    style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary)),
-                const SizedBox(height: 12),
-                if (keys.isEmpty)
-                  Padding(
-                    padding: EdgeInsets.symmetric(vertical: 20),
-                    child: Center(
-                      child: Text('No keys yet — generate your first key.',
-                          style: TextStyle(color: AppColors.textSecondary)),
-                    ),
-                  )
-                else
-                  ...keys.map((k) => _KeyRow(
-                        apiKey: k,
-                        onCopy: () => _copy(context, k.key, 'API key copied'),
-                        onToggle: () => controller.revoke(k.id),
-                        onDelete: () => controller.remove(k.id),
-                      )),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-
-          // Integration snippets
+          // Code snippet
           GlassContainer(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Text('Integration',
+                    Text('Приклад коду',
                         style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -93,9 +87,8 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
                 ),
                 const SizedBox(height: 14),
                 _CodeBlock(
-                  code: _snippet(_lang, sampleKey),
-                  onCopy: () =>
-                      _copy(context, _snippet(_lang, sampleKey), 'Snippet copied'),
+                  code: _snippet(_lang),
+                  onCopy: () => _copy(_snippet(_lang), 'Код скопійовано'),
                 ),
               ],
             ),
@@ -105,6 +98,15 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
       ),
     );
   }
+
+  Widget _sectionLabel(String t) => Text(
+        t.toUpperCase(),
+        style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.6,
+            color: AppColors.textMuted),
+      );
 
   Widget _langTabs() {
     return Container(
@@ -142,91 +144,80 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
     );
   }
 
-  void _copy(BuildContext context, String text, String msg) {
+  void _copy(String text, [String msg = 'Скопійовано']) {
     Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  void _showGenerate(BuildContext context, ApiKeysController controller) {
-    final labelCtl = TextEditingController();
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Generate API key'),
-        content: SizedBox(
-          width: 340,
-          child: TextField(
-            controller: labelCtl,
-            autofocus: true,
-            decoration: const InputDecoration(
-              hintText: 'Key label (e.g. Production)',
+  String _snippet(int lang) {
+    switch (lang) {
+      case 0:
+        return '''import requests
+
+BASE = "$_base"
+
+# Живі цілі + стан (публічно, без ключа)
+data = requests.get(f"{BASE}/state.json").json() or {}
+for t in (data.get("threats") or []):
+    print(t["label"], t.get("place",""), t.get("dist"), "км",
+          t.get("stageLabel",""))''';
+      case 1:
+        return '''const BASE = "$_base";
+
+// Живі цілі + стан (публічно, без ключа)
+const data = await (await fetch(`\${BASE}/state.json`)).json() ?? {};
+for (const t of data.threats ?? []) {
+  console.log(t.label, t.place ?? "", t.dist, "км", t.stageLabel ?? "");
+}''';
+      default:
+        return 'curl "$_base/state.json"';
+    }
+  }
+}
+
+class _InfoBanner extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.primarySoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.primaryTint),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.public_rounded, color: AppColors.primaryDark, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Публічний доступ, ключ не потрібен. Дані оновлює Reader на ПК; '
+              'офіційні тривоги — окремим джерелом.',
+              style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.primaryDark),
             ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              controller.generate(labelCtl.text);
-              Navigator.pop(context);
-            },
-            child: const Text('Generate'),
           ),
         ],
       ),
     );
   }
-
-  String _snippet(int lang, String key) {
-    final url = FirebaseConfig.databaseUrl;
-    switch (lang) {
-      case 0:
-        return '''import requests
-
-API_KEY = "$key"
-BASE = "$url"
-
-# Read the live threat status
-res = requests.get(f"{BASE}/status.json", headers={"X-API-Key": API_KEY})
-print(res.json())''';
-      case 1:
-        return '''const API_KEY = "$key";
-const BASE = "$url";
-
-// Read the live threat status
-const res = await fetch(`\${BASE}/status.json`, {
-  headers: { "X-API-Key": API_KEY },
-});
-console.log(await res.json());''';
-      default:
-        return '''curl "$url/status.json" \\
-  -H "X-API-Key: $key"''';
-    }
-  }
 }
 
-class _KeyRow extends StatelessWidget {
-  const _KeyRow({
-    required this.apiKey,
+class _Endpoint extends StatelessWidget {
+  const _Endpoint({
+    required this.title,
+    required this.desc,
+    required this.url,
     required this.onCopy,
-    required this.onToggle,
-    required this.onDelete,
   });
-
-  final ApiKey apiKey;
-  final VoidCallback onCopy;
-  final VoidCallback onToggle;
-  final VoidCallback onDelete;
+  final String title, desc, url;
+  final void Function(String, [String]) onCopy;
 
   @override
   Widget build(BuildContext context) {
-    final active = apiKey.active;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -235,89 +226,55 @@ class _KeyRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: active ? AppColors.primarySoft : AppColors.divider,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(Icons.vpn_key_rounded,
-                color: active ? AppColors.primary : AppColors.textMuted,
-                size: 20),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        apiKey.label,
-                        style: TextStyle(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: active
-                            ? AppColors.safeSoft
-                            : AppColors.threatSoft,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        active ? 'Active' : 'Revoked',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                          color:
-                              active ? AppColors.safe : AppColors.threatDark,
-                        ),
-                      ),
-                    ),
-                  ],
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.safeSoft,
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  '${apiKey.masked}  ·  ${timeAgo(apiKey.createdAt)}',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textMuted,
-                      fontFamily: 'monospace'),
-                ),
-              ],
+                child: Text('GET',
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.safe)),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(title,
+                    style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+              ),
+              IconButton(
+                tooltip: 'Копіювати адресу',
+                onPressed: () => onCopy(url, 'Адресу скопійовано'),
+                icon: Icon(Icons.copy_rounded,
+                    size: 18, color: AppColors.textSecondary),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SelectableText(
+              url,
+              style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: AppColors.primaryDark),
             ),
           ),
-          IconButton(
-            tooltip: 'Copy',
-            onPressed: onCopy,
-            icon: Icon(Icons.copy_rounded,
-                size: 18, color: AppColors.textSecondary),
-          ),
-          IconButton(
-            tooltip: active ? 'Revoke' : 'Re-activate',
-            onPressed: onToggle,
-            icon: Icon(
-              active ? Icons.block_rounded : Icons.check_circle_rounded,
-              size: 18,
-              color: active ? AppColors.threat : AppColors.safe,
-            ),
-          ),
-          IconButton(
-            tooltip: 'Delete',
-            onPressed: onDelete,
-            icon: Icon(Icons.delete_outline_rounded,
-                size: 18, color: AppColors.textMuted),
-          ),
+          const SizedBox(height: 6),
+          Text(desc,
+              style: TextStyle(
+                  fontSize: 12.5, color: AppColors.textSecondary, height: 1.35)),
         ],
       ),
     );

@@ -11,7 +11,7 @@ extension AppTabInfo on AppTab {
         AppTab.settings => 'Settings',
         AppTab.chat => 'Chat',
         AppTab.ai => 'AI',
-        AppTab.apiKeys => 'API Keys',
+        AppTab.apiKeys => 'API · Дані',
       };
 }
 
