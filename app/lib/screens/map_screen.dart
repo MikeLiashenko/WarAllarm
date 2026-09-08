@@ -42,10 +42,10 @@ class MapScreen extends StatelessWidget {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(color: AppColors.border),
-                    gradient: const LinearGradient(
+                    gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Color(0xFFEAF3FF), Color(0xFFF7FAFF)],
+                      colors: [AppColors.mapSea, AppColors.background],
                     ),
                     boxShadow: const [
                       BoxShadow(
@@ -242,7 +242,7 @@ class _TargetStrip extends StatelessWidget {
                         t.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w700,
                             color: AppColors.textPrimary),
@@ -268,7 +268,7 @@ class _TargetStrip extends StatelessWidget {
                   ].join(' · '),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 11.5, color: AppColors.textSecondary),
                 ),
               ],

@@ -9,6 +9,7 @@ import 'controllers/map_data_controller.dart';
 import 'controllers/nav_controller.dart';
 import 'controllers/places_controller.dart';
 import 'controllers/settings_controller.dart';
+import 'controllers/theme_controller.dart';
 import 'services/local_store.dart';
 import 'services/rtdb_service.dart';
 import 'screens/home_shell.dart';
@@ -36,6 +37,10 @@ class WarAlarmApp extends StatelessWidget {
         Provider<RtdbService>.value(value: rtdb),
         Provider<LocalStore>.value(value: store),
         ChangeNotifierProvider<NavController>(create: (_) => NavController()),
+        ChangeNotifierProvider<ThemeController>(
+          create: (_) => ThemeController(store)..applyNow(),
+          lazy: false,
+        ),
         ChangeNotifierProvider<SettingsController>.value(value: settings),
         ChangeNotifierProvider<PlacesController>(
           create: (_) => PlacesController(store),
@@ -59,11 +64,13 @@ class WarAlarmApp extends StatelessWidget {
           create: (_) => ApiKeysController(store),
         ),
       ],
-      child: MaterialApp(
-        title: 'WarAlarm',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
-        home: const HomeShell(),
+      child: Consumer<ThemeController>(
+        builder: (context, theme, _) => MaterialApp(
+          title: 'WarAlarm',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.build(),
+          home: HomeShell(),
+        ),
       ),
     );
   }

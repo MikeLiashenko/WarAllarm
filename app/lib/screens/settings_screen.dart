@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../controllers/alarm_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/settings_controller.dart';
+import '../controllers/theme_controller.dart';
 import '../firebase_config.dart';
 import '../services/ai_service.dart';
 import '../theme/app_colors.dart';
@@ -103,14 +104,14 @@ class SettingsScreen extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.check_circle_rounded,
+                        Icon(Icons.check_circle_rounded,
                             color: AppColors.safe, size: 20),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             'Ключ ІІ взято з secrets.local.txt (${AiService.providerLabel(s.aiApiKey)}). '
                             'Нижче можна перевизначити для цього пристрою.',
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 12.5, color: AppColors.textSecondary),
                           ),
                         ),
@@ -127,7 +128,7 @@ class SettingsScreen extends StatelessWidget {
                 apiKey: s.aiApiKey,
                 onChanged: s.setAiModel,
               ),
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(16, 2, 16, 10),
                 child: Text(
                   'Ключ Anthropic (sk-ant-…) або Google (AIza…/AQ…) вмикає '
@@ -159,6 +160,14 @@ class SettingsScreen extends StatelessWidget {
           _Group(
             title: 'Display',
             children: [
+              _ToggleRow(
+                icon: Icons.dark_mode_rounded,
+                title: 'Темна тема',
+                subtitle: 'Темний вигляд додатку',
+                value: context.watch<ThemeController>().dark,
+                onChanged: (v) =>
+                    context.read<ThemeController>().setDark(v),
+              ),
               _ToggleRow(
                 icon: Icons.view_agenda_rounded,
                 title: 'Compact feed',
@@ -212,7 +221,7 @@ class _VolumeSlider extends StatelessWidget {
               color: AppColors.primary.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.graphic_eq_rounded,
+            child: Icon(Icons.graphic_eq_rounded,
                 color: AppColors.primary, size: 20),
           ),
           const SizedBox(width: 14),
@@ -222,14 +231,14 @@ class _VolumeSlider extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Text('Гучність сирени',
+                    Text('Гучність сирени',
                         style: TextStyle(
                             fontSize: 14.5,
                             fontWeight: FontWeight.w600,
                             color: AppColors.textPrimary)),
                     const Spacer(),
                     Text('$pct%',
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
                             color: AppColors.primaryDark)),
@@ -295,13 +304,13 @@ class _SettingSlider extends StatelessWidget {
                 Row(
                   children: [
                     Text(title,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 14.5,
                             fontWeight: FontWeight.w600,
                             color: AppColors.textPrimary)),
                     const Spacer(),
                     Text(valueLabel,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
                             color: AppColors.primaryDark)),
@@ -391,11 +400,11 @@ class _SnoozeChoice extends StatelessWidget {
               color: AppColors.primary.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.snooze_rounded,
+            child: Icon(Icons.snooze_rounded,
                 color: AppColors.primary, size: 20),
           ),
           const SizedBox(width: 14),
-          const Expanded(
+          Expanded(
             child: Text('Пауза звуку',
                 style: TextStyle(
                     fontSize: 14.5,
@@ -422,7 +431,7 @@ class _SnoozeChoice extends StatelessWidget {
                   backgroundColor: AppColors.surface,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
-                    side: const BorderSide(color: AppColors.border),
+                    side: BorderSide(color: AppColors.border),
                   ),
                 ),
             ],
@@ -452,12 +461,12 @@ class _TestSirenButton extends StatelessWidget {
               ),
             );
           },
-          icon: const Icon(Icons.campaign_rounded, color: AppColors.threat),
+          icon: Icon(Icons.campaign_rounded, color: AppColors.threat),
           label: const Text('Перевірити сирену',
               style: TextStyle(fontWeight: FontWeight.w700)),
           style: OutlinedButton.styleFrom(
             foregroundColor: AppColors.threatDark,
-            side: const BorderSide(color: AppColors.threatSoft),
+            side: BorderSide(color: AppColors.threatSoft),
             padding: const EdgeInsets.symmetric(vertical: 14),
           ),
         ),
@@ -482,7 +491,7 @@ class _Group extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
             child: Text(
               title.toUpperCase(),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.8,
@@ -504,7 +513,7 @@ class _ToggleRow extends StatelessWidget {
     required this.subtitle,
     required this.value,
     required this.onChanged,
-    this.accent = AppColors.primary,
+    this.accent,
   });
 
   final IconData icon;
@@ -512,10 +521,11 @@ class _ToggleRow extends StatelessWidget {
   final String subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
-  final Color accent;
+  final Color? accent;
 
   @override
   Widget build(BuildContext context) {
+    final accent = this.accent ?? AppColors.primary;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(
@@ -535,12 +545,12 @@ class _ToggleRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 14.5,
                         fontWeight: FontWeight.w600,
                         color: AppColors.textPrimary)),
                 Text(subtitle,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 12.5, color: AppColors.textSecondary)),
               ],
             ),
@@ -589,7 +599,7 @@ class _NameFieldState extends State<_NameField> {
               color: AppColors.primary.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.person_rounded,
+            child: Icon(Icons.person_rounded,
                 color: AppColors.primary, size: 20),
           ),
           const SizedBox(width: 14),
@@ -709,14 +719,14 @@ class _InfoRow extends StatelessWidget {
       child: Row(
         children: [
           Text(label,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 13.5, color: AppColors.textSecondary)),
           const Spacer(),
           Flexible(
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textPrimary),

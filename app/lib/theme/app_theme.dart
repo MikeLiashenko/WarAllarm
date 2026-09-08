@@ -5,18 +5,23 @@ import 'app_colors.dart';
 class AppTheme {
   const AppTheme._();
 
-  static ThemeData light() {
+  /// Builds the theme from the CURRENT [AppColors] palette (light or dark).
+  static ThemeData build() {
+    final dark = AppColors.isDark;
     final base = ThemeData(
       useMaterial3: true,
-      brightness: Brightness.light,
-      scaffoldBackgroundColor: AppColors.scaffold,
-      colorScheme: const ColorScheme.light(
+      brightness: dark ? Brightness.dark : Brightness.light,
+      scaffoldBackgroundColor: AppColors.background,
+      colorScheme: ColorScheme(
+        brightness: dark ? Brightness.dark : Brightness.light,
         primary: AppColors.primary,
-        onPrimary: Colors.white,
+        onPrimary: dark ? const Color(0xFF0B1220) : Colors.white,
         secondary: AppColors.accent,
+        onSecondary: dark ? const Color(0xFF0B1220) : Colors.white,
         surface: AppColors.surface,
         onSurface: AppColors.textPrimary,
         error: AppColors.threat,
+        onError: Colors.white,
       ),
       fontFamily: 'Roboto',
     );
@@ -46,18 +51,18 @@ class AppTheme {
         fillColor: AppColors.primarySoft.withValues(alpha: 0.5),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        hintStyle: const TextStyle(color: AppColors.textMuted),
+        hintStyle: TextStyle(color: AppColors.textMuted),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppColors.border),
+          borderSide: BorderSide(color: AppColors.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
+          borderSide: BorderSide(color: AppColors.primary, width: 1.6),
         ),
       ),
       snackBarTheme: SnackBarThemeData(

@@ -37,15 +37,15 @@ class MyPlacesScreen extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 46),
               child: Column(
                 children: [
-                  const Icon(Icons.map_outlined,
+                  Icon(Icons.map_outlined,
                       size: 42, color: AppColors.textMuted),
                   const SizedBox(height: 12),
-                  const Text('No saved places yet',
+                  Text('No saved places yet',
                       style: TextStyle(
                           fontWeight: FontWeight.w600,
                           color: AppColors.textPrimary)),
                   const SizedBox(height: 4),
-                  const Text('Add a city or region to start monitoring it.',
+                  Text('Add a city or region to start monitoring it.',
                       style: TextStyle(color: AppColors.textSecondary)),
                   const SizedBox(height: 16),
                   ElevatedButton(
@@ -157,7 +157,7 @@ class _AddPlaceDialogState extends State<_AddPlaceDialog> {
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 260),
               child: matches.isEmpty
-                  ? const Padding(
+                  ? Padding(
                       padding: EdgeInsets.symmetric(vertical: 20),
                       child: Text(
                         'Не знайшов такого міста 🤔\nСпробуй іншу назву українською.',
@@ -169,16 +169,16 @@ class _AddPlaceDialogState extends State<_AddPlaceDialog> {
                       shrinkWrap: true,
                       itemCount: matches.length,
                       separatorBuilder: (_, _) =>
-                          const Divider(height: 1, color: AppColors.divider),
+                          Divider(height: 1, color: AppColors.divider),
                       itemBuilder: (context, i) {
                         final c = matches[i];
                         return ListTile(
                           contentPadding:
                               const EdgeInsets.symmetric(horizontal: 6),
-                          leading: const Icon(Icons.location_on_rounded,
+                          leading: Icon(Icons.location_on_rounded,
                               color: AppColors.primary),
                           title: Text(c.name,
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   color: AppColors.textPrimary)),
                           onTap: () => _pick(c),
@@ -230,7 +230,7 @@ class _PlaceCard extends StatelessWidget {
               color: AppColors.primarySoft,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: const Icon(Icons.location_city_rounded,
+            child: Icon(Icons.location_city_rounded,
                 color: AppColors.primary),
           ),
           const SizedBox(width: 14),
@@ -241,7 +241,7 @@ class _PlaceCard extends StatelessWidget {
               children: [
                 Text(
                   place.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15.5,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
@@ -252,7 +252,7 @@ class _PlaceCard extends StatelessWidget {
                   place.region.isEmpty
                       ? '${place.lat.toStringAsFixed(2)}, ${place.lng.toStringAsFixed(2)}'
                       : place.region,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12.5, color: AppColors.textSecondary),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -272,7 +272,7 @@ class _PlaceCard extends StatelessWidget {
           IconButton(
             tooltip: 'Remove',
             onPressed: () => controller.remove(place.id),
-            icon: const Icon(Icons.delete_outline_rounded,
+            icon: Icon(Icons.delete_outline_rounded,
                 color: AppColors.textMuted),
           ),
         ],

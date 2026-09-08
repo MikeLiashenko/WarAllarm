@@ -66,7 +66,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 border: Border.all(color: AppColors.border),
               ),
               child: messages.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text('No messages yet',
                           style: TextStyle(color: AppColors.textSecondary)),
                     )
@@ -117,7 +117,7 @@ class _Bubble extends StatelessWidget {
                     padding: const EdgeInsets.only(left: 4, bottom: 2),
                     child: Text(
                       message.author,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textSecondary,
@@ -150,7 +150,7 @@ class _Bubble extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 3, left: 4, right: 4),
                   child: Text(
                     clock(message.timestamp),
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 10.5, color: AppColors.textMuted),
                   ),
                 ),
@@ -169,7 +169,7 @@ class _Bubble extends StatelessWidget {
       backgroundColor: AppColors.primaryTint,
       child: Text(
         initial,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w700,
           color: AppColors.primaryDark,

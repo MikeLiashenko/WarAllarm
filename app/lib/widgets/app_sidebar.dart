@@ -32,7 +32,7 @@ class AppSidebar extends StatelessWidget {
       duration: const Duration(milliseconds: 240),
       curve: Curves.easeOut,
       width: width,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.sidebarBg,
         border: Border(right: BorderSide(color: AppColors.border)),
       ),
@@ -76,7 +76,7 @@ class AppSidebar extends StatelessWidget {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
+              gradient: LinearGradient(
                 colors: [AppColors.accent, AppColors.primary],
               ),
               borderRadius: BorderRadius.circular(12),
@@ -86,7 +86,7 @@ class AppSidebar extends StatelessWidget {
           ),
           if (!collapsed) ...[
             const SizedBox(width: 12),
-            const Text(
+            Text(
               'WarAlarm',
               style: TextStyle(
                 fontSize: 18,
@@ -168,10 +168,10 @@ class AppSidebar extends StatelessWidget {
         mainAxisAlignment:
             collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
         children: [
-          const Icon(Icons.circle, size: 8, color: AppColors.primary),
+          Icon(Icons.circle, size: 8, color: AppColors.primary),
           if (!collapsed) ...[
             const SizedBox(width: 8),
-            const Text(
+            Text(
               'Live · Kharkiv',
               style: TextStyle(fontSize: 12, color: AppColors.textMuted),
             ),
@@ -243,7 +243,7 @@ class _NavTile extends StatelessWidget {
                     Container(
                       width: 6,
                       height: 6,
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         color: AppColors.primary,
                         shape: BoxShape.circle,
                       ),

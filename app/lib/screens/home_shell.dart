@@ -19,20 +19,21 @@ import 'settings_screen.dart';
 class HomeShell extends StatelessWidget {
   const HomeShell({super.key});
 
-  static const _screens = <Widget>[
-    NowScreen(),
-    MapScreen(),
-    MyPlacesScreen(),
-    SettingsScreen(),
-    ChatScreen(),
-    AiScreen(),
-    ApiKeysScreen(),
-  ];
-
   @override
   Widget build(BuildContext context) {
     final nav = context.watch<NavController>();
     final collapsed = Responsive.railCollapsed(context);
+    // Built fresh (non-const) each build so a theme change rebuilds every screen
+    // and it re-reads the (mutable) AppColors palette.
+    final screens = <Widget>[
+      NowScreen(),
+      MapScreen(),
+      MyPlacesScreen(),
+      SettingsScreen(),
+      ChatScreen(),
+      AiScreen(),
+      ApiKeysScreen(),
+    ];
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -43,11 +44,11 @@ class HomeShell extends StatelessWidget {
               AppSidebar(collapsed: collapsed),
               Expanded(
                 child: DecoratedBox(
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [AppColors.background, Color(0xFFFFFFFF)],
+                      colors: [AppColors.background, AppColors.scaffold],
                     ),
                   ),
                   child: AnimatedSwitcher(
@@ -65,7 +66,7 @@ class HomeShell extends StatelessWidget {
                     ),
                     child: KeyedSubtree(
                       key: ValueKey(nav.tab),
-                      child: _screens[nav.tab.index],
+                      child: screens[nav.tab.index],
                     ),
                   ),
                 ),

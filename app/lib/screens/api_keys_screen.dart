@@ -49,14 +49,14 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Active keys',
+                Text('Active keys',
                     style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary)),
                 const SizedBox(height: 12),
                 if (keys.isEmpty)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.symmetric(vertical: 20),
                     child: Center(
                       child: Text('No keys yet — generate your first key.',
@@ -82,7 +82,7 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
               children: [
                 Row(
                   children: [
-                    const Text('Integration',
+                    Text('Integration',
                         style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -258,7 +258,7 @@ class _KeyRow extends StatelessWidget {
                     Flexible(
                       child: Text(
                         apiKey.label,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 14.5,
                             fontWeight: FontWeight.w700,
                             color: AppColors.textPrimary),
@@ -289,7 +289,7 @@ class _KeyRow extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   '${apiKey.masked}  ·  ${timeAgo(apiKey.createdAt)}',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12,
                       color: AppColors.textMuted,
                       fontFamily: 'monospace'),
@@ -300,7 +300,7 @@ class _KeyRow extends StatelessWidget {
           IconButton(
             tooltip: 'Copy',
             onPressed: onCopy,
-            icon: const Icon(Icons.copy_rounded,
+            icon: Icon(Icons.copy_rounded,
                 size: 18, color: AppColors.textSecondary),
           ),
           IconButton(
@@ -315,7 +315,7 @@ class _KeyRow extends StatelessWidget {
           IconButton(
             tooltip: 'Delete',
             onPressed: onDelete,
-            icon: const Icon(Icons.delete_outline_rounded,
+            icon: Icon(Icons.delete_outline_rounded,
                 size: 18, color: AppColors.textMuted),
           ),
         ],

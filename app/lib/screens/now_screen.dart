@@ -100,7 +100,7 @@ class NowScreen extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(message,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 13.5, color: AppColors.textSecondary)),
               ],
             ),
@@ -133,7 +133,7 @@ class NowScreen extends StatelessWidget {
                 ),
                 child: Text(
                   '${data.selectedId == 'all' ? data.targets.length : sel.length}',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                       color: AppColors.primaryDark),
@@ -154,7 +154,7 @@ class NowScreen extends StatelessWidget {
                 color: AppColors.safeSoft,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: const Text('✅ Наразі чисто — активних цілей немає',
+              child: Text('✅ Наразі чисто — активних цілей немає',
                   style: TextStyle(
                       color: AppColors.safe, fontWeight: FontWeight.w600)),
             ),
@@ -169,7 +169,7 @@ class NowScreen extends StatelessWidget {
 
   Widget _sectionLabel(String text) => Text(
         text.toUpperCase(),
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w800,
           letterSpacing: 0.6,
@@ -221,14 +221,14 @@ class _ConnBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const SizedBox(
+          SizedBox(
             width: 18,
             height: 18,
             child: CircularProgressIndicator(
                 strokeWidth: 2.2, color: AppColors.primaryDark),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Text(
               'Очікую монітор… Дані ще не отримано. Це не означає «чисто» — '
               'звук тривоги вмикається, коли надійдуть живі дані.',
@@ -291,7 +291,7 @@ class _PlaceCard extends StatelessWidget {
               Flexible(
                 child: Text('${place.icon} ${place.name}',
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 14.5,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary)),
@@ -314,7 +314,7 @@ class _PlaceCard extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Text(detail,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 12.5, color: AppColors.textSecondary)),
         ],
       ),
@@ -395,7 +395,7 @@ class _TargetRow extends StatelessWidget {
                     if (t.dir.isNotEmpty) 'напрям ${t.dir}',
                     if (t.place.isNotEmpty) t.place,
                   ].join(' · '),
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12.5, color: AppColors.textSecondary),
                 ),
               ],

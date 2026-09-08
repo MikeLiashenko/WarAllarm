@@ -37,7 +37,7 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
         children: [
           Row(
             children: [
-              const Text('Аналітика',
+              Text('Аналітика',
                   style: TextStyle(
                       fontSize: 15.5,
                       fontWeight: FontWeight.w700,
@@ -139,7 +139,7 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
                         color: t.$3)),
                 const SizedBox(height: 2),
                 Text(t.$2,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 11, color: AppColors.textSecondary)),
               ],
             ),
@@ -155,12 +155,12 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(title,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary)),
         Text(sub,
-            style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
+            style: TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
         const SizedBox(height: 12),
         SizedBox(
           height: 90,
@@ -188,15 +188,15 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
         Row(
           children: [
             Text(firstLabel ?? '',
-                style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
             const Spacer(),
             if (midLabel != null)
               Text(midLabel,
                   style:
-                      const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                      TextStyle(fontSize: 10, color: AppColors.textMuted)),
             const Spacer(),
             Text(lastLabel ?? '',
-                style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
           ],
         ),
       ],
@@ -209,14 +209,14 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('За типами загроз',
+        Text('За типами загроз',
             style: TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary)),
         const SizedBox(height: 12),
         if (data.isEmpty)
-          const Text('немає даних за період',
+          Text('немає даних за період',
               style: TextStyle(fontSize: 12.5, color: AppColors.textMuted))
         else
           for (final e in data)
@@ -227,7 +227,7 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
                   SizedBox(
                     width: 92,
                     child: Text(kKindMeta[e.$1]?.name ?? e.$1,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 12.5, color: AppColors.textSecondary),
                         overflow: TextOverflow.ellipsis),
                   ),
@@ -251,7 +251,7 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
                     width: 30,
                     child: Text('${e.$2}',
                         textAlign: TextAlign.right,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w700,
                             color: AppColors.textPrimary)),

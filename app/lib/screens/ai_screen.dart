@@ -153,7 +153,7 @@ class _AiScreenState extends State<AiScreen> {
         padding: const EdgeInsets.only(bottom: 12, left: 4),
         child: Text(
           text.toUpperCase(),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w800,
             letterSpacing: 0.6,
@@ -176,7 +176,7 @@ class _AiScreenState extends State<AiScreen> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
+                  gradient: LinearGradient(
                       colors: [AppColors.accent, AppColors.primary]),
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -184,7 +184,7 @@ class _AiScreenState extends State<AiScreen> {
                     color: Colors.white, size: 20),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Text('Асистент (Claude · Gemini)',
                     style: TextStyle(
                         fontSize: 15,
@@ -222,7 +222,7 @@ class _AiScreenState extends State<AiScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
                         'Додай ключ Anthropic (sk-ant-…) або Google (AIza…/AQ…) '
                         'у Налаштуваннях, щоб увімкнути справжній ІІ.',
@@ -251,7 +251,7 @@ class _AiScreenState extends State<AiScreen> {
               child: _bubble(m.content, mine: m.isUser),
             ),
           if (ai.thinking)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 10),
               child: Text('Аналізую…',
                   style: TextStyle(
@@ -315,7 +315,7 @@ class _AiScreenState extends State<AiScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(sub,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 11, color: AppColors.textMuted)),
               ),
           ],
@@ -375,7 +375,7 @@ class _AiScreenState extends State<AiScreen> {
                       : accent)),
           const SizedBox(height: 6),
           Text(body,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 13.5, height: 1.5, color: AppColors.textSecondary)),
         ],
       ),
@@ -402,7 +402,7 @@ class _AiScreenState extends State<AiScreen> {
           Row(
             children: [
               Text('${r.place.icon} ${r.place.name}',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 14.5,
                       fontWeight: FontWeight.w700,
                       color: AppColors.textPrimary)),
@@ -426,7 +426,7 @@ class _AiScreenState extends State<AiScreen> {
           ),
           const SizedBox(height: 8),
           Text(r.advice,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 13, color: AppColors.textSecondary)),
         ],
       ),
@@ -463,13 +463,13 @@ class _AiScreenState extends State<AiScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('${bestT.label} → ${pl.name}',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary)),
             const SizedBox(height: 4),
             Text('зараз ${d.round()} км, курс ${bestT.dir}. $verdict.',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 13, color: AppColors.textSecondary)),
           ],
         ),
@@ -516,18 +516,18 @@ class _AiScreenState extends State<AiScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text('${t.$1}  ${t.$2}',
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
                           color: AppColors.textSecondary)),
                   const SizedBox(height: 6),
                   Text(t.$3,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary)),
                   Text(t.$4,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 11.5, color: AppColors.textMuted)),
                 ],
               ),
@@ -547,6 +547,6 @@ class _AiScreenState extends State<AiScreen> {
         ),
         child: Text(text,
             style:
-                const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                TextStyle(fontSize: 13, color: AppColors.textSecondary)),
       );
 }

@@ -9,6 +9,7 @@ import '../data/ukraine_geo.dart';
 import '../data/ukraine_oblasts.dart';
 import '../data/ukraine_path.dart';
 import '../models/map_target.dart';
+import '../theme/app_colors.dart';
 import '../utils/svg_path.dart';
 
 /// Full custom-painted Ukraine threat map — Ukraine silhouette, tiered cities,
@@ -254,12 +255,12 @@ class _UkraineMapState extends State<UkraineMap>
 
   Widget _zoomButton(IconData icon, VoidCallback onTap) {
     return Material(
-      color: Colors.white,
+      color: AppColors.surface,
       elevation: 2,
       shadowColor: const Color(0x22123A6B),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(9),
-        side: const BorderSide(color: Color(0xFFE4ECF5)),
+        side: BorderSide(color: AppColors.border),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(9),
@@ -267,7 +268,7 @@ class _UkraineMapState extends State<UkraineMap>
         child: SizedBox(
           width: 34,
           height: 34,
-          child: Icon(icon, color: const Color(0xFF1E7BE0), size: 18),
+          child: Icon(icon, color: AppColors.primaryDark, size: 18),
         ),
       ),
     );
@@ -393,7 +394,7 @@ class _MapPainter extends CustomPainter {
       outline,
       Paint()
         ..style = PaintingStyle.fill
-        ..color = const Color(0xFFFFFFFF), // white land on light-blue sea
+        ..color = AppColors.mapLand, // land on the sea-tinted panel
     );
     canvas.drawPath(
       outline,
@@ -401,7 +402,7 @@ class _MapPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.6 / a
         ..strokeJoin = StrokeJoin.round
-        ..color = const Color(0xFF3B9EFF),
+        ..color = AppColors.primary,
     );
     canvas.restore();
 
@@ -444,15 +445,15 @@ class _MapPainter extends CustomPainter {
       if (!show) continue;
       final p = _toScreen(fit.project(c.lon, c.lat));
       final r = c.tier == 0 ? 2.4 : c.tier == 1 ? 1.9 : 1.4;
-      canvas.drawCircle(p, r, Paint()..color = const Color(0xFF3B9EFF));
+      canvas.drawCircle(p, r, Paint()..color = AppColors.primary);
       canvas.drawCircle(p, r,
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1
-            ..color = const Color(0xFFFFFFFF));
+            ..color = AppColors.mapLand);
       final fs = c.tier == 0 ? 10.5 : c.tier == 1 ? 9.0 : 7.5;
       _text(canvas, c.name, p + Offset(0, -(r + 3)),
-          fs, const Color(0xE60F2035), center: true, stroke: true);
+          fs, AppColors.textPrimary, center: true, stroke: true);
     }
 
     // --- Audibility radius around home ("what we can hear") ---
@@ -475,7 +476,7 @@ class _MapPainter extends CustomPainter {
             ..strokeWidth = 1.4
             ..color = const Color(0xFF3B9EFF).withValues(alpha: 0.55));
       _text(canvas, '~${audibilityKm.round()} км чутно',
-          hpc + Offset(0, -rPx - 5), 9.5, const Color(0xCC1E7BE0),
+          hpc + Offset(0, -rPx - 5), 9.5, AppColors.primaryDark,
           center: true, stroke: true);
     }
 
@@ -627,9 +628,9 @@ class _MapPainter extends CustomPainter {
       ..pushStyle(ui.TextStyle(
         color: color,
         shadows: stroke
-            ? const [
-                Shadow(color: Color(0xFFFFFFFF), blurRadius: 3),
-                Shadow(color: Color(0xFFFFFFFF), blurRadius: 2),
+            ? [
+                Shadow(color: AppColors.mapLand, blurRadius: 3),
+                Shadow(color: AppColors.mapLand, blurRadius: 2),
               ]
             : null,
       ))
@@ -660,9 +661,9 @@ class _Legend extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xF2FFFFFF),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE4ECF5)),
+        border: Border.all(color: AppColors.border),
         boxShadow: const [
           BoxShadow(color: Color(0x14123A6B), blurRadius: 10, offset: Offset(0, 3)),
         ],
@@ -685,8 +686,8 @@ class _Legend extends StatelessWidget {
                 ),
                 const SizedBox(width: 5),
                 Text(it.$1,
-                    style: const TextStyle(
-                        color: Color(0xFF5B6B7F),
+                    style: TextStyle(
+                        color: AppColors.textSecondary,
                         fontSize: 11,
                         fontWeight: FontWeight.w600)),
               ],
