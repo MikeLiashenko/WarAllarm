@@ -20,7 +20,10 @@ const double _lon0 = 22.14, _lonSpan = 18.09, _lat1 = 52.38, _latSpan = 7.99;
 _Fit _geoFit(Size size) {
   const pad = 12.0;
   final aW = size.width - 2 * pad, aH = size.height - 2 * pad;
-  const aspect = _lonSpan / _latSpan;
+  // Correct for longitude compression at Ukraine's latitude (a degree of lon is
+  // ~cos(48.4°)≈0.66 of a degree of lat) — otherwise the country looks squashed.
+  final midLat = (_lat1 + (_lat1 - _latSpan)) / 2;
+  final aspect = (_lonSpan / _latSpan) * math.cos(midLat * math.pi / 180);
   double pw, ph;
   if (aW / aH > aspect) {
     ph = aH;
