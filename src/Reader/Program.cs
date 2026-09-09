@@ -362,7 +362,15 @@ else
 var botToken = SecretOpt("telegram_bot_token");
 if (!string.IsNullOrWhiteSpace(botToken))
 {
-    var bot = new TelegramBot(botToken, BuildBotStatus);
+    var features = new BotFeatures(
+        Status: BuildBotStatus,
+        MapPng: BuildBotMapPng,
+        Risk: BuildBotRisk,
+        Places: BuildBotPlaces,
+        Ai: BuildBotAi,
+        Stats: BuildBotStats,
+        Alerts: BuildBotAlerts);
+    var bot = new TelegramBot(botToken, features);
     notifiers.Add(bot);                 // тривоги йдуть і підписникам бота
     _ = bot.RunAsync();                 // фоновий цикл команд (long-polling)
     Console.WriteLine($"🤖 Telegram-бот ВКЛ (підписників: {bot.SubscriberCount}). Напиши боту /start у Telegram.\n");
@@ -388,6 +396,127 @@ string BuildBotStatus()
             sb.AppendLine($"• {ThreatTracker.Label(t)} — {t.DistKm:0} км, {ThreatTracker.StageLabel(t.Stage)}"
                 + (t.LastPlace.Length > 0 ? $", біля {t.LastPlace}" : ""));
     }
+    return sb.ToString();
+}
+
+// Малює поточну карту загроз у PNG для бота (/map).
+byte[]? BuildBotMapPng()
+{
+    var live = tracker.Active.Where(t => t.Pos is not null).ToList();
+    var a = RiskModel.For((HomeLat, HomeLon), live.Select(t => (t, t.Amount)).ToList());
+    return MapImage.Render((HomeLat, HomeLon), MyCity, live, a.Percent, a.Verdict);
+}
+
+static string KindName(string cat) => cat switch
+{
+    "shahed" => "Шахед", "missile" => "Ракета", "balist" => "Балістика",
+    "kab" => "КАБ", "avia" => "Авіація", _ => "Інше",
+};
+
+// Детальна ймовірність: відсоток + вердикт + розклад по типах + головні чинники.
+string BuildBotRisk()
+{
+    var list = tracker.Active.Where(t => t.Pos is not null).Select(t => (t, t.Amount)).ToList();
+    var a = RiskModel.For((HomeLat, HomeLon), list);
+    var sb = new StringBuilder();
+    sb.AppendLine($"🎯 Ймовірність удару по «{MyCity}»: {a.Percent}% — {a.Verdict}");
+    if (a.ByKind.Count > 0)
+    {
+        sb.AppendLine("\nЗа типами:");
+        foreach (var kv in a.ByKind.OrderByDescending(k => k.Value))
+            sb.AppendLine($"• {KindName(kv.Key)}: {kv.Value}%");
+    }
+    if (a.Factors.Count > 0)
+    {
+        sb.AppendLine("\nГоловні чинники:");
+        foreach (var f in a.Factors.Take(4))
+            sb.AppendLine($"• {f.label} — {f.distKm:0} км ({f.percent}%)");
+    }
+    if (a.Percent == 0) sb.AppendLine("Наразі прямих загроз не видно.");
+    return sb.ToString();
+}
+
+// Ризик по всіх місцях (дім + місця з settings places=...).
+string BuildBotPlaces()
+{
+    var list = tracker.Active.Where(t => t.Pos is not null).Select(t => (t, t.Amount)).ToList();
+    var sb = new StringBuilder();
+    sb.AppendLine("📍 Ризик по місцях:");
+    var ah = RiskModel.For((HomeLat, HomeLon), list);
+    sb.AppendLine($"🏠 {MyCity} (дім): {ah.Percent}% — {ah.Verdict}");
+    foreach (var pl in extraPlaces)
+    {
+        var ap = RiskModel.For((pl.lat, pl.lon), list);
+        sb.AppendLine($"📍 {pl.name}: {ap.Percent}% — {ap.Verdict}");
+    }
+    return sb.ToString();
+}
+
+// Розумний аналіз обстановки від справжнього ІІ (Claude/Gemini), якщо ключ заданий.
+async Task<string> BuildBotAi()
+{
+    if (advisor is null)
+        return "🤖 ІІ не налаштовано. Додай  ai_api_key=...  у secrets.local.txt.";
+    var reply = await advisor.Analyze(BuildSituation());
+    return reply is { Length: > 0 } ? "🤖 " + reply : "ІІ не відповів — перевір ключ/мережу.";
+}
+
+// Аналітика з журналу alarms.csv: сьогодні / тиждень / усього / пік / за типами.
+string BuildBotStats()
+{
+    if (!File.Exists("alarms.csv")) return "📈 Ще немає даних — журнал зʼявиться після перших тривог.";
+    var rows = File.ReadAllLines("alarms.csv").Select(l => l.Split(',')).Where(c => c.Length >= 5).ToList();
+    if (rows.Count == 0) return "📈 Журнал порожній.";
+    var today = DateTime.Now.ToString("yyyy-MM-dd");
+    var weekAgo = DateTime.Now.AddDays(-6).ToString("yyyy-MM-dd");
+    bool IsAlarm(string[] c) => c[4] is "alarm" or "urgent";
+    int todayA = rows.Count(c => IsAlarm(c) && c[0] == today);
+    int week = rows.Count(c => IsAlarm(c) && string.CompareOrdinal(c[0], weekAgo) >= 0);
+    int total = rows.Count(IsAlarm);
+    int impacts = rows.Count(c => c[4] == "impact");
+    var hours = new int[24];
+    foreach (var c in rows.Where(IsAlarm))
+        if (c[1].Length >= 2 && int.TryParse(c[1].AsSpan(0, 2), out var h)) hours[h % 24]++;
+    int peak = 0; for (int i = 1; i < 24; i++) if (hours[i] > hours[peak]) peak = i;
+    var sb = new StringBuilder();
+    sb.AppendLine("📈 Аналітика тривог:");
+    sb.AppendLine($"• Сьогодні: {todayA}");
+    sb.AppendLine($"• За тиждень: {week}");
+    sb.AppendLine($"• Усього: {total} (прильотів: {impacts})");
+    if (total > 0) sb.AppendLine($"• Найнебезпечніша година: {peak:00}:00");
+    var byType = rows.Where(IsAlarm).GroupBy(c => c[3]).OrderByDescending(g => g.Count()).Take(4).ToList();
+    if (byType.Count > 0)
+    {
+        sb.AppendLine("• За типами:");
+        foreach (var g in byType) sb.AppendLine($"   {g.Key} — {g.Count()}");
+    }
+    return sb.ToString();
+}
+
+// Офіційні тривоги по областях (free feed vadimklimenko) — чи є тривога у твоїй.
+async Task<string> BuildBotAlerts()
+{
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+    var json = await http.GetStringAsync("https://vadimklimenko.com/map/statuses.json");
+    using var doc = System.Text.Json.JsonDocument.Parse(json);
+    if (!doc.RootElement.TryGetProperty("states", out var states))
+        return "Не вдалося прочитати офіційні тривоги.";
+    int red = 0; var names = new List<string>(); bool mine = false;
+    foreach (var st in states.EnumerateObject())
+    {
+        bool enabled = st.Value.TryGetProperty("enabled", out var en) && en.ValueKind == System.Text.Json.JsonValueKind.True;
+        if (!enabled) continue;
+        red++; names.Add(st.Name);
+        if (st.Name.Contains(MyOblast, StringComparison.OrdinalIgnoreCase)
+            || st.Name.Contains(MyCity, StringComparison.OrdinalIgnoreCase)
+            || (MyCity == "Київ" && st.Name.Contains("Київ")))
+            mine = true;
+    }
+    var sb = new StringBuilder();
+    sb.AppendLine("🚨 Офіційні тривоги:");
+    sb.AppendLine(mine ? $"🔴 У «{MyCity}» — ТРИВОГА!" : $"🟢 У «{MyCity}» тривоги немає.");
+    sb.AppendLine($"Всього областей з тривогою: {red}");
+    if (names.Count > 0) sb.AppendLine(string.Join(", ", names.Take(12)));
     return sb.ToString();
 }
 
