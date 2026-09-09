@@ -15,9 +15,10 @@ public static class MapImage
         string homeName,
         IReadOnlyList<Threat> threats,
         int percent,
-        string verdict)
+        string verdict,
+        Dictionary<string, string>? oblastLevels = null)
     {
-        const int W = 1000, padTop = 74, pad = 16;
+        const int W = 1000, padTop = 96, pad = 16;
         double midLat = (Lat1 + (Lat1 - LatSpan)) / 2;
         double aspect = (LonSpan / LatSpan) * Math.Cos(midLat * Math.PI / 180);
         int pw = W - 2 * pad;
@@ -32,24 +33,26 @@ public static class MapImage
             (float)(pad + (lon - Lon0) / LonSpan * pw),
             (float)(padTop + (Lat1 - lat) / LatSpan * ph));
 
-        // ── Області ──────────────────────────────────────────────────────────
+        // ── Області: колір за ОФІЦІЙНОЮ тривогою (red/yellow), інакше суша ──────
         var oblasts = ParseOblasts();
         using var land = new SKPaint { Color = new SKColor(0x14, 0x1E, 0x33), IsAntialias = true, Style = SKPaintStyle.Fill };
-        using var landHot = new SKPaint { Color = new SKColor(0xE2, 0x3A, 0x34, 0x8C), IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var landRed = new SKPaint { Color = new SKColor(0xE2, 0x3A, 0x34, 0x99), IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var landYellow = new SKPaint { Color = new SKColor(0xFF, 0xC4, 0x00, 0x7A), IsAntialias = true, Style = SKPaintStyle.Fill };
         using var border = new SKPaint { Color = new SKColor(0x5A, 0xA9, 0xFF, 0x66), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.1f };
 
-        foreach (var poly in oblasts)
+        foreach (var (name, rings) in oblasts)
         {
-            bool hot = threats.Any(t => t.Pos is { } p && PointIn(poly, p.lon, p.lat));
+            var level = oblastLevels != null && oblastLevels.TryGetValue(name, out var lv) ? lv : "";
+            var fill = level == "red" ? landRed : level == "yellow" ? landYellow : land;
             using var path = new SKPath();
-            foreach (var ring in poly)
+            foreach (var ring in rings)
             {
                 if (ring.Count < 3) continue;
                 path.MoveTo(P(ring[0][0], ring[0][1]));
                 for (int i = 1; i < ring.Count; i++) path.LineTo(P(ring[i][0], ring[i][1]));
                 path.Close();
             }
-            canvas.DrawPath(path, hot ? landHot : land);
+            canvas.DrawPath(path, fill);
             canvas.DrawPath(path, border);
         }
 
@@ -83,6 +86,14 @@ public static class MapImage
         canvas.DrawText($"Ймовірність удару: {percent}% — {verdict}", pad + 2, 62, sub);
         var now = DateTime.Now.ToString("dd.MM HH:mm");
         canvas.DrawText($"цілей: {threats.Count}   ·   {now}", W - 250, 34, muted);
+        // Легенда: області — офіційна тривога; точки — наші цілі.
+        canvas.DrawRect(pad + 2, 78, 14, 14, landRed);
+        canvas.DrawText("офіційна тривога", pad + 22, 90, muted);
+        canvas.DrawRect(pad + 190, 78, 14, 14, landYellow);
+        canvas.DrawText("часткова", pad + 210, 90, muted);
+        using var dotLegend = new SKPaint { Color = new SKColor(0xFF, 0x9F, 0x45), IsAntialias = true };
+        canvas.DrawCircle(pad + 322, 85, 6, dotLegend);
+        canvas.DrawText("наші цілі", pad + 334, 90, muted);
 
         using var img = SKImage.FromBitmap(bmp);
         using var data = img.Encode(SKEncodedImageFormat.Png, 90);
@@ -99,16 +110,16 @@ public static class MapImage
         _ => new SKColor(0x9A, 0xA6, 0xB2),
     };
 
-    // Полігони областей з MapOblasts.Json: список областей, кожна — список кілець
-    // з точок [lon,lat].
-    static List<List<List<double[]>>> ParseOblasts()
+    // Полігони областей з MapOblasts.Json: (назва «n», список кілець з точок [lon,lat]).
+    static List<(string name, List<List<double[]>> rings)> ParseOblasts()
     {
-        var outp = new List<List<List<double[]>>>();
+        var outp = new List<(string, List<List<double[]>>)>();
         try
         {
             using var doc = JsonDocument.Parse(MapOblasts.Json);
             foreach (var o in doc.RootElement.EnumerateArray())
             {
+                var name = o.TryGetProperty("n", out var n) ? n.GetString() ?? "" : "";
                 var rings = new List<List<double[]>>();
                 foreach (var r in o.GetProperty("r").EnumerateArray())
                 {
@@ -117,25 +128,10 @@ public static class MapImage
                         ring.Add(new[] { p[0].GetDouble(), p[1].GetDouble() });
                     if (ring.Count >= 3) rings.Add(ring);
                 }
-                if (rings.Count > 0) outp.Add(rings);
+                if (rings.Count > 0) outp.Add((name, rings));
             }
         }
         catch { /* немає полігонів — карта без областей */ }
         return outp;
-    }
-
-    // Точка в межах області (парність перетинів по всіх кільцях — з дірками).
-    static bool PointIn(List<List<double[]>> poly, double lon, double lat)
-    {
-        bool inside = false;
-        foreach (var ring in poly)
-            for (int i = 0, j = ring.Count - 1; i < ring.Count; j = i++)
-            {
-                double xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-                if (((yi > lat) != (yj > lat)) &&
-                    (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi))
-                    inside = !inside;
-            }
-        return inside;
     }
 }

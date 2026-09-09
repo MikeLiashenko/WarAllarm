@@ -10,7 +10,7 @@ using System.Text.Json;
 // Набір функцій застосунку, які Program передає боту (щоб бот не знав деталей ядра).
 public sealed record BotFeatures(
     Func<string> Status,
-    Func<byte[]?> MapPng,
+    Func<Task<byte[]?>> MapPng,
     Func<string> Risk,
     Func<string> Places,
     Func<Task<string>> Ai,
@@ -62,7 +62,7 @@ public sealed class TelegramBot : INotifier
         if (!a.Clear)
         {
             byte[]? png = null;
-            try { png = _f.MapPng(); } catch { }
+            try { png = await _f.MapPng(); } catch { }
             if (png is not null)
                 foreach (var chat in _subs.ToArray())
                     try { await SendPhoto(chat, png, "🗺 Карта загроз зараз"); } catch { }
@@ -144,7 +144,7 @@ public sealed class TelegramBot : INotifier
         {
             await Send(chat, "🗺 Малюю карту…");
             byte[]? png = null;
-            try { png = _f.MapPng(); } catch (Exception ex) { Console.Error.WriteLine("map: " + ex.Message); }
+            try { png = await _f.MapPng(); } catch (Exception ex) { Console.Error.WriteLine("map: " + ex.Message); }
             if (png is not null) await SendPhoto(chat, png, "🗺 Карта загроз зараз");
             else await Send(chat, "Не вдалося намалювати карту.");
             return;

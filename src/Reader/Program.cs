@@ -399,12 +399,14 @@ string BuildBotStatus()
     return sb.ToString();
 }
 
-// Малює поточну карту загроз у PNG для бота (/map).
-byte[]? BuildBotMapPng()
+// Малює поточну карту загроз у PNG для бота (/map): області — за ОФІЦІЙНОЮ
+// тривогою (red/yellow), наші цілі — точками зверху.
+async Task<byte[]?> BuildBotMapPng()
 {
     var live = tracker.Active.Where(t => t.Pos is not null).ToList();
     var a = RiskModel.For((HomeLat, HomeLon), live.Select(t => (t, t.Amount)).ToList());
-    return MapImage.Render((HomeLat, HomeLon), MyCity, live, a.Percent, a.Verdict);
+    var levels = await OfficialAlerts.Fetch();
+    return MapImage.Render((HomeLat, HomeLon), MyCity, live, a.Percent, a.Verdict, levels);
 }
 
 static string KindName(string cat) => cat switch
@@ -494,31 +496,7 @@ string BuildBotStats()
 }
 
 // Офіційні тривоги по областях (free feed vadimklimenko) — чи є тривога у твоїй.
-async Task<string> BuildBotAlerts()
-{
-    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-    var json = await http.GetStringAsync("https://vadimklimenko.com/map/statuses.json");
-    using var doc = System.Text.Json.JsonDocument.Parse(json);
-    if (!doc.RootElement.TryGetProperty("states", out var states))
-        return "Не вдалося прочитати офіційні тривоги.";
-    int red = 0; var names = new List<string>(); bool mine = false;
-    foreach (var st in states.EnumerateObject())
-    {
-        bool enabled = st.Value.TryGetProperty("enabled", out var en) && en.ValueKind == System.Text.Json.JsonValueKind.True;
-        if (!enabled) continue;
-        red++; names.Add(st.Name);
-        if (st.Name.Contains(MyOblast, StringComparison.OrdinalIgnoreCase)
-            || st.Name.Contains(MyCity, StringComparison.OrdinalIgnoreCase)
-            || (MyCity == "Київ" && st.Name.Contains("Київ")))
-            mine = true;
-    }
-    var sb = new StringBuilder();
-    sb.AppendLine("🚨 Офіційні тривоги:");
-    sb.AppendLine(mine ? $"🔴 У «{MyCity}» — ТРИВОГА!" : $"🟢 У «{MyCity}» тривоги немає.");
-    sb.AppendLine($"Всього областей з тривогою: {red}");
-    if (names.Count > 0) sb.AppendLine(string.Join(", ", names.Take(12)));
-    return sb.ToString();
-}
+Task<string> BuildBotAlerts() => OfficialAlerts.Summary(MyCity, MyOblast);
 
 // Рассылает тревогу во все подключённые каналы (падение одного не роняет остальные).
 async Task Alert(AlarmInfo info)
