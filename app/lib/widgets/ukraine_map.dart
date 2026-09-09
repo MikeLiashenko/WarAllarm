@@ -7,10 +7,31 @@ import 'package:flutter/material.dart';
 
 import '../data/ukraine_geo.dart';
 import '../data/ukraine_oblasts.dart';
-import '../data/ukraine_path.dart';
 import '../models/map_target.dart';
 import '../theme/app_colors.dart';
 import '../utils/svg_path.dart';
+
+// Geographic bounds of the equirectangular projection — MUST match _Fit.project.
+const double _lon0 = 22.14, _lonSpan = 18.09, _lat1 = 52.38, _latSpan = 7.99;
+
+/// Fit the geographic bounds into [size] preserving the lon/lat aspect, so the
+/// projection matches the oblast polygons exactly (the country is drawn from
+/// them — no separate silhouette that could drift out of alignment).
+_Fit _geoFit(Size size) {
+  const pad = 12.0;
+  final aW = size.width - 2 * pad, aH = size.height - 2 * pad;
+  const aspect = _lonSpan / _latSpan;
+  double pw, ph;
+  if (aW / aH > aspect) {
+    ph = aH;
+    pw = ph * aspect;
+  } else {
+    pw = aW;
+    ph = pw / aspect;
+  }
+  return _Fit(
+      s: 1, pw: pw, ph: ph, oX: (size.width - pw) / 2, oY: (size.height - ph) / 2);
+}
 
 /// Full custom-painted Ukraine threat map — Ukraine silhouette, tiered cities,
 /// detailed rotated target silhouettes, AI course prediction, ×N clusters,
@@ -43,8 +64,6 @@ class UkraineMap extends StatefulWidget {
 
 class _UkraineMapState extends State<UkraineMap>
     with SingleTickerProviderStateMixin {
-  late final Path _outline; // world-space Ukraine outline
-  late final Rect _fb; // world-space bbox
   late final Map<String, List<_FigPathPart>> _figs;
   late final List<_Oblast> _oblasts;
   late final AnimationController _anim;
@@ -62,23 +81,12 @@ class _UkraineMapState extends State<UkraineMap>
   @override
   void initState() {
     super.initState();
-    _outline = _buildOutline();
-    _fb = _outline.getBounds();
     _figs = _buildFigs();
     _oblasts = _parseOblasts();
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     )..repeat();
-  }
-
-  Path _buildOutline() {
-    // Raw path → world coords via transform (x*0.1, 1024 - y*0.1).
-    final raw = parseSvgPath(kUkrainePathRaw);
-    final m = Matrix4.identity()
-      ..translateByDouble(0.0, 1024.0, 0.0, 1.0)
-      ..scaleByDouble(0.1, -0.1, 1.0, 1.0);
-    return raw.transform(m.storage);
   }
 
   List<_Oblast> _parseOblasts() {
@@ -124,14 +132,7 @@ class _UkraineMapState extends State<UkraineMap>
 
   // --- Projection helpers (recomputed from current size) ----------------------
 
-  _Fit _fit(Size size) {
-    const pad = 12.0;
-    final aW = size.width - 2 * pad, aH = size.height - 2 * pad;
-    final s = math.min(aW / _fb.width, aH / _fb.height);
-    final pw = _fb.width * s, ph = _fb.height * s;
-    final oX = (size.width - pw) / 2, oY = (size.height - ph) / 2;
-    return _Fit(s: s, pw: pw, ph: ph, oX: oX, oY: oY, fb: _fb);
-  }
+  _Fit _fit(Size size) => _geoFit(size);
 
   void _autoFocus(Size size) {
     // No targets → show the whole country, centred (recognisable Ukraine),
@@ -211,7 +212,6 @@ class _UkraineMapState extends State<UkraineMap>
                 builder: (context, _) => CustomPaint(
                   size: Size.infinite,
                   painter: _MapPainter(
-                    outline: _outline,
                     figs: _figs,
                     targets: widget.targets,
                     home: widget.home,
@@ -295,19 +295,17 @@ class _Oblast {
 
 class _Fit {
   final double s, pw, ph, oX, oY;
-  final Rect fb;
-  _Fit({required this.s, required this.pw, required this.ph, required this.oX, required this.oY, required this.fb});
+  _Fit({required this.s, required this.pw, required this.ph, required this.oX, required this.oY});
 
-  /// lon/lat → base (pre-zoom) pixel space. Same geo bounds as the website.
+  /// lon/lat → base (pre-zoom) pixel space.
   Offset project(double lon, double lat) => Offset(
-        oX + ((lon - 22.14) / 18.09) * pw,
-        oY + ((52.38 - lat) / 7.99) * ph,
+        oX + ((lon - _lon0) / _lonSpan) * pw,
+        oY + ((_lat1 - lat) / _latSpan) * ph,
       );
 }
 
 class _MapPainter extends CustomPainter {
   _MapPainter({
-    required this.outline,
     required this.figs,
     required this.targets,
     required this.home,
@@ -322,7 +320,6 @@ class _MapPainter extends CustomPainter {
     required this.oblastLevels,
   });
 
-  final Path outline;
   final Map<String, List<_FigPathPart>> figs;
   final List<MapTarget> targets;
   final ({double lat, double lon}) home;
@@ -375,38 +372,11 @@ class _MapPainter extends CustomPainter {
       canvas.drawCircle(p, 26 + 6.0 * t.amount, glow);
     }
 
-    // --- Ukraine outline (world→screen affine) ---
-    final a = scale * fit.s;
-    final txO = tx + scale * fit.oX - a * fit.fb.left;
-    final tyO = ty + scale * fit.oY - a * fit.fb.top;
-    canvas.save();
-    canvas.transform((Matrix4.identity()
-          ..translateByDouble(txO, tyO, 0.0, 1.0)
-          ..scaleByDouble(a, a, 1.0, 1.0))
-        .storage);
-    canvas.drawPath(
-      outline,
-      Paint()
-        ..style = PaintingStyle.fill
-        ..color = AppColors.mapLand,
-    );
-    canvas.drawPath(
-      outline,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6 / a
-        ..strokeJoin = StrokeJoin.round
-        ..color = AppColors.primary,
-    );
-    canvas.restore();
-
-    // --- Oblast shading by OFFICIAL air-raid status (🔴 active / 🟡 warning) ---
+    // --- Country drawn FROM the oblast polygons, so land, oblast borders and
+    //     the alert shading all share the exact same geometry (perfectly
+    //     aligned — no separate silhouette that could drift). ---
+    final obPaths = <_Oblast, Path>{};
     for (final ob in oblasts) {
-      final lvl = oblastLevels[ob.name];
-      if (lvl == null) continue;
-      final base = lvl == 'red'
-          ? const Color(0xFFFF3B30)
-          : const Color(0xFFF4B740);
       final path = Path()..fillType = PathFillType.evenOdd;
       for (final ring in ob.rings) {
         for (var i = 0; i < ring.length; i++) {
@@ -415,17 +385,36 @@ class _MapPainter extends CustomPainter {
         }
         path.close();
       }
+      obPaths[ob] = path;
+    }
+    // Land fill.
+    final landPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = AppColors.mapLand;
+    for (final ob in oblasts) {
+      canvas.drawPath(obPaths[ob]!, landPaint);
+    }
+    // Official air-raid shading (🔴 active / 🟡 warning).
+    for (final ob in oblasts) {
+      final lvl = oblastLevels[ob.name];
+      if (lvl == null) continue;
+      final base = lvl == 'red'
+          ? const Color(0xFFFF3B30)
+          : const Color(0xFFF4B740);
       canvas.drawPath(
-          path,
+          obPaths[ob]!,
           Paint()
             ..style = PaintingStyle.fill
-            ..color = base.withValues(alpha: lvl == 'red' ? 0.30 : 0.24));
-      canvas.drawPath(
-          path,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.2
-            ..color = base.withValues(alpha: 0.6));
+            ..color = base.withValues(alpha: lvl == 'red' ? 0.32 : 0.26));
+    }
+    // Oblast borders + the country outline (they're the outer edges).
+    final borderPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0
+      ..strokeJoin = StrokeJoin.round
+      ..color = AppColors.primary.withValues(alpha: 0.5);
+    for (final ob in oblasts) {
+      canvas.drawPath(obPaths[ob]!, borderPaint);
     }
 
     // --- Cities / towns / villages (tiered by zoom, thinned + de-cluttered) ---
@@ -596,21 +585,7 @@ class _MapPainter extends CustomPainter {
     }
   }
 
-  _Fit _fit(Size size) {
-    const pad = 12.0;
-    final aW = size.width - 2 * pad, aH = size.height - 2 * pad;
-    final bounds = outline.getBounds();
-    final s = math.min(aW / bounds.width, aH / bounds.height);
-    final pw = bounds.width * s, ph = bounds.height * s;
-    return _Fit(
-      s: s,
-      pw: pw,
-      ph: ph,
-      oX: (size.width - pw) / 2,
-      oY: (size.height - ph) / 2,
-      fb: bounds,
-    );
-  }
+  _Fit _fit(Size size) => _geoFit(size);
 
   void _drawFig(Canvas canvas, Offset at, double headingDeg, String cat,
       Color color, double ppu,
