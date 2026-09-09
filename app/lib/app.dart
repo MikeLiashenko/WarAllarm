@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'controllers/accuracy_controller.dart';
 import 'controllers/ai_controller.dart';
 import 'controllers/alarm_controller.dart';
 import 'controllers/alerts_controller.dart';
@@ -59,6 +60,15 @@ class WarAlarmApp extends StatelessWidget {
             ctx.read<MapDataController>(),
             ctx.read<SettingsController>(),
           ),
+        ),
+        // Records forecast vs. reality to measure how accurate the model is.
+        ChangeNotifierProvider<AccuracyController>(
+          create: (ctx) => AccuracyController(
+            ctx.read<MapDataController>(),
+            ctx.read<SettingsController>(),
+            store,
+          ),
+          lazy: false,
         ),
         ChangeNotifierProvider<ChatController>(
           create: (_) =>

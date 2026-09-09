@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/accuracy_controller.dart';
 import '../controllers/ai_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/nav_controller.dart';
@@ -15,6 +16,7 @@ import '../models/monitored_place.dart';
 import '../services/ai_tools.dart';
 import '../theme/app_colors.dart';
 import '../utils/formatting.dart';
+import '../widgets/accuracy_card.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/section_header.dart';
 import 'home_shell.dart';
@@ -156,6 +158,14 @@ class _AiScreenState extends State<AiScreen> {
           // 5 — Patterns from history
           _heading('Патерни з історії'),
           _patternGrid(patterns),
+          const SizedBox(height: 22),
+
+          // 6 — How accurate our forecast has been
+          _heading('Точність прогнозу'),
+          AccuracyCard(
+            stats: context.watch<AccuracyController>().stats,
+            qualityPct: context.watch<AccuracyController>().qualityPct,
+          ),
           const SizedBox(height: 20),
         ],
       ),
