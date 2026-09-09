@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:home_widget/home_widget.dart';
 
 import '../domain/alarm_decision.dart';
@@ -25,7 +26,7 @@ class HomeWidgetService {
     String? officialLevel,
     bool live = true,
   }) async {
-    if (!Platform.isAndroid) return;
+    if (kIsWeb || !Platform.isAndroid) return;
     final home = MonitoredPlace(
         id: 'home', icon: '🏠', name: placeName, lat: lat, lon: lon);
     final prob = probabilityFor(home, targets, officialLevel: officialLevel);

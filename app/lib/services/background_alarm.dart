@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
@@ -34,7 +35,7 @@ class BackgroundAlarm {
 
   /// Call once at startup to register the service (does not start it).
   static Future<void> init() async {
-    if (!Platform.isAndroid) return;
+    if (kIsWeb || !Platform.isAndroid) return;
     await _ensureChannels(_fln);
     final service = FlutterBackgroundService();
     await service.configure(
@@ -59,12 +60,12 @@ class BackgroundAlarm {
   }
 
   static Future<bool> isRunning() =>
-      Platform.isAndroid ? FlutterBackgroundService().isRunning() : Future.value(false);
+      (!kIsWeb && Platform.isAndroid) ? FlutterBackgroundService().isRunning() : Future.value(false);
 
   /// Turn the background watcher on: ask for notification permission, start the
   /// foreground service. Returns false if notifications were denied.
   static Future<bool> enable() async {
-    if (!Platform.isAndroid) return false;
+    if (kIsWeb || !Platform.isAndroid) return false;
     final android = _fln.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     final granted = await android?.requestNotificationsPermission() ?? true;
@@ -82,7 +83,7 @@ class BackgroundAlarm {
   }
 
   static Future<void> disable() async {
-    if (!Platform.isAndroid) return;
+    if (kIsWeb || !Platform.isAndroid) return;
     final service = FlutterBackgroundService();
     if (await service.isRunning()) service.invoke('stopService');
     await _fln.cancel(_alarmNotifId);
@@ -91,7 +92,7 @@ class BackgroundAlarm {
   /// Let the service know the app UI is (not) in front, so it doesn't double up
   /// the siren while the user already has the app open and ringing.
   static void setAppForeground(bool front) {
-    if (!Platform.isAndroid) return;
+    if (kIsWeb || !Platform.isAndroid) return;
     FlutterBackgroundService().invoke('appFront', {'v': front});
   }
 

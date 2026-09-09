@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "waralarm-web",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "cd /d C:\\Work\\WarAlarm\\app && flutter run -d web-server --web-port 8099 --web-hostname 127.0.0.1"],
+      "port": 8099,
+      "url": "http://127.0.0.1:8099"
+    }
+  ]
+}

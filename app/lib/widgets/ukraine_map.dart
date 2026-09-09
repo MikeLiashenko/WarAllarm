@@ -135,35 +135,13 @@ class _UkraineMapState extends State<UkraineMap>
 
   // --- Projection helpers (recomputed from current size) ----------------------
 
-  _Fit _fit(Size size) => _geoFit(size);
-
   void _autoFocus(Size size) {
-    // No targets → show the whole country, centred (recognisable Ukraine),
-    // instead of zooming onto an empty area around home.
-    if (widget.targets.isEmpty) {
-      _scale = 1;
-      _tx = 0;
-      _ty = 0;
-      return;
-    }
-    final fit = _fit(size);
-    final lons = <double>[widget.home.lon];
-    final lats = <double>[widget.home.lat];
-    for (final t in widget.targets) {
-      lons.add(t.lon);
-      lats.add(t.lat);
-    }
-    final cx = (lons.reduce(math.min) + lons.reduce(math.max)) / 2;
-    final cy = (lats.reduce(math.min) + lats.reduce(math.max)) / 2;
-    final lo = math.max(4.4, (lons.reduce(math.max) - lons.reduce(math.min)) * 1.5);
-    final la = math.max(3.2, (lats.reduce(math.max) - lats.reduce(math.min)) * 1.5);
-    final a = fit.project(cx - lo / 2, cy + la / 2);
-    final b = fit.project(cx + lo / 2, cy - la / 2);
-    final bw = (b.dx - a.dx).abs(), bh = (b.dy - a.dy).abs();
-    _scale = math.max(1, math.min(3.4, math.min(size.width / bw, size.height / bh)));
-    final mid = fit.project(cx, cy);
-    _tx = size.width / 2 - mid.dx * _scale;
-    _ty = size.height / 2 - mid.dy * _scale;
+    // Default view = the WHOLE country, centred and evenly proportioned (like the
+    // clean bot map). Zoom in with pinch / wheel / the + button to see towns and
+    // villages. This keeps the default map recognisable and uncluttered.
+    _scale = 1;
+    _tx = 0;
+    _ty = 0;
   }
 
   void _zoomAt(Offset center, double factor) {
