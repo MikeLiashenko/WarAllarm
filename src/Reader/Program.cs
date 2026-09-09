@@ -358,6 +358,39 @@ if (!string.IsNullOrWhiteSpace(ntfyTopic))
 else
     Console.WriteLine("📲 Push ВЫКЛ. Чтобы телефон звонил — добавь строку  ntfy_topic=...  в secrets.local.txt\n");
 
+// ── Telegram-бот: підписка /start, /status, авто-сповіщення підписникам ───────
+var botToken = SecretOpt("telegram_bot_token");
+if (!string.IsNullOrWhiteSpace(botToken))
+{
+    var bot = new TelegramBot(botToken, BuildBotStatus);
+    notifiers.Add(bot);                 // тривоги йдуть і підписникам бота
+    _ = bot.RunAsync();                 // фоновий цикл команд (long-polling)
+    Console.WriteLine($"🤖 Telegram-бот ВКЛ (підписників: {bot.SubscriberCount}). Напиши боту /start у Telegram.\n");
+}
+else
+    Console.WriteLine("🤖 Telegram-бот ВИКЛ. Додай  telegram_bot_token=...  у secrets.local.txt (токен від @BotFather).\n");
+
+// Готує текст обстановки для бота: ймовірність удару (RiskModel) + найближчі цілі.
+string BuildBotStatus()
+{
+    var list = tracker.Active.Where(t => t.Pos is not null).Select(t => (t, t.Amount)).ToList();
+    var a = RiskModel.For((HomeLat, HomeLon), list);
+    var sb = new StringBuilder();
+    sb.AppendLine($"📍 {MyDistrict}, {MyCity}");
+    sb.AppendLine($"🎯 Ймовірність удару: {a.Percent}% — {a.Verdict}");
+    var near = tracker.Active.Where(t => t.DistKm is not null).OrderBy(t => t.DistKm).Take(6).ToList();
+    if (near.Count == 0)
+        sb.AppendLine("🟢 Активних цілей поруч немає.");
+    else
+    {
+        sb.AppendLine($"\nАктивні цілі ({tracker.Active.Count}):");
+        foreach (var t in near)
+            sb.AppendLine($"• {ThreatTracker.Label(t)} — {t.DistKm:0} км, {ThreatTracker.StageLabel(t.Stage)}"
+                + (t.LastPlace.Length > 0 ? $", біля {t.LastPlace}" : ""));
+    }
+    return sb.ToString();
+}
+
 // Рассылает тревогу во все подключённые каналы (падение одного не роняет остальные).
 async Task Alert(AlarmInfo info)
 {

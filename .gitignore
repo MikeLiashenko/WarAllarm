@@ -10,6 +10,7 @@ map.html
 *.session
 updates.state
 WTelegram.log
+bot_subscribers.json
 run.out
 index.html
 
