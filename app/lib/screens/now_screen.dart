@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/alarm_controller.dart';
+import '../controllers/alerts_controller.dart';
 import '../controllers/map_data_controller.dart';
+import '../domain/probability.dart';
 import '../domain/situation.dart';
 import '../models/map_target.dart';
 import '../models/monitored_place.dart';
@@ -10,6 +12,7 @@ import '../theme/app_colors.dart';
 import '../widgets/analytics_dashboard.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/place_selector.dart';
+import '../widgets/probability_gauge.dart';
 import '../widgets/responsive.dart';
 import '../widgets/threat_circle.dart';
 import 'home_shell.dart';
@@ -34,7 +37,16 @@ class NowScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = context.watch<MapDataController>();
     final alarm = context.watch<AlarmController>();
+    final alerts = context.watch<AlertsController>();
     final sel = _selThreats(data);
+
+    // Attack-probability per selected place, strongest first.
+    final probs = data.selectedPlaces
+        .map((p) => probabilityFor(p, data.targets,
+            officialLevel: officialLevelFor(p, alerts.levels)))
+        .toList()
+      ..sort((a, b) => b.percent.compareTo(a.percent));
+    final probByPlace = {for (final pr in probs) pr.place.id: pr};
     final worst = worstOf(sel);
     final rank = worst == null ? 0 : (kRank[worst.stage] ?? 0);
     // Red when the real alarm logic (distance to the selected place) fires,
@@ -107,11 +119,37 @@ class NowScreen extends StatelessWidget {
           ),
           const SizedBox(height: 18),
 
+          // Attack probability (also published over the API as state.risk)
+          if (probs.isNotEmpty) ...[
+            Row(
+              children: [
+                _sectionLabel('Ймовірність удару'),
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySoft,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text('через API',
+                      style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primaryDark)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ProbabilityGauge(prob: probs.first),
+            const SizedBox(height: 18),
+          ],
+
           // Place status cards
           _sectionLabel('Мої місця'),
           const SizedBox(height: 10),
-          ...data.selectedPlaces
-              .map((p) => _PlaceCard(place: p, data: data)),
+          ...data.selectedPlaces.map(
+              (p) => _PlaceCard(place: p, data: data, prob: probByPlace[p.id])),
           const SizedBox(height: 18),
 
           // Analytics
@@ -245,9 +283,10 @@ class _ConnBanner extends StatelessWidget {
 }
 
 class _PlaceCard extends StatelessWidget {
-  const _PlaceCard({required this.place, required this.data});
+  const _PlaceCard({required this.place, required this.data, this.prob});
   final MonitoredPlace place;
   final MapDataController data;
+  final ThreatProbability? prob;
 
   @override
   Widget build(BuildContext context) {
@@ -297,6 +336,15 @@ class _PlaceCard extends StatelessWidget {
                         color: AppColors.textPrimary)),
               ),
               const Spacer(),
+              if (prob != null)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Text('${prob!.percent}%',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: accent)),
+                ),
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

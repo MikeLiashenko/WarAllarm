@@ -6,6 +6,7 @@ import '../controllers/settings_controller.dart';
 import '../controllers/theme_controller.dart';
 import '../data/places_gazetteer.dart';
 import '../data/ukraine_geo.dart';
+import '../domain/probability.dart';
 
 /// Gives the AI assistant real *hands*: a small set of tools it can call to read
 /// the live threat picture and to change the app (add places, tune settings…).
@@ -44,6 +45,12 @@ class AiToolbox {
           'get_places',
           'Список збережених користувачем місць, які він відстежує, і чи '
               'увімкнені для них сповіщення.',
+          {},
+        ),
+        _tool(
+          'get_attack_probability',
+          'Обчислити ймовірність удару (0–99%) по кожному місцю користувача та '
+              'дому: відсоток, вердикт (прилетить/навряд) і головні чинники.',
           {},
         ),
         _tool(
@@ -116,6 +123,8 @@ class AiToolbox {
         return _getTargets();
       case 'get_places':
         return _getPlaces();
+      case 'get_attack_probability':
+        return _getProbability();
       case 'get_settings':
         return _getSettings();
       case 'add_place':
@@ -174,6 +183,25 @@ class AiToolbox {
           },
       ],
     };
+  }
+
+  Map<String, dynamic> _getProbability() {
+    final rows = <Map<String, dynamic>>[];
+    for (final pl in map.places) {
+      final pr = probabilityFor(pl, map.targets);
+      rows.add({
+        'place': pl.name,
+        'percent': pr.percent,
+        'verdict': pr.verdict,
+        if (pr.byKind.isNotEmpty) 'byKind': pr.byKind,
+        'factors': [
+          for (final f in pr.factors.take(3))
+            {'label': f.target.label, 'dist_km': f.distKm.round(), 'percent': f.percent},
+        ],
+      });
+    }
+    rows.sort((a, b) => (b['percent'] as int).compareTo(a['percent'] as int));
+    return {'ok': true, 'places': rows};
   }
 
   Map<String, dynamic> _getSettings() {

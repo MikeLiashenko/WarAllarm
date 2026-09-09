@@ -55,6 +55,13 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
             onCopy: _copy,
           ),
           _Endpoint(
+            title: 'Ймовірність удару 🎯',
+            desc: 'risk: шанс удару (0–99%) по дому й місцях — percent, verdict '
+                '(прилетить/навряд), cls, byKind{тип:%}, factors[]. Рахує Reader.',
+            url: '$_base/state/risk.json',
+            onCopy: _copy,
+          ),
+          _Endpoint(
             title: 'Аналітика (журнал тривог)',
             desc: 'rows[]: d(дата), h(година), k(тип), z(зона), g(рівень).',
             url: '$_base/state/rows.json',
@@ -161,7 +168,12 @@ BASE = "$_base"
 data = requests.get(f"{BASE}/state.json").json() or {}
 for t in (data.get("threats") or []):
     print(t["label"], t.get("place",""), t.get("dist"), "км",
-          t.get("stageLabel",""))''';
+          t.get("stageLabel",""))
+
+# Ймовірність удару по дому
+risk = requests.get(f"{BASE}/state/risk.json").json() or {}
+home = risk.get("home") or {}
+print("Дім:", home.get("percent"), "% —", home.get("verdict"))''';
       case 1:
         return '''const BASE = "$_base";
 
@@ -169,9 +181,13 @@ for t in (data.get("threats") or []):
 const data = await (await fetch(`\${BASE}/state.json`)).json() ?? {};
 for (const t of data.threats ?? []) {
   console.log(t.label, t.place ?? "", t.dist, "км", t.stageLabel ?? "");
-}''';
+}
+
+// Ймовірність удару по дому
+const risk = await (await fetch(`\${BASE}/state/risk.json`)).json() ?? {};
+console.log("Дім:", risk.home?.percent, "% —", risk.home?.verdict);''';
       default:
-        return 'curl "$_base/state.json"';
+        return 'curl "$_base/state/risk.json"';
     }
   }
 }

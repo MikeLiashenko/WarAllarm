@@ -110,6 +110,9 @@ public static class MapWriter
         sb.Append(']');
         sb.Append(",\"stats\":"); AppendStats(sb, now);
         sb.Append(",\"rows\":"); AppendRows(sb, now);
+        // Ймовірність удару (дім + місця) — той самий рушій, що в застосунку.
+        // Публікується у Firebase і віддається публічним API (state.risk).
+        sb.Append(",\"risk\":"); RiskModel.AppendJson(sb, home, merged, Config?.Places);
         if (Config is { } cf)
         {
             sb.Append(",\"cfg\":{");
