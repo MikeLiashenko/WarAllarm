@@ -50,6 +50,8 @@ dependencies:
   # --- Background alarm: keep watching the sky with the app closed/locked ---
   flutter_background_service: ^5.1.0
   flutter_local_notifications: ^18.0.1
+  # Home-screen widget (Android): status + probability without opening the app
+  home_widget: ^0.7.0
 
 dev_dependencies:
   flutter_test:

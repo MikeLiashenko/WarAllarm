@@ -12,6 +12,7 @@ import '../domain/alarm_decision.dart';
 import '../firebase_config.dart';
 import '../models/map_target.dart';
 import '../models/monitored_place.dart';
+import 'home_widget_service.dart';
 
 /// Keeps WarAlarm watching the sky even when the app is CLOSED or the phone is
 /// LOCKED (Android). A foreground service polls the live RTDB `state` and, on a
@@ -134,6 +135,7 @@ class BackgroundAlarm {
     var appFront = false;
     var wasAlarm = false;
     DateTime? lastNotified;
+    var lastWidgetMs = 0;
 
     service.on('stopService').listen((_) => service.stopSelf());
     service.on('appFront').listen((e) => appFront = (e?['v'] as bool?) ?? false);
@@ -161,10 +163,25 @@ class BackgroundAlarm {
           }
         }
 
+        final radius = _getDouble(prefs, 'set_alarm_radius', 25).clamp(5, 100);
+
+        // Keep the home-screen widget fresh even with the app closed (~30 s).
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
+        final home = data['home'];
+        if (home is Map && home['lat'] != null && nowMs - lastWidgetMs > 30000) {
+          lastWidgetMs = nowMs;
+          await HomeWidgetService.push(
+            placeName: (data['homeName'] ?? 'Дім').toString(),
+            lat: (home['lat'] as num).toDouble(),
+            lon: (home['lon'] as num).toDouble(),
+            targets: targets,
+            radiusKm: radius.toDouble(),
+          );
+        }
+
         // Notified places from the same store the UI writes.
         final places = _loadNotifiedPlaces(prefs);
         if (places.isEmpty) return;
-        final radius = _getDouble(prefs, 'set_alarm_radius', 25).clamp(5, 100);
 
         final d = evaluateAlarm(
             targets: targets, places: places, radiusKm: radius.toDouble());

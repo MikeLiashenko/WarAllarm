@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/alerts_controller.dart';
+import '../controllers/map_data_controller.dart';
 import '../controllers/nav_controller.dart';
+import '../controllers/settings_controller.dart';
+import '../domain/probability.dart';
+import '../models/monitored_place.dart';
 import '../services/background_alarm.dart';
+import '../services/home_widget_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/alarm_overlay.dart';
 import '../widgets/app_sidebar.dart';
@@ -25,6 +31,11 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
+  MapDataController? _map;
+  AlertsController? _alerts;
+  SettingsController? _settings;
+  DateTime _lastWidget = DateTime.fromMillisecondsSinceEpoch(0);
+
   @override
   void initState() {
     super.initState();
@@ -32,10 +43,36 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // The in-app siren handles alerts while we're open; tell the background
     // watcher to stay quiet so it doesn't double up.
     BackgroundAlarm.setAppForeground(true);
+    // Keep the home-screen widget fresh while the app is open.
+    _map = context.read<MapDataController>()..addListener(_pushWidget);
+    _alerts = context.read<AlertsController>()..addListener(_pushWidget);
+    _settings = context.read<SettingsController>();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pushWidget());
+  }
+
+  void _pushWidget() {
+    final map = _map, alerts = _alerts, settings = _settings;
+    if (map == null || alerts == null || settings == null) return;
+    final now = DateTime.now();
+    if (now.difference(_lastWidget).inSeconds < 20) return; // throttle
+    _lastWidget = now;
+    final home = MonitoredPlace(
+        id: 'home', icon: '🏠', name: map.homeName, lat: map.home.lat, lon: map.home.lon);
+    HomeWidgetService.push(
+      placeName: map.homeName,
+      lat: map.home.lat,
+      lon: map.home.lon,
+      targets: map.isDemo ? const [] : map.targets,
+      radiusKm: settings.alarmRadiusKm,
+      officialLevel: officialLevelFor(home, alerts.levels),
+      live: map.live,
+    );
   }
 
   @override
   void dispose() {
+    _map?.removeListener(_pushWidget);
+    _alerts?.removeListener(_pushWidget);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
