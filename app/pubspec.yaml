@@ -47,6 +47,9 @@ dependencies:
   # Share a captured map screenshot
   share_plus: ^10.1.4
   path_provider: ^2.1.5
+  # --- Background alarm: keep watching the sky with the app closed/locked ---
+  flutter_background_service: ^5.1.0
+  flutter_local_notifications: ^18.0.1
 
 dev_dependencies:
   flutter_test:

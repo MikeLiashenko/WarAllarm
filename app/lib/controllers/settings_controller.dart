@@ -14,6 +14,7 @@ class SettingsController extends ChangeNotifier {
     _alarmRadiusKm = _store.getDouble('set_alarm_radius', fallback: 25).clamp(5, 100);
     _audibilityKm = _store.getDouble('set_audibility_km', fallback: 15).clamp(3, 60);
     _showAudibility = _store.getBool('set_audibility_show', fallback: true);
+    _backgroundAlarm = _store.getBool('set_bg_alarm', fallback: false);
     _snoozeSeconds = _store.getDouble('set_snooze_sec', fallback: 90).round();
     _keepScreenOn = _store.getBool('set_keep_screen', fallback: false);
     _compactFeed = _store.getBool('set_compact_feed', fallback: false);
@@ -40,6 +41,7 @@ class SettingsController extends ChangeNotifier {
   double _alarmRadiusKm = 25;
   double _audibilityKm = 15;
   bool _showAudibility = true;
+  bool _backgroundAlarm = false;
   int _snoozeSeconds = 90;
   bool _keepScreenOn = false;
   bool _compactFeed = false;
@@ -55,6 +57,7 @@ class SettingsController extends ChangeNotifier {
   double get alarmRadiusKm => _alarmRadiusKm;
   double get audibilityKm => _audibilityKm;
   bool get showAudibility => _showAudibility;
+  bool get backgroundAlarm => _backgroundAlarm;
   int get snoozeSeconds => _snoozeSeconds;
   bool get keepScreenOn => _keepScreenOn;
   bool get compactFeed => _compactFeed;
@@ -96,6 +99,11 @@ class SettingsController extends ChangeNotifier {
 
   void setShowAudibility(bool v) =>
       _setBool('set_audibility_show', v, (x) => _showAudibility = x);
+
+  /// Note: persisted here; the actual service start/stop + permission prompt is
+  /// driven from the Settings screen (needs BuildContext / async).
+  void setBackgroundAlarm(bool v) =>
+      _setBool('set_bg_alarm', v, (x) => _backgroundAlarm = x);
 
   void setSnoozeSeconds(int v) {
     _snoozeSeconds = v;

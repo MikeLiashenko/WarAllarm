@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -7,6 +9,7 @@ import '../controllers/settings_controller.dart';
 import '../controllers/theme_controller.dart';
 import '../firebase_config.dart';
 import '../services/ai_service.dart';
+import '../services/background_alarm.dart';
 import '../theme/app_colors.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/section_header.dart';
@@ -79,6 +82,14 @@ class SettingsScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
+
+          if (Platform.isAndroid) ...[
+            _Group(
+              title: 'Фонові тривоги',
+              children: const [_BackgroundAlarmToggle()],
+            ),
+            const SizedBox(height: 14),
+          ],
 
           _Group(
             title: 'Тривога та карта',
@@ -438,6 +449,67 @@ class _SnoozeChoice extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Turns the Android foreground watcher on/off. On enable it requests the
+/// notification permission and warns about battery optimisation.
+class _BackgroundAlarmToggle extends StatefulWidget {
+  const _BackgroundAlarmToggle();
+  @override
+  State<_BackgroundAlarmToggle> createState() => _BackgroundAlarmToggleState();
+}
+
+class _BackgroundAlarmToggleState extends State<_BackgroundAlarmToggle> {
+  bool _busy = false;
+
+  Future<void> _toggle(bool v) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final settings = context.read<SettingsController>();
+    final messenger = ScaffoldMessenger.of(context);
+    if (v) {
+      final ok = await BackgroundAlarm.enable();
+      settings.setBackgroundAlarm(true);
+      messenger.showSnackBar(SnackBar(
+        content: Text(ok
+            ? 'Увімкнено. Щоб будило вночі — вимкни «оптимізацію батареї» для WarAlarm у налаштуваннях телефону.'
+            : 'Дозвіл на сповіщення не надано — увімкни його в налаштуваннях телефону.'),
+        duration: const Duration(seconds: 6),
+      ));
+    } else {
+      await BackgroundAlarm.disable();
+      settings.setBackgroundAlarm(false);
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Фонові тривоги вимкнено')));
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<SettingsController>();
+    return Column(
+      children: [
+        _ToggleRow(
+          icon: Icons.shield_moon_rounded,
+          title: 'Стежити із закритим застосунком',
+          subtitle: 'Розбудить навіть уночі, коли телефон заблоковано',
+          value: s.backgroundAlarm,
+          onChanged: _busy ? (_) {} : _toggle,
+          accent: AppColors.threat,
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          child: Text(
+            'WarAlarm працюватиме у фоні й покаже гучну повноекранну тривогу, '
+            'коли загроза підійде до твого місця. Потрібні: дозвіл на сповіщення '
+            'і вимкнена «оптимізація батареї». Не тривожить на демо-даних.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+          ),
+        ),
+      ],
     );
   }
 }

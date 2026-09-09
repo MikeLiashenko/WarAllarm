@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/nav_controller.dart';
+import '../services/background_alarm.dart';
 import '../theme/app_colors.dart';
 import '../widgets/alarm_overlay.dart';
 import '../widgets/app_sidebar.dart';
@@ -16,8 +17,33 @@ import 'settings_screen.dart';
 
 /// Root layout: fixed left sidebar + active screen. Responsive between desktop
 /// windows and Android phone ratios.
-class HomeShell extends StatelessWidget {
+class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
+
+  @override
+  State<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // The in-app siren handles alerts while we're open; tell the background
+    // watcher to stay quiet so it doesn't double up.
+    BackgroundAlarm.setAppForeground(true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    BackgroundAlarm.setAppForeground(state == AppLifecycleState.resumed);
+  }
 
   @override
   Widget build(BuildContext context) {
