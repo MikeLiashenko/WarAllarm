@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/ai_session.dart';
 import '../services/ai_service.dart';
+import '../services/ai_tools.dart';
 import '../services/local_store.dart';
 
 /// Manages multi-session AI conversations with persisted history.
@@ -89,6 +90,7 @@ class AiController extends ChangeNotifier {
     String apiKey = '',
     String model = '',
     String situation = '',
+    AiToolbox? toolbox,
   }) async {
     final trimmed = text.trim();
     final session = active;
@@ -111,20 +113,44 @@ class AiController extends ChangeNotifier {
     String reply;
     if (apiKey.trim().isNotEmpty) {
       // Real LLM call with the WarAlarm system prompt + live situation.
+      final canAct = toolbox != null;
       final system =
           'Ти — асистент застосунку повітряної тривоги WarAlarm для мешканця '
           'України. Тобі дають зведення про поточні повітряні загрози (тип, '
           'місце, відстань, ETA, стадія, напрямок). Відповідай КОРОТКО, '
           'спокійно і по суті українською, як досвідчений фахівець із безпеки. '
           'Без вступів і markdown. Ніколи не вигадуй загроз, яких немає у зведенні.'
+          '${canAct ? '\n\nУ тебе Є ІНСТРУМЕНТИ: можеш подивитися свіжі цілі '
+              '(get_targets), місця й налаштування, а також ЗМІНЮВАТИ застосунок — '
+              'додавати/видаляти місця, вмикати сповіщення, змінювати радіуси, '
+              'гучність, паузу й тему. Коли користувач просить щось зробити чи '
+              'уточнити цілі — виклич потрібний інструмент, а не вигадуй. Роби рівно '
+              'те, що просять; після дії коротко підтверди українською.' : ''}'
           '${situation.isEmpty ? '' : '\n\nПоточна обстановка:\n$situation'}';
+      final resolvedModel =
+          model.trim().isNotEmpty ? model : AiService.defaultModel(apiKey);
       try {
-        reply = await _ai.complete(
-          apiKey: apiKey,
-          model: model.trim().isNotEmpty ? model : AiService.defaultModel(apiKey),
-          systemPrompt: system,
-          history: session.messages,
-        );
+        if (canAct) {
+          toolbox.log.clear();
+          reply = await _ai.completeWithTools(
+            apiKey: apiKey,
+            model: resolvedModel,
+            systemPrompt: system,
+            history: session.messages,
+            tools: toolbox.specs,
+            runTool: toolbox.run,
+          );
+          if (toolbox.log.isNotEmpty) {
+            reply = '$reply\n\n🛠 ${toolbox.log.join('; ')}.';
+          }
+        } else {
+          reply = await _ai.complete(
+            apiKey: apiKey,
+            model: resolvedModel,
+            systemPrompt: system,
+            history: session.messages,
+          );
+        }
         lastReplyWasLive = true;
       } on AiException catch (e) {
         reply = '⚠ ${e.message}\n\n(Перевір ключ/модель у Налаштуваннях. '

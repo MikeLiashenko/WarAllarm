@@ -4,12 +4,15 @@ import 'package:provider/provider.dart';
 import '../controllers/ai_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/nav_controller.dart';
+import '../controllers/places_controller.dart';
 import '../controllers/settings_controller.dart';
+import '../controllers/theme_controller.dart';
 import '../domain/analytics.dart';
 import '../domain/situation.dart';
 import '../models/ai_session.dart';
 import '../models/map_target.dart';
 import '../models/monitored_place.dart';
+import '../services/ai_tools.dart';
 import '../theme/app_colors.dart';
 import '../utils/formatting.dart';
 import '../widgets/glass_container.dart';
@@ -55,17 +58,27 @@ class _AiScreenState extends State<AiScreen> {
     return b.toString();
   }
 
-  Future<void> _ask(BuildContext context) async {
-    final text = _input.text.trim();
+  Future<void> _ask(BuildContext context, [String? preset]) async {
+    final text = (preset ?? _input.text).trim();
     if (text.isEmpty) return;
-    _input.clear();
+    if (preset == null) _input.clear();
     final settings = context.read<SettingsController>();
     final data = context.read<MapDataController>();
+    // Give the assistant real hands only when a key is configured.
+    final toolbox = settings.aiConfigured
+        ? AiToolbox(
+            map: data,
+            places: context.read<PlacesController>(),
+            settings: settings,
+            theme: context.read<ThemeController>(),
+          )
+        : null;
     await context.read<AiController>().sendMessage(
           text,
           apiKey: settings.aiApiKey,
           model: settings.aiModel,
           situation: _situation(data, data.selectedPlaces),
+          toolbox: toolbox,
         );
   }
 
@@ -185,11 +198,20 @@ class _AiScreenState extends State<AiScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text('Асистент (Claude · Gemini)',
-                    style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Асистент (Claude · Gemini)',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary)),
+                    if (configured)
+                      Text('може дивитись цілі та змінювати застосунок',
+                          style: TextStyle(
+                              fontSize: 11.5, color: AppColors.textMuted)),
+                  ],
+                ),
               ),
               Container(
                 padding:
@@ -258,6 +280,23 @@ class _AiScreenState extends State<AiScreen> {
                       color: AppColors.textSecondary,
                       fontStyle: FontStyle.italic)),
             ),
+          if (configured && msgs.isEmpty && !ai.thinking) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final s in const [
+                  'Які цілі зараз найближче?',
+                  'Додай Полтаву',
+                  'Гучність на 80%',
+                  'Радіус тривоги 30 км',
+                  'Увімкни темну тему',
+                ])
+                  _chip(context, s),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           Row(
             children: [
@@ -289,6 +328,26 @@ class _AiScreenState extends State<AiScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _chip(BuildContext context, String text) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => _ask(context, text),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.primarySoft.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Text(text,
+            style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primaryDark)),
       ),
     );
   }
