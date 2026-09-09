@@ -394,20 +394,19 @@ class _MapPainter extends CustomPainter {
     for (final ob in oblasts) {
       canvas.drawPath(obPaths[ob]!, landPaint);
     }
-    // Official air-raid shading (🔴 active / 🟡 warning).
+    // Official air-raid shading — clean red / yellow like the official map.
     for (final ob in oblasts) {
       final lvl = oblastLevels[ob.name];
       if (lvl == null) continue;
-      final base = lvl == 'red'
-          ? const Color(0xFFFF3B30)
-          : const Color(0xFFF4B740);
+      final red = lvl == 'red';
+      final base = red ? const Color(0xFFE23A34) : const Color(0xFFFFC400);
       canvas.drawPath(
           obPaths[ob]!,
           Paint()
             ..style = PaintingStyle.fill
-            ..color = base.withValues(alpha: lvl == 'red' ? 0.32 : 0.26));
+            ..color = base.withValues(alpha: red ? 0.52 : 0.46));
     }
-    // Oblast borders + the country outline (they're the outer edges).
+    // Oblast borders (also the country outline — the outer edges).
     final borderPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0
@@ -415,6 +414,20 @@ class _MapPainter extends CustomPainter {
       ..color = AppColors.primary.withValues(alpha: 0.5);
     for (final ob in oblasts) {
       canvas.drawPath(obPaths[ob]!, borderPaint);
+    }
+    // Colored edge on alert oblasts, on top of the blue border, for definition.
+    for (final ob in oblasts) {
+      final lvl = oblastLevels[ob.name];
+      if (lvl == null) continue;
+      final red = lvl == 'red';
+      canvas.drawPath(
+          obPaths[ob]!,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.3
+            ..strokeJoin = StrokeJoin.round
+            ..color = (red ? const Color(0xFFE23A34) : const Color(0xFFFFC400))
+                .withValues(alpha: 0.9));
     }
 
     // --- Cities / towns / villages (tiered by zoom, thinned + de-cluttered) ---
