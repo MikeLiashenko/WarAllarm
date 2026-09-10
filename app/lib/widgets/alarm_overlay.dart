@@ -75,21 +75,24 @@ class _AlarmOverlayState extends State<AlarmOverlay>
       return const SizedBox.shrink();
     }
 
-    // Ringing → full-screen unmissable alarm.
+    // Ringing → full-screen unmissable alarm. The background and the button stay
+    // steady (opaque) so the button is always crisp and instantly tappable —
+    // only the 🚨 icon pulses, for the "alarm" feel.
     return Positioned.fill(
-      child: FadeTransition(
-        opacity: _pulse.drive(Tween(begin: 0.82, end: 1.0)),
-        child: Container(
-          color: AppColors.threat.withValues(alpha: 0.97),
-          child: SafeArea(
+      child: Container(
+        color: AppColors.threat.withValues(alpha: 0.97),
+        child: SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(28),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('🚨', style: TextStyle(fontSize: 72),
-                      textAlign: TextAlign.center),
+                  FadeTransition(
+                    opacity: _pulse.drive(Tween(begin: 0.45, end: 1.0)),
+                    child: const Text('🚨', style: TextStyle(fontSize: 72),
+                        textAlign: TextAlign.center),
+                  ),
                   const SizedBox(height: 8),
                   const Text('ТРИВОГА',
                       textAlign: TextAlign.center,
@@ -141,7 +144,6 @@ class _AlarmOverlayState extends State<AlarmOverlay>
             ),
           ),
         ),
-      ),
     );
   }
 }

@@ -114,12 +114,12 @@ class AlarmController extends ChangeNotifier {
     final vibrate = _settings.vibration;
     _svc.setVolume(_settings.alarmVolume); // keep loudness in sync live
 
-    // A strike or overhead is critical: override any active snooze.
-    final critical = (worst?.score ?? 0) >= 85;
-    final snoozing = snoozed && !critical;
+    // Respect the user's "Я в укритті — стоп" for the full snooze window — even
+    // for a close/critical target. It auto-re-arms after snoozeSeconds, so the
+    // alarm is never silenced for long, but the STOP button always works now.
+    final snoozing = snoozed;
 
     if (newLevel == 'alarm' && !snoozing) {
-      if (critical) _snoozeUntil = null; // cancel snooze on escalation
       if (!_ringing) {
         _ringing = true;
         _svc.startSiren(
