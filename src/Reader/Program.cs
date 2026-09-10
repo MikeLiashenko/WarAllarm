@@ -455,10 +455,11 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             {
                 var newly = snap.RedUa.Where(r => !prevRed.Contains(r)).ToList();
                 var cleared = prevRed.Where(r => !nowRed.Contains(r)).ToList();
+                // Тривога / відбій → перемальовуємо й постимо карту разом із текстом.
                 if (newly.Count > 0)
-                    await channel.Post(BuildAlarmPost(newly, snap), null); // карта окремо (10 хв)
+                    await channel.Post(BuildAlarmPost(newly, snap), await BuildBotMapPng(channel: true));
                 else if (cleared.Count > 0)
-                    await channel.Post(BuildClearPost(cleared, nowRed.Count), null);
+                    await channel.Post(BuildClearPost(cleared, nowRed.Count), await BuildBotMapPng(channel: true));
                 prevRed = nowRed;
             }
             else prevRed = nowRed;
