@@ -410,6 +410,8 @@ else
     Console.WriteLine("📢 Канал ВИКЛ. Додай  telegram_channel_bot_token=...  і  telegram_channel=@name  у secrets.local.txt.\n");
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
+// Живі новини каналу: дайджест активності цілей (шахеди/ракети по місцях) + карта.
+if (channelPoster is not null) _ = RunThreatNews(channelPoster);
 
 // Фоновий цикл офіційних тривог: оновлює API (state.alerts) + новини в канал при змінах.
 async Task RunAlertsLoop(ChannelPoster? channel)
@@ -488,6 +490,61 @@ static string BuildClearPost(List<string> cleared, int remaining)
     sb.AppendLine();
     sb.AppendLine($"Ще під тривогою: 🔴 {remaining} обл.");
     sb.Append("🤖 Авто-дані WarAlarm");
+    return sb.ToString();
+}
+
+// Живі новини: щохвилини дивимось активні цілі; коли картина ЗМІНИЛАСЬ і минуло
+// ≥2 хв від минулого посту — публікуємо дайджест (по типах, з місцями) + карту.
+async Task RunThreatNews(ChannelPoster channel)
+{
+    string lastKey = "";
+    var lastPost = DateTime.MinValue;
+    while (true)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(60));
+        try
+        {
+            var active = tracker.Active.Where(t => t.Pos is not null).ToList();
+            if (active.Count == 0) continue;
+            var key = string.Join("|", active
+                .Select(t => $"{t.Kind}:{t.LastPlace}:{t.Amount}")
+                .OrderBy(x => x));
+            if (key == lastKey) continue;                              // нічого нового
+            if (DateTime.Now - lastPost < TimeSpan.FromMinutes(2)) continue; // не спамимо
+            lastKey = key;
+            lastPost = DateTime.Now;
+            await channel.Post(BuildThreatPost(active), await BuildBotMapPng());
+        }
+        catch (Exception ex) { Console.Error.WriteLine("⚠ threatnews: " + ex.Message); }
+    }
+}
+
+static string KindUa(ThreatKind k) => k switch
+{
+    ThreatKind.Ballistic => "Балістика",
+    ThreatKind.Missile => "Ракети",
+    ThreatKind.Kab => "КАБи",
+    ThreatKind.Aviation => "Авіація",
+    ThreatKind.Drone => "Шахеди/БпЛА",
+    _ => "Цілі",
+};
+
+static string BuildThreatPost(List<Threat> active)
+{
+    var sb = new StringBuilder();
+    sb.AppendLine("🛸 Повітряна активність зараз:");
+    foreach (var g in active.GroupBy(t => KindUa(t.Kind))
+                            .OrderByDescending(g => g.Sum(t => t.Amount)))
+    {
+        int amount = g.Sum(t => t.Amount);
+        var places = g.Where(t => t.LastPlace.Length > 0)
+                      .Select(t => t.LastPlace).Distinct().Take(6).ToList();
+        sb.Append("• ").Append(g.Key);
+        if (amount > 1) sb.Append(" ×").Append(amount);
+        if (places.Count > 0) sb.Append(" → ").Append(string.Join(", ", places));
+        sb.AppendLine();
+    }
+    sb.Append("\n🤖 Авто-дані WarAlarm · перевіряйте офіційні джерела");
     return sb.ToString();
 }
 
