@@ -407,13 +407,19 @@ if (channelPoster is not null)
     Console.WriteLine($"📢 Новинний канал ВКЛ → {channelName} (вся Україна, виділення Київ/Харків/Дніпро).\n");
 else
     Console.WriteLine("📢 Канал ВИКЛ. Додай  telegram_channel_bot_token=...  і  telegram_channel=@name  у secrets.local.txt.\n");
+// Денні лічильники для авто-зведення в канал (оголошення тривог по областях
+// + помічені цілі за типом/місцем). Накопичуються в циклах, скидаються після зведення.
+var dayRed = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+var daySeen = new HashSet<string>();
+
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
-// Живі новини каналу: короткі тексти цілей + карта окремо (раз на 10 хв).
+// Живі новини каналу: короткі тексти цілей + карта окремо (раз на 10 хв) + денне зведення.
 if (channelPoster is not null)
 {
     _ = RunThreatNews(channelPoster);
     _ = RunMapLoop(channelPoster);
+    _ = RunDailyDigest(channelPoster);
 }
 
 // Карта в канал раз на 10 хв — але лише коли є що показати (цілі або тривоги),
@@ -454,6 +460,7 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             {
                 var newly = snap.RedUa.Where(r => !prevRed.Contains(r)).ToList();
                 var cleared = prevRed.Where(r => !nowRed.Contains(r)).ToList();
+                foreach (var r in newly) dayRed[r] = dayRed.GetValueOrDefault(r) + 1; // для зведення
                 // Тривога / відбій → перемальовуємо й постимо карту разом із текстом.
                 if (newly.Count > 0)
                     await channel.Post(BuildAlarmPost(newly, snap), await BuildBotMapPng(channel: true));
@@ -467,6 +474,50 @@ async Task RunAlertsLoop(ChannelPoster? channel)
         await Task.Delay(TimeSpan.FromSeconds(20));
     }
 }
+
+// Денне авто-зведення в канал — раз на добу, о ~09:00, потім лічильники скидаються.
+async Task RunDailyDigest(ChannelPoster channel)
+{
+    var lastDay = DateTime.Now.Date;
+    bool postedToday = DateTime.Now.Hour >= 9; // запуск після 9 → чекаємо завтра
+    while (true)
+    {
+        try { await Task.Delay(TimeSpan.FromMinutes(5)); } catch { }
+        var now = DateTime.Now;
+        if (now.Date != lastDay) { lastDay = now.Date; postedToday = false; }
+        if (!postedToday && now.Hour >= 9)
+        {
+            postedToday = true;
+            try { await channel.Post(BuildDigest(), null); } catch (Exception ex) { Console.Error.WriteLine("⚠ digest: " + ex.Message); }
+            dayRed.Clear(); daySeen.Clear();
+        }
+    }
+}
+
+string BuildDigest()
+{
+    var sb = new StringBuilder();
+    sb.AppendLine("📊 Зведення за добу");
+    int announces = dayRed.Values.Sum();
+    sb.AppendLine($"🔴 Оголошень тривог по областях: {announces}");
+    if (dayRed.Count > 0)
+        sb.AppendLine("Найактивніше: " + string.Join(", ",
+            dayRed.OrderByDescending(k => k.Value).Take(3).Select(k => $"{ShortReg(k.Key)} ×{k.Value}")));
+    var byKind = daySeen.GroupBy(x => x.Split('|')[0]).ToDictionary(g => g.Key, g => g.Count());
+    if (byKind.Count > 0)
+        sb.AppendLine("🛸 Цілі помічено: " + string.Join(" · ",
+            byKind.OrderByDescending(k => k.Value).Select(k => $"{KindShortEnum(k.Key)} {k.Value}")));
+    if (announces == 0 && byKind.Count == 0) sb.AppendLine("😌 Доба була відносно спокійною.");
+    sb.Append("\n🤖 Авто-дані WarAlarm · бережіть себе 🇺🇦");
+    return sb.ToString();
+}
+
+static string ShortReg(string ua) => ua.Replace(" область", "").Replace("м. ", "").Trim();
+static string KindShortEnum(string k) => k switch
+{
+    "Drone" => "шахеди", "Missile" => "ракети", "Ballistic" => "балістика",
+    "Kab" => "КАБи", "Aviation" => "авіація", _ => "цілі",
+};
 
 static string BuildAlertsJson(OfficialAlerts.Snapshot s)
 {
@@ -530,6 +581,7 @@ async Task RunThreatNews(ChannelPoster channel)
         {
             var active = tracker.Active.Where(t => t.Pos is not null).ToList();
             if (active.Count == 0) continue;
+            foreach (var t in active) daySeen.Add($"{t.Kind}|{t.LastPlace}"); // для зведення
             var key = string.Join("|", active
                 .Select(t => $"{t.Kind}:{t.LastPlace}:{t.Amount}")
                 .OrderBy(x => x));
