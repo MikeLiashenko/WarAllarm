@@ -442,7 +442,7 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             else prevRed = nowRed;
         }
         catch (Exception ex) { Console.Error.WriteLine("⚠ alerts: " + ex.Message); }
-        await Task.Delay(TimeSpan.FromSeconds(45));
+        await Task.Delay(TimeSpan.FromSeconds(20));
     }
 }
 
@@ -501,7 +501,9 @@ async Task RunThreatNews(ChannelPoster channel)
     var lastPost = DateTime.MinValue;
     while (true)
     {
-        await Task.Delay(TimeSpan.FromSeconds(60));
+        // Швидко: реактивні цілі перетинають місто за ~30 с, тож перевіряємо
+        // кожні 5 с. Перша поява → пост за ≤5 с; під час налёту оновлення ~20 с.
+        await Task.Delay(TimeSpan.FromSeconds(5));
         try
         {
             var active = tracker.Active.Where(t => t.Pos is not null).ToList();
@@ -509,8 +511,8 @@ async Task RunThreatNews(ChannelPoster channel)
             var key = string.Join("|", active
                 .Select(t => $"{t.Kind}:{t.LastPlace}:{t.Amount}")
                 .OrderBy(x => x));
-            if (key == lastKey) continue;                              // нічого нового
-            if (DateTime.Now - lastPost < TimeSpan.FromMinutes(2)) continue; // не спамимо
+            if (key == lastKey) continue;                                  // нічого нового
+            if (DateTime.Now - lastPost < TimeSpan.FromSeconds(20)) continue; // не спамимо
             lastKey = key;
             lastPost = DateTime.Now;
             await channel.Post(BuildThreatPost(active), await BuildBotMapPng());
