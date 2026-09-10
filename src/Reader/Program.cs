@@ -352,7 +352,7 @@ if (args.Length >= 1 && args[0].Equals("channeltest", StringComparison.OrdinalIg
         return;
     }
     Console.WriteLine($"📢 Тестовий пост у {cn} ...");
-    var png = await BuildBotMapPng();
+    var png = await BuildBotMapPng(channel: true);
     var poster = new ChannelPoster(ct!, cn!);
     await poster.Post(
         "🔔 Тест WarAlarm — карта загроз.\nОбласті: 🔴 офіційна тривога · 🟡 часткова. Наші цілі — точками.\n\n🤖 Авто-дані · перевіряйте офіційні джерела",
@@ -384,7 +384,7 @@ if (!string.IsNullOrWhiteSpace(botToken))
 {
     var features = new BotFeatures(
         Status: BuildBotStatus,
-        MapPng: BuildBotMapPng,
+        MapPng: () => BuildBotMapPng(),
         Risk: BuildBotRisk,
         Places: BuildBotPlaces,
         Ai: BuildBotAi,
@@ -429,7 +429,7 @@ async Task RunMapLoop(ChannelPoster channel)
             var snap = await OfficialAlerts.FetchFull();
             bool active = tracker.Active.Any(t => t.Pos is not null);
             if (!active && snap.RedUa.Count == 0 && snap.YellowUa.Count == 0) continue;
-            await channel.Post("🗺 Карта загроз — оновлення", await BuildBotMapPng());
+            await channel.Post("🗺 Карта загроз — оновлення", await BuildBotMapPng(channel: true));
         }
         catch (Exception ex) { Console.Error.WriteLine("⚠ maploop: " + ex.Message); }
     }
@@ -644,14 +644,21 @@ string BuildBotStatus()
     return sb.ToString();
 }
 
-// Малює поточну карту загроз у PNG для бота (/map): області — за ОФІЦІЙНОЮ
-// тривогою (red/yellow), наші цілі — точками зверху.
-async Task<byte[]?> BuildBotMapPng()
+// Малює поточну карту загроз у PNG: області за ОФІЦІЙНОЮ тривогою (red/yellow),
+// цілі — детальні силуети за курсом (як у застосунку), міста з підписами.
+// channel=true → нейтральний заголовок для каналу (без дому й «ймовірності»).
+async Task<byte[]?> BuildBotMapPng(bool channel = false)
 {
     var live = tracker.Active.Where(t => t.Pos is not null).ToList();
+    var snap = await OfficialAlerts.FetchFull();
+    if (channel)
+    {
+        var subtitle = $"Тривога: {snap.RedUa.Count} обл · часткова: {snap.YellowUa.Count} · цілей: {live.Count}";
+        return MapImage.Render((HomeLat, HomeLon), live, "WarAlarm · Карта тривог", subtitle, snap.ByPolygon, showHome: false);
+    }
     var a = RiskModel.For((HomeLat, HomeLon), live.Select(t => (t, t.Amount)).ToList());
-    var levels = await OfficialAlerts.Fetch();
-    return MapImage.Render((HomeLat, HomeLon), MyCity, live, a.Percent, a.Verdict, levels);
+    return MapImage.Render((HomeLat, HomeLon), live, $"WarAlarm · {MyCity}",
+        $"Ймовірність удару: {a.Percent}% — {a.Verdict}", snap.ByPolygon, showHome: true);
 }
 
 static string KindName(string cat) => cat switch
