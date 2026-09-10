@@ -410,8 +410,30 @@ else
     Console.WriteLine("📢 Канал ВИКЛ. Додай  telegram_channel_bot_token=...  і  telegram_channel=@name  у secrets.local.txt.\n");
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
-// Живі новини каналу: дайджест активності цілей (шахеди/ракети по місцях) + карта.
-if (channelPoster is not null) _ = RunThreatNews(channelPoster);
+// Живі новини каналу: короткі тексти цілей + карта окремо (раз на 10 хв).
+if (channelPoster is not null)
+{
+    _ = RunThreatNews(channelPoster);
+    _ = RunMapLoop(channelPoster);
+}
+
+// Карта в канал раз на 10 хв — але лише коли є що показати (цілі або тривоги),
+// щоб не постити порожню карту під час повного спокою.
+async Task RunMapLoop(ChannelPoster channel)
+{
+    while (true)
+    {
+        await Task.Delay(TimeSpan.FromMinutes(10));
+        try
+        {
+            var snap = await OfficialAlerts.FetchFull();
+            bool active = tracker.Active.Any(t => t.Pos is not null);
+            if (!active && snap.RedUa.Count == 0 && snap.YellowUa.Count == 0) continue;
+            await channel.Post("🗺 Карта загроз — оновлення", await BuildBotMapPng());
+        }
+        catch (Exception ex) { Console.Error.WriteLine("⚠ maploop: " + ex.Message); }
+    }
+}
 
 // Фоновий цикл офіційних тривог: оновлює API (state.alerts) + новини в канал при змінах.
 async Task RunAlertsLoop(ChannelPoster? channel)
@@ -434,7 +456,7 @@ async Task RunAlertsLoop(ChannelPoster? channel)
                 var newly = snap.RedUa.Where(r => !prevRed.Contains(r)).ToList();
                 var cleared = prevRed.Where(r => !nowRed.Contains(r)).ToList();
                 if (newly.Count > 0)
-                    await channel.Post(BuildAlarmPost(newly, snap), await BuildBotMapPng());
+                    await channel.Post(BuildAlarmPost(newly, snap), null); // карта окремо (10 хв)
                 else if (cleared.Count > 0)
                     await channel.Post(BuildClearPost(cleared, nowRed.Count), null);
                 prevRed = nowRed;
@@ -515,7 +537,7 @@ async Task RunThreatNews(ChannelPoster channel)
             if (DateTime.Now - lastPost < TimeSpan.FromSeconds(20)) continue; // не спамимо
             lastKey = key;
             lastPost = DateTime.Now;
-            await channel.Post(BuildThreatPost(active), await BuildBotMapPng());
+            await channel.Post(BuildThreatPost(active), null); // текст; карта — окремо (10 хв)
         }
         catch (Exception ex) { Console.Error.WriteLine("⚠ threatnews: " + ex.Message); }
     }
@@ -531,22 +553,22 @@ static string KindUa(ThreatKind k) => k switch
     _ => "Цілі",
 };
 
+// Короткий пост про цілі по Україні (без карти — вона окремо, раз на 10 хв).
 static string BuildThreatPost(List<Threat> active)
 {
     var sb = new StringBuilder();
-    sb.AppendLine("🛸 Повітряна активність зараз:");
-    foreach (var g in active.GroupBy(t => KindUa(t.Kind))
+    foreach (var g in active.GroupBy(t => t.Kind)
                             .OrderByDescending(g => g.Sum(t => t.Amount)))
     {
         int amount = g.Sum(t => t.Amount);
         var places = g.Where(t => t.LastPlace.Length > 0)
-                      .Select(t => t.LastPlace).Distinct().Take(6).ToList();
-        sb.Append("• ").Append(g.Key);
+                      .Select(t => t.LastPlace).Distinct().Take(5).ToList();
+        sb.Append(ThreatParser.Icon(g.Key)).Append(' ').Append(KindUa(g.Key));
         if (amount > 1) sb.Append(" ×").Append(amount);
         if (places.Count > 0) sb.Append(" → ").Append(string.Join(", ", places));
         sb.AppendLine();
     }
-    sb.Append("\n🤖 Авто-дані WarAlarm · перевіряйте офіційні джерела");
+    sb.Append("🤖 Авто · звіряйтесь з офіційними");
     return sb.ToString();
 }
 
