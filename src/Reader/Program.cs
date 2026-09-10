@@ -383,16 +383,15 @@ var botToken = SecretOpt("telegram_bot_token");
 if (!string.IsNullOrWhiteSpace(botToken))
 {
     var features = new BotFeatures(
-        Status: BuildBotStatus,
+        StatusAt: StatusAt,
+        RiskAt: RiskAt,
+        AlarmAt: AlarmAt,
         MapPng: () => BuildBotMapPng(),
-        Risk: BuildBotRisk,
-        Places: BuildBotPlaces,
         Ai: BuildBotAi,
         Stats: BuildBotStats,
         Alerts: BuildBotAlerts);
     var bot = new TelegramBot(botToken, features);
-    notifiers.Add(bot);                 // тривоги йдуть і підписникам бота
-    _ = bot.RunAsync();                 // фоновий цикл команд (long-polling)
+    _ = bot.RunAsync();                 // команди + персональні тривоги по місту
     Console.WriteLine($"🤖 Telegram-бот ВКЛ (підписників: {bot.SubscriberCount}). Напиши боту /start у Telegram.\n");
 }
 else
@@ -624,22 +623,23 @@ static string BuildCityRaidPost(List<Threat> active, List<string> cities)
     return sb.ToString();
 }
 
-// Готує текст обстановки для бота: ймовірність удару (RiskModel) + найближчі цілі.
-string BuildBotStatus()
+// Статус по ТОЧЦІ (місто користувача): ймовірність + найближчі цілі.
+string StatusAt(double lat, double lon)
 {
-    var list = tracker.Active.Where(t => t.Pos is not null).Select(t => (t, t.Amount)).ToList();
-    var a = RiskModel.For((HomeLat, HomeLon), list);
+    var pt = (lat, lon);
+    var list = tracker.Active.Where(t => t.Pos is not null).ToList();
+    var a = RiskModel.For(pt, list.Select(t => (t, t.Amount)).ToList());
     var sb = new StringBuilder();
-    sb.AppendLine($"📍 {MyDistrict}, {MyCity}");
     sb.AppendLine($"🎯 Ймовірність удару: {a.Percent}% — {a.Verdict}");
-    var near = tracker.Active.Where(t => t.DistKm is not null).OrderBy(t => t.DistKm).Take(6).ToList();
-    if (near.Count == 0)
+    var near = list.Select(t => (t, km: ThreatGeo.Km(t.Pos!.Value, pt)))
+                   .OrderBy(x => x.km).Take(6).ToList();
+    if (near.Count == 0 || near[0].km > 70)
         sb.AppendLine("🟢 Активних цілей поруч немає.");
     else
     {
-        sb.AppendLine($"\nАктивні цілі ({tracker.Active.Count}):");
-        foreach (var t in near)
-            sb.AppendLine($"• {ThreatTracker.Label(t)} — {t.DistKm:0} км, {ThreatTracker.StageLabel(t.Stage)}"
+        sb.AppendLine("\nНайближчі цілі:");
+        foreach (var (t, km) in near.Where(x => x.km <= 250))
+            sb.AppendLine($"• {ThreatTracker.Label(t)} — {km:0} км, {ThreatTracker.StageLabel(t.Stage)}"
                 + (t.LastPlace.Length > 0 ? $", біля {t.LastPlace}" : ""));
     }
     return sb.ToString();
@@ -668,13 +668,13 @@ static string KindName(string cat) => cat switch
     "kab" => "КАБ", "avia" => "Авіація", _ => "Інше",
 };
 
-// Детальна ймовірність: відсоток + вердикт + розклад по типах + головні чинники.
-string BuildBotRisk()
+// Детальна ймовірність по ТОЧЦІ: відсоток + типи + головні чинники.
+string RiskAt(double lat, double lon)
 {
     var list = tracker.Active.Where(t => t.Pos is not null).Select(t => (t, t.Amount)).ToList();
-    var a = RiskModel.For((HomeLat, HomeLon), list);
+    var a = RiskModel.For((lat, lon), list);
     var sb = new StringBuilder();
-    sb.AppendLine($"🎯 Ймовірність удару по «{MyCity}»: {a.Percent}% — {a.Verdict}");
+    sb.AppendLine($"🎯 Ймовірність удару: {a.Percent}% — {a.Verdict}");
     if (a.ByKind.Count > 0)
     {
         sb.AppendLine("\nЗа типами:");
@@ -691,20 +691,22 @@ string BuildBotRisk()
     return sb.ToString();
 }
 
-// Ризик по всіх місцях (дім + місця з settings places=...).
-string BuildBotPlaces()
+// Чи тривога поруч із ТОЧКОЮ (для персональних сповіщень у боті).
+(bool alarm, string text) AlarmAt(double lat, double lon)
 {
-    var list = tracker.Active.Where(t => t.Pos is not null).Select(t => (t, t.Amount)).ToList();
-    var sb = new StringBuilder();
-    sb.AppendLine("📍 Ризик по місцях:");
-    var ah = RiskModel.For((HomeLat, HomeLon), list);
-    sb.AppendLine($"🏠 {MyCity} (дім): {ah.Percent}% — {ah.Verdict}");
-    foreach (var pl in extraPlaces)
+    var pt = (lat, lon);
+    var list = tracker.Active.Where(t => t.Pos is not null).ToList();
+    if (list.Count == 0) return (false, "");
+    Threat? top = null; double nearest = double.MaxValue;
+    foreach (var t in list)
     {
-        var ap = RiskModel.For((pl.lat, pl.lon), list);
-        sb.AppendLine($"📍 {pl.name}: {ap.Percent}% — {ap.Verdict}");
+        var d = ThreatGeo.Km(t.Pos!.Value, pt);
+        if (d < nearest) { nearest = d; top = t; }
     }
-    return sb.ToString();
+    var a = RiskModel.For(pt, list.Select(t => (t, t.Amount)).ToList());
+    bool alarm = nearest <= 25 || a.Percent >= 55;
+    string text = top != null ? $"{ThreatTracker.Label(top)} ~{nearest:0} км" : "";
+    return (alarm, text);
 }
 
 // Розумний аналіз обстановки від справжнього ІІ (Claude/Gemini), якщо ключ заданий.

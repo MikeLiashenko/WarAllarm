@@ -1,30 +1,33 @@
 using System.Text;
 using System.Text.Json;
 
-// ── WarAlarm · Telegram-бот ──────────────────────────────────────────────────
-// Повноцінний застосунок у боті: підписка, авто-тривоги, і всі функції додатку —
-// статус, карта КАРТИНКОЮ (/map), ймовірність, місця, ШІ-аналіз, аналітика,
-// офіційні тривоги. Кнопки-меню знизу. Токен — secrets.local.txt
-// (telegram_bot_token=...). Це БОТ (Bot API), окремий від акаунта-читача каналів.
+// ── WarAlarm · Telegram-бот (персональний) ───────────────────────────────────
+// Кожен користувач задає СВОЄ місто (пошук по великому списку ~5330 міст, як у
+// застосунку). Далі /status, /risk і тривоги — по його місту. Бот сам шле
+// сповіщення в особисті, коли загроза поруч із містом користувача.
+// Токен — secrets.local.txt (telegram_bot_token=...). Окремий від каналу.
 
-// Набір функцій застосунку, які Program передає боту (щоб бот не знав деталей ядра).
+// Що вміє ядро (Program передає): усе відносно точки (lat,lon).
 public sealed record BotFeatures(
-    Func<string> Status,
+    Func<double, double, string> StatusAt,
+    Func<double, double, string> RiskAt,
+    Func<double, double, (bool alarm, string text)> AlarmAt,
     Func<Task<byte[]?>> MapPng,
-    Func<string> Risk,
-    Func<string> Places,
     Func<Task<string>> Ai,
     Func<string> Stats,
     Func<Task<string>> Alerts);
 
-public sealed class TelegramBot : INotifier
+public sealed class TelegramBot
 {
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(60) };
     const string SubsFile = "bot_subscribers.json";
 
+    sealed record Place(string Name, double Lat, double Lon);
+
     readonly string _api;
     readonly BotFeatures _f;
-    readonly HashSet<long> _subs = new();
+    readonly Dictionary<long, Place?> _users = new();      // chat → місто (null = ще не задано)
+    readonly Dictionary<long, bool> _lastAlarm = new();    // для фронта тривоги
     long _offset;
 
     public TelegramBot(string token, BotFeatures features)
@@ -34,52 +37,32 @@ public sealed class TelegramBot : INotifier
         LoadSubs();
     }
 
-    public int SubscriberCount => _subs.Count;
+    public int SubscriberCount => _users.Count;
 
-    // Кнопки-меню знизу (як вкладки застосунку).
     static readonly object Keyboard = new
     {
         keyboard = new[]
         {
             new[] { "📊 Статус", "🗺 Карта" },
-            new[] { "🎯 Ризик", "📍 Місця" },
+            new[] { "🎯 Ризик", "📍 Моє місто" },
             new[] { "🤖 ШІ", "📈 Аналітика" },
             new[] { "🚨 Тривоги", "❓ Довідка" },
         },
         resize_keyboard = true,
     };
 
-    // ── INotifier: розсилка тривоги/відбою всім підписникам ──────────────────
-    public async Task Notify(AlarmInfo a)
-    {
-        if (_subs.Count == 0) return;
-        string msg = a.Clear
-            ? $"✅ ВІДБІЙ — можна виходити з укриття.\n{a.Headline}\n🕑 {a.Time}"
-            : $"🔴 ПОВІТРЯНА ТРИВОГА\n{a.Headline}\n➤ В укриття! Подалі від вікон, правило двох стін.\n🕑 {a.Time} · {a.Source}";
-        foreach (var chat in _subs.ToArray())
-            try { await Send(chat, msg); } catch { /* один невдалий чат не спиняє інших */ }
-        // На тривозі — одразу й свіжа карта.
-        if (!a.Clear)
-        {
-            byte[]? png = null;
-            try { png = await _f.MapPng(); } catch { }
-            if (png is not null)
-                foreach (var chat in _subs.ToArray())
-                    try { await SendPhoto(chat, png, "🗺 Карта загроз зараз"); } catch { }
-        }
-    }
-
-    // ── Фоновий цикл: тягне команди через long-polling ───────────────────────
+    // ── Фонові цикли ──────────────────────────────────────────────────────────
     public async Task RunAsync(CancellationToken ct = default)
     {
-        try { await InitOffset(); } catch { /* мережа — спробуємо в циклі */ }
+        try { await InitOffset(); } catch { }
+        _ = RunUserAlarms(ct);                 // персональні тривоги в особисті
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                foreach (var (updateId, chat, text) in await GetUpdates(ct))
+                foreach (var (id, chat, text) in await GetUpdates(ct))
                 {
-                    _offset = updateId + 1;
+                    _offset = id + 1;
                     await Handle(chat, text.Trim());
                 }
             }
@@ -92,90 +75,113 @@ public sealed class TelegramBot : INotifier
         }
     }
 
+    // Кожні ~10 с: для кожного користувача з містом — тривога поруч → сповіщення.
+    async Task RunUserAlarms(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(10), ct); } catch { break; }
+            foreach (var (chat, place) in _users.ToArray())
+            {
+                if (place is null) continue;
+                var (alarm, text) = _f.AlarmAt(place.Lat, place.Lon);
+                bool last = _lastAlarm.TryGetValue(chat, out var l) && l;
+                if (alarm && !last)
+                    try { await Send(chat, $"🔴 ТРИВОГА поруч — {place.Name}!\n{text}\n➤ В укриття! Подалі від вікон, правило двох стін."); } catch { }
+                else if (!alarm && last)
+                    try { await Send(chat, $"🟢 Відбій — {place.Name}. Наразі поруч чисто."); } catch { }
+                _lastAlarm[chat] = alarm;
+            }
+        }
+    }
+
+    // ── Команди ───────────────────────────────────────────────────────────────
     async Task Handle(long chat, string text)
     {
-        // Нормалізуємо: і слеш-команди, і текст кнопок.
         var cmd = text.Split(' ', '\n')[0].Split('@')[0].ToLowerInvariant();
 
         switch (cmd)
         {
             case "/start":
-                var isNew = _subs.Add(chat);
+                bool isNew = !_users.ContainsKey(chat);
+                if (isNew) _users[chat] = null;
                 SaveSubs();
                 await Send(chat,
                     "🛡 Вітаю у WarAlarm!\n\n"
-                    + (isNew ? "Ти підписаний — я сповіщу, коли поруч буде загроза.\n\n" : "Ти вже підписаний.\n\n")
-                    + "Користуйся кнопками знизу або командами:\n"
-                    + "/status /map /risk /places /ai /stats /alerts /stop",
+                    + "Напиши назву свого міста (напр. «Полтава» або «Бровари») — і я "
+                    + "сповіщатиму, коли загроза буде поруч, та показуватиму ризик саме по ньому.",
                     withKeyboard: true);
-                await Send(chat, _f.Status());
                 return;
 
             case "/stop":
-                _subs.Remove(chat);
+                _users.Remove(chat); _lastAlarm.Remove(chat);
                 SaveSubs();
-                await Send(chat, "Відписано. Напиши /start, щоб знову отримувати тривоги.");
+                await Send(chat, "Відписано. /start — щоб знову.");
                 return;
 
             case "/help":
                 await Send(chat,
-                    "WarAlarm — тривоги повітряної небезпеки.\n\n"
-                    + "📊 Статус — поточні цілі + ймовірність\n"
-                    + "🗺 Карта — карта загроз картинкою\n"
-                    + "🎯 Ризик — детальна ймовірність по типах\n"
-                    + "📍 Місця — ризик по твоїх місцях\n"
-                    + "🤖 ШІ — розумний аналіз обстановки\n"
-                    + "📈 Аналітика — статистика тривог\n"
-                    + "🚨 Тривоги — офіційні тривоги по областях\n"
-                    + "/stop — відписатися\n\n"
-                    + "Бот сам надсилає сповіщення при загрозі поруч.",
+                    "WarAlarm — тривоги повітряної небезпеки по ТВОЄМУ місту.\n\n"
+                    + "📍 Моє місто — задати/змінити місто\n"
+                    + "📊 Статус — цілі + ймовірність по твоєму місту\n"
+                    + "🎯 Ризик — детально по типах\n🗺 Карта — карта України\n"
+                    + "🚨 Тривоги — офіційні по областях\n📈 Аналітика — статистика\n"
+                    + "🤖 ШІ — розумний аналіз\n/stop — відписатися",
                     withKeyboard: true);
                 return;
         }
 
-        // Кнопки / слова.
-        if (Match(text, cmd, "/status", "📊", "статус")) { await Send(chat, _f.Status()); return; }
-        if (Match(text, cmd, "/risk", "🎯", "ризик"))    { await Send(chat, _f.Risk()); return; }
-        if (Match(text, cmd, "/places", "📍", "місця"))  { await Send(chat, _f.Places()); return; }
-        if (Match(text, cmd, "/stats", "📈", "аналітика")) { await Send(chat, _f.Stats()); return; }
-        if (Match(text, cmd, "/help", "❓", "довідка"))  { await Handle(chat, "/help"); return; }
-
+        // Кнопки-«вкладки».
         if (Match(text, cmd, "/map", "🗺", "карта"))
         {
             await Send(chat, "🗺 Малюю карту…");
-            byte[]? png = null;
-            try { png = await _f.MapPng(); } catch (Exception ex) { Console.Error.WriteLine("map: " + ex.Message); }
-            if (png is not null) await SendPhoto(chat, png, "🗺 Карта загроз зараз");
-            else await Send(chat, "Не вдалося намалювати карту.");
+            var png = await _f.MapPng();
+            if (png != null) await SendPhoto(chat, png, "🗺 Карта тривог"); else await Send(chat, "Не вдалося.");
             return;
         }
-
-        if (Match(text, cmd, "/ai", "🤖", "ші", "ии"))
+        if (Match(text, cmd, "/stats", "📈", "аналітика")) { await Send(chat, _f.Stats()); return; }
+        if (Match(text, cmd, "/alerts", "🚨", "тривоги")) { await Send(chat, "🚨 Перевіряю…"); await Send(chat, await _f.Alerts()); return; }
+        if (Match(text, cmd, "/ai", "🤖", "ші", "ии")) { await Send(chat, "🤖 Аналізую…"); await Send(chat, await _f.Ai()); return; }
+        if (Match(text, cmd, "/place", "📍", "моє місто", "мое место", "місто", "город"))
         {
-            await Send(chat, "🤖 Аналізую обстановку…");
-            string reply;
-            try { reply = await _f.Ai(); } catch (Exception ex) { reply = "ІІ недоступний: " + ex.Message; }
-            await Send(chat, reply);
+            await Send(chat, "Напиши назву свого міста (напр. «Львів», «Ірпінь», «Ізюм»):");
             return;
         }
 
-        if (Match(text, cmd, "/alerts", "🚨", "тривоги"))
+        bool hasCity = _users.TryGetValue(chat, out var pl) && pl is not null;
+        if (Match(text, cmd, "/status", "📊", "статус"))
         {
-            await Send(chat, "🚨 Перевіряю офіційні тривоги…");
-            string reply;
-            try { reply = await _f.Alerts(); } catch (Exception ex) { reply = "Не вдалося отримати: " + ex.Message; }
-            await Send(chat, reply);
+            if (!hasCity) { await Send(chat, "Спершу напиши назву свого міста 📍"); return; }
+            await Send(chat, $"📍 {pl!.Name}\n" + _f.StatusAt(pl.Lat, pl.Lon));
+            return;
+        }
+        if (Match(text, cmd, "/risk", "🎯", "ризик"))
+        {
+            if (!hasCity) { await Send(chat, "Спершу напиши назву свого міста 📍"); return; }
+            await Send(chat, $"📍 {pl!.Name}\n" + _f.RiskAt(pl.Lat, pl.Lon));
             return;
         }
 
-        await Send(chat, "Не зрозумів. Тисни кнопки знизу або /help.", withKeyboard: true);
+        // Інакше — вважаємо це назвою міста → шукаємо у великому списку.
+        var hit = Cities.Find(text);
+        if (hit is { } c)
+        {
+            _users[chat] = new Place(c.name, c.lat, c.lon);
+            _lastAlarm.Remove(chat);
+            SaveSubs();
+            await Send(chat, $"✅ Твоє місто: {c.name}.\nТепер /status і тривоги — по ньому. Змінити — просто напиши іншу назву.", withKeyboard: true);
+            return;
+        }
+        var sug = Cities.Suggest(text);
+        await Send(chat, sug.Count > 0
+            ? "Не знайшов точно. Може, одне з цих?\n" + string.Join("\n", sug)
+            : "Не знайшов такого міста. Спробуй іншу назву (українською).");
     }
 
     static bool Match(string text, string cmd, params string[] keys)
     {
         var low = text.ToLowerInvariant();
-        foreach (var k in keys)
-            if (cmd == k || low.Contains(k)) return true;
+        foreach (var k in keys) if (cmd == k || low.Contains(k)) return true;
         return false;
     }
 
@@ -187,19 +193,18 @@ public sealed class TelegramBot : INotifier
             _offset = Math.Max(_offset, u.GetProperty("update_id").GetInt64() + 1);
     }
 
-    async Task<List<(long updateId, long chat, string text)>> GetUpdates(CancellationToken ct)
+    async Task<List<(long id, long chat, string text)>> GetUpdates(CancellationToken ct)
     {
         var outp = new List<(long, long, string)>();
-        using var doc = await GetJson(
-            $"{_api}/getUpdates?timeout=25&offset={_offset}&allowed_updates=[\"message\"]", ct);
+        using var doc = await GetJson($"{_api}/getUpdates?timeout=25&offset={_offset}&allowed_updates=[\"message\"]", ct);
         foreach (var u in doc.RootElement.GetProperty("result").EnumerateArray())
         {
             var id = u.GetProperty("update_id").GetInt64();
             if (!u.TryGetProperty("message", out var m) ||
                 !m.TryGetProperty("text", out var t) ||
-                !m.TryGetProperty("chat", out var c))
+                !m.TryGetProperty("chat", out var ch))
             { _offset = Math.Max(_offset, id + 1); continue; }
-            outp.Add((id, c.GetProperty("id").GetInt64(), t.GetString() ?? ""));
+            outp.Add((id, ch.GetProperty("id").GetInt64(), t.GetString() ?? ""));
         }
         return outp;
     }
@@ -211,7 +216,7 @@ public sealed class TelegramBot : INotifier
             : new { chat_id = chat, text, disable_web_page_preview = true };
         using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         var resp = await Http.PostAsync($"{_api}/sendMessage", content);
-        if (!resp.IsSuccessStatusCode && (int)resp.StatusCode == 403 && _subs.Remove(chat)) SaveSubs();
+        if (!resp.IsSuccessStatusCode && (int)resp.StatusCode == 403) { _users.Remove(chat); SaveSubs(); }
     }
 
     async Task SendPhoto(long chat, byte[] png, string caption)
@@ -230,25 +235,54 @@ public sealed class TelegramBot : INotifier
     async Task<JsonDocument> GetJson(string url, CancellationToken ct = default)
     {
         var resp = await Http.GetAsync(url, ct);
-        var body = await resp.Content.ReadAsStringAsync(ct);
-        return JsonDocument.Parse(body);
+        return JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
     }
 
-    // ── Підписники (локальний файл, у .gitignore) ────────────────────────────
+    // ── Підписники (chat → місто), локальний файл у .gitignore ────────────────
     void LoadSubs()
     {
         try
         {
             if (!File.Exists(SubsFile)) return;
-            var ids = JsonSerializer.Deserialize<long[]>(File.ReadAllText(SubsFile));
-            if (ids != null) foreach (var id in ids) _subs.Add(id);
+            var json = File.ReadAllText(SubsFile).TrimStart();
+            if (json.StartsWith("["))
+            {
+                // Старий формат: масив id — переносимо без міста.
+                foreach (var id in JsonSerializer.Deserialize<long[]>(json) ?? Array.Empty<long>())
+                    _users[id] = null;
+                return;
+            }
+            using var doc = JsonDocument.Parse(json);
+            foreach (var p in doc.RootElement.EnumerateObject())
+            {
+                if (!long.TryParse(p.Name, out var id)) continue;
+                var v = p.Value;
+                if (v.ValueKind == JsonValueKind.Object && v.TryGetProperty("name", out var nm))
+                    _users[id] = new Place(nm.GetString() ?? "", v.GetProperty("lat").GetDouble(), v.GetProperty("lon").GetDouble());
+                else
+                    _users[id] = null;
+            }
         }
-        catch { /* немає файлу — почнемо з нуля */ }
+        catch { }
     }
 
     void SaveSubs()
     {
-        try { File.WriteAllText(SubsFile, JsonSerializer.Serialize(_subs.ToArray())); }
-        catch { /* не критично */ }
+        try
+        {
+            var sb = new StringBuilder("{");
+            bool first = true;
+            foreach (var (id, p) in _users)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append('"').Append(id).Append("\":");
+                if (p is null) sb.Append("null");
+                else sb.Append($"{{\"name\":{JsonSerializer.Serialize(p.Name)},\"lat\":{p.Lat.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"lon\":{p.Lon.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}");
+            }
+            sb.Append('}');
+            File.WriteAllText(SubsFile, sb.ToString());
+        }
+        catch { }
     }
 }
