@@ -20,6 +20,9 @@ public static class MapWriter
     // Последний ответ настоящего ИИ (Claude) + время. Program обновляет по мере анализа.
     public static string AiText = "";
     public static DateTime? AiAt;
+    // Офіційні тривоги по областях (JSON) — Program оновлює у фоновому циклі,
+    // публікується у state → доступно через API (state/alerts.json).
+    public static string AlertsJson = "";
 
     static string N(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
 
@@ -135,6 +138,8 @@ public static class MapWriter
             sb.Append(",\"ai\":").Append(cf.Ai ? "true" : "false");
             sb.Append('}');
         }
+        // Офіційні тривоги по областях (для API state/alerts.json).
+        sb.Append(",\"alerts\":").Append(AlertsJson.Length > 0 ? AlertsJson : "{}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.
         sb.Append(",\"aiText\":\"").Append(Esc(AiText)).Append('"');
         sb.Append(",\"aiAt\":").Append(AiAt is { } aa ? ((DateTimeOffset)aa.ToUniversalTime()).ToUnixTimeMilliseconds().ToString() : "null");

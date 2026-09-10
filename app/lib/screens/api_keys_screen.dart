@@ -62,6 +62,13 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
             onCopy: _copy,
           ),
           _Endpoint(
+            title: 'Офіційні тривоги по областях 🚨',
+            desc: 'alerts: red[]/yellow[] (назви областей), redCount/yellowCount, '
+                'byOblast{область:red|yellow}, ts. Оновлює Reader щохвилини.',
+            url: '$_base/state/alerts.json',
+            onCopy: _copy,
+          ),
+          _Endpoint(
             title: 'Аналітика (журнал тривог)',
             desc: 'rows[]: d(дата), h(година), k(тип), z(зона), g(рівень).',
             url: '$_base/state/rows.json',

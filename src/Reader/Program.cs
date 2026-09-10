@@ -378,6 +378,99 @@ if (!string.IsNullOrWhiteSpace(botToken))
 else
     Console.WriteLine("🤖 Telegram-бот ВИКЛ. Додай  telegram_bot_token=...  у secrets.local.txt (токен від @BotFather).\n");
 
+// ── Новинний канал (ОКРЕМИЙ бот) + офіційні тривоги в API ────────────────────
+var channelToken = SecretOpt("telegram_channel_bot_token");
+var channelName = SecretOpt("telegram_channel");
+ChannelPoster? channelPoster =
+    (!string.IsNullOrWhiteSpace(channelToken) && !string.IsNullOrWhiteSpace(channelName))
+        ? new ChannelPoster(channelToken!, channelName!) : null;
+if (channelPoster is not null)
+    Console.WriteLine($"📢 Новинний канал ВКЛ → {channelName} (вся Україна, виділення Київ/Харків/Дніпро).\n");
+else
+    Console.WriteLine("📢 Канал ВИКЛ. Додай  telegram_channel_bot_token=...  і  telegram_channel=@name  у secrets.local.txt.\n");
+// Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
+_ = RunAlertsLoop(channelPoster);
+
+// Фоновий цикл офіційних тривог: оновлює API (state.alerts) + новини в канал при змінах.
+async Task RunAlertsLoop(ChannelPoster? channel)
+{
+    var prevRed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    bool seeded = false;
+    while (true)
+    {
+        try
+        {
+            var snap = await OfficialAlerts.FetchFull();
+            // 1) API: покласти тривоги у state → публікується у Firebase (state/alerts).
+            MapWriter.AlertsJson = BuildAlertsJson(snap);
+            MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+            // 2) Канал: новини при змінах.
+            var nowRed = new HashSet<string>(snap.RedUa, StringComparer.OrdinalIgnoreCase);
+            if (!seeded) { prevRed = nowRed; seeded = true; }
+            else if (channel is not null)
+            {
+                var newly = snap.RedUa.Where(r => !prevRed.Contains(r)).ToList();
+                var cleared = prevRed.Where(r => !nowRed.Contains(r)).ToList();
+                if (newly.Count > 0)
+                    await channel.Post(BuildAlarmPost(newly, snap), await BuildBotMapPng());
+                else if (cleared.Count > 0)
+                    await channel.Post(BuildClearPost(cleared, nowRed.Count), null);
+                prevRed = nowRed;
+            }
+            else prevRed = nowRed;
+        }
+        catch (Exception ex) { Console.Error.WriteLine("⚠ alerts: " + ex.Message); }
+        await Task.Delay(TimeSpan.FromSeconds(45));
+    }
+}
+
+static string BuildAlertsJson(OfficialAlerts.Snapshot s)
+{
+    static string Q(string x) => "\"" + x.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+    string Arr(IEnumerable<string> xs) => "[" + string.Join(",", xs.Select(Q)) + "]";
+    var by = new StringBuilder("{");
+    bool first = true;
+    foreach (var kv in s.ByPolygon)
+    {
+        if (!first) by.Append(',');
+        first = false;
+        by.Append(Q(kv.Key)).Append(':').Append(Q(kv.Value));
+    }
+    by.Append('}');
+    var ts = ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeMilliseconds();
+    return $"{{\"ts\":{ts},\"redCount\":{s.RedUa.Count},\"yellowCount\":{s.YellowUa.Count},"
+         + $"\"red\":{Arr(s.RedUa)},\"yellow\":{Arr(s.YellowUa)},\"byOblast\":{by}}}";
+}
+
+static string BigLabel(string ua) =>
+    ua.Contains("Київ") ? "КИЇВ" : ua.Contains("Харків") ? "ХАРКІВ" : ua.Contains("Дніпро") ? "ДНІПРО" : ua;
+
+static string BuildAlarmPost(List<string> newly, OfficialAlerts.Snapshot s)
+{
+    var sb = new StringBuilder();
+    var big = newly.Where(r => r.Contains("Київ") || r.Contains("Харків") || r.Contains("Дніпро"))
+                   .Select(BigLabel).Distinct().ToList();
+    if (big.Count > 0)
+        sb.AppendLine("🚨 " + string.Join(", ", big) + " — ТРИВОГА!");
+    sb.AppendLine("🔴 Повітряна тривога:");
+    sb.AppendLine(string.Join(", ", newly));
+    sb.AppendLine();
+    sb.AppendLine($"Загалом по країні: 🔴 {s.RedUa.Count} · 🟡 {s.YellowUa.Count} обл.");
+    sb.Append("\n🤖 Авто-дані WarAlarm · перевіряйте офіційні джерела");
+    return sb.ToString();
+}
+
+static string BuildClearPost(List<string> cleared, int remaining)
+{
+    var sb = new StringBuilder();
+    sb.AppendLine("🟢 Відбій:");
+    sb.AppendLine(string.Join(", ", cleared));
+    sb.AppendLine();
+    sb.AppendLine($"Ще під тривогою: 🔴 {remaining} обл.");
+    sb.Append("🤖 Авто-дані WarAlarm");
+    return sb.ToString();
+}
+
 // Готує текст обстановки для бота: ймовірність удару (RiskModel) + найближчі цілі.
 string BuildBotStatus()
 {

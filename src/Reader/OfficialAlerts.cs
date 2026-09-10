@@ -42,18 +42,30 @@ public static class OfficialAlerts
         ["м. Київ"] = "Kiev City",
     };
 
+    /// Знімок офіційних тривог: рівень по полігону («n»→red/yellow) + читабельні
+    /// українські назви областей, що зараз червоні / жовті (для новин у каналі).
+    public sealed record Snapshot(
+        Dictionary<string, string> ByPolygon,
+        List<string> RedUa,
+        List<string> YellowUa);
+
     /// Наш полігон «n» → "red"/"yellow". Порожній словник = немає тривог / офлайн.
-    public static async Task<Dictionary<string, string>> Fetch()
+    public static async Task<Dictionary<string, string>> Fetch() => (await FetchFull()).ByPolygon;
+
+    public static async Task<Snapshot> FetchFull()
     {
-        var outp = new Dictionary<string, string>();
+        var byPoly = new Dictionary<string, string>();
+        var redUa = new List<string>();
+        var yellowUa = new List<string>();
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, Url);
             req.Headers.Add("User-Agent", "WarAlarm/1.0");
             var resp = await Http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return outp;
+            if (!resp.IsSuccessStatusCode) return new Snapshot(byPoly, redUa, yellowUa);
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-            if (!doc.RootElement.TryGetProperty("states", out var states)) return outp;
+            if (!doc.RootElement.TryGetProperty("states", out var states))
+                return new Snapshot(byPoly, redUa, yellowUa);
 
             foreach (var st in states.EnumerateObject())
             {
@@ -68,12 +80,15 @@ public static class OfficialAlerts
                         if (d.Value.TryGetProperty("enabled", out var de) && de.ValueKind == JsonValueKind.True)
                             districtsOn++;
 
-                if (enabled) outp[en] = lvl == "yellow" ? "yellow" : "red";
-                else if (districtsOn > 0) outp[en] = "yellow";
+                string? level = enabled ? (lvl == "yellow" ? "yellow" : "red")
+                              : districtsOn > 0 ? "yellow" : null;
+                if (level == null) continue;
+                byPoly[en] = level;
+                (level == "red" ? redUa : yellowUa).Add(st.Name);
             }
         }
         catch { /* офлайн — порожньо */ }
-        return outp;
+        return new Snapshot(byPoly, redUa, yellowUa);
     }
 
     /// Читабельний перелік для команди /alerts, + чи є тривога у місті [myCity].
