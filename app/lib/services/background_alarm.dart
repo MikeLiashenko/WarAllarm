@@ -33,9 +33,19 @@ class BackgroundAlarm {
 
   static final _fln = FlutterLocalNotificationsPlugin();
 
-  /// Call once at startup to register the service (does not start it).
+  /// Call once at startup. IMPORTANT: does NOTHING unless the user already
+  /// enabled background alarms — so a fresh install never touches the foreground
+  /// service / notification plugins at launch (which crashed on some tablets).
   static Future<void> init() async {
     if (kIsWeb || !Platform.isAndroid) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!(prefs.getBool(prefEnabled) ?? false)) return; // off → touch nothing
+    await _configureAndStart();
+  }
+
+  /// Configure the service (idempotent) and start it. Only ever called when the
+  /// user has turned background alarms on.
+  static Future<void> _configureAndStart() async {
     await _ensureChannels(_fln);
     final service = FlutterBackgroundService();
     await service.configure(
@@ -52,18 +62,14 @@ class BackgroundAlarm {
       ),
       iosConfiguration: IosConfiguration(autoStart: false),
     );
-    // If the user had it enabled, make sure it is running again after a restart.
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(prefEnabled) ?? false) {
-      if (!await service.isRunning()) service.startService();
-    }
+    if (!await service.isRunning()) service.startService();
   }
 
   static Future<bool> isRunning() =>
       (!kIsWeb && Platform.isAndroid) ? FlutterBackgroundService().isRunning() : Future.value(false);
 
-  /// Turn the background watcher on: ask for notification permission, start the
-  /// foreground service. Returns false if notifications were denied.
+  /// Turn the background watcher on: ask for notification permission, configure
+  /// and start the foreground service. Returns false if notifications denied.
   static Future<bool> enable() async {
     if (kIsWeb || !Platform.isAndroid) return false;
     final android = _fln.resolvePlatformSpecificImplementation<
@@ -73,8 +79,7 @@ class BackgroundAlarm {
     try {
       await android?.requestFullScreenIntentPermission();
     } catch (_) {}
-    final service = FlutterBackgroundService();
-    if (!await service.isRunning()) service.startService();
+    await _configureAndStart();
     // Enabling happens from inside the open app — tell the service to stay quiet
     // until we go to the background (the in-app siren covers the foreground).
     await Future<void>.delayed(const Duration(milliseconds: 400));
