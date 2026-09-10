@@ -47,6 +47,8 @@ dependencies:
   # Share a captured map screenshot
   share_plus: ^10.1.4
   path_provider: ^2.1.5
+  # Open a shelter in the phone's maps app (walking directions)
+  url_launcher: ^6.3.1
   # NOTE: flutter_background_service / flutter_local_notifications / home_widget
   # were removed — their native code crashed at launch on some devices
   # (Galaxy Tab S10+). Background alerts are delivered via the Telegram bot.

@@ -14,6 +14,7 @@ import '../widgets/glass_container.dart';
 import '../widgets/place_selector.dart';
 import '../widgets/probability_gauge.dart';
 import '../widgets/responsive.dart';
+import '../widgets/shelters_sheet.dart';
 import '../widgets/threat_circle.dart';
 import 'home_shell.dart';
 
@@ -117,6 +118,33 @@ class NowScreen extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(height: 14),
+
+          // Nearest shelters (OSM) around the selected place / home.
+          Builder(builder: (ctx) {
+            final p = data.selectedPlaces.isNotEmpty
+                ? data.selectedPlaces.first
+                : null;
+            final lat = p?.lat ?? data.home.lat;
+            final lon = p?.lon ?? data.home.lon;
+            final name = p?.name ?? data.homeName;
+            return SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => showSheltersSheet(ctx, lat, lon, name),
+                icon: Icon(Icons.home_work_rounded, color: AppColors.primaryDark),
+                label: const Text('Найближче укриття',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primaryDark,
+                  side: BorderSide(color: AppColors.primaryTint),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            );
+          }),
           const SizedBox(height: 18),
 
           // Attack probability (also published over the API as state.risk)
