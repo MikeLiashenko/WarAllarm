@@ -23,3 +23,5 @@ dist/
 # --- прочее ---
 .vs/
 *.user
+site/serve.js
+!site/index.html
