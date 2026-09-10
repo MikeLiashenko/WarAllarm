@@ -341,6 +341,26 @@ if (args.Length >= 3 && args[0].Equals("geo", StringComparison.OrdinalIgnoreCase
     return;
 }
 
+// ── Тестовий пост у канал з картою (оффлайн):  dotnet run -- channeltest ─────
+if (args.Length >= 1 && args[0].Equals("channeltest", StringComparison.OrdinalIgnoreCase))
+{
+    var ct = SecretOpt("telegram_channel_bot_token");
+    var cn = SecretOpt("telegram_channel");
+    if (string.IsNullOrWhiteSpace(ct) || string.IsNullOrWhiteSpace(cn))
+    {
+        Console.WriteLine("❌ Немає telegram_channel_bot_token / telegram_channel у secrets.local.txt");
+        return;
+    }
+    Console.WriteLine($"📢 Тестовий пост у {cn} ...");
+    var png = await BuildBotMapPng();
+    var poster = new ChannelPoster(ct!, cn!);
+    await poster.Post(
+        "🔔 Тест WarAlarm — карта загроз.\nОбласті: 🔴 офіційна тривога · 🟡 часткова. Наші цілі — точками.\n\n🤖 Авто-дані · перевіряйте офіційні джерела",
+        png);
+    Console.WriteLine(png is null ? "⚠ карта не згенерувалась (надіслано лише текст)." : "✅ Надіслано: карта + текст.");
+    return;
+}
+
 using var client = new Client(Config);
 var me = await client.LoginUserIfNeeded();
 Console.WriteLine($"✅ Вошли как: {me.first_name} {me.last_name} (@{me.username})\n");
