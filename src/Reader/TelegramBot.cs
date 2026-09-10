@@ -44,9 +44,10 @@ public sealed class TelegramBot
         keyboard = new[]
         {
             new[] { "📊 Статус", "🗺 Карта" },
-            new[] { "🎯 Ризик", "📍 Моє місто" },
-            new[] { "🤖 ШІ", "📈 Аналітика" },
-            new[] { "🚨 Тривоги", "❓ Довідка" },
+            new[] { "🎯 Ризик", "🏠 Укриття" },
+            new[] { "📍 Моє місто", "📈 Аналітика" },
+            new[] { "🤖 ШІ", "🚨 Тривоги" },
+            new[] { "❓ Довідка" },
         },
         resize_keyboard = true,
     };
@@ -124,7 +125,7 @@ public sealed class TelegramBot
                     "WarAlarm — тривоги повітряної небезпеки по ТВОЄМУ місту.\n\n"
                     + "📍 Моє місто — задати/змінити місто\n"
                     + "📊 Статус — цілі + ймовірність по твоєму місту\n"
-                    + "🎯 Ризик — детально по типах\n🗺 Карта — карта України\n"
+                    + "🎯 Ризик — детально по типах\n🏠 Укриття — найближчі укриття/метро\n🗺 Карта — карта України\n"
                     + "🚨 Тривоги — офіційні по областях\n📈 Аналітика — статистика\n"
                     + "🤖 ШІ — розумний аналіз\n/stop — відписатися",
                     withKeyboard: true);
@@ -159,6 +160,13 @@ public sealed class TelegramBot
         {
             if (!hasCity) { await Send(chat, "Спершу напиши назву свого міста 📍"); return; }
             await Send(chat, $"📍 {pl!.Name}\n" + _f.RiskAt(pl.Lat, pl.Lon));
+            return;
+        }
+        if (Match(text, cmd, "/shelter", "🏠", "укриття", "укрытие"))
+        {
+            if (!hasCity) { await Send(chat, "Спершу напиши назву свого міста 📍"); return; }
+            await Send(chat, "🏠 Шукаю найближчі укриття…");
+            await Send(chat, await Shelters.Near(pl!.Lat, pl.Lon));
             return;
         }
 
