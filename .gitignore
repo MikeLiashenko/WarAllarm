@@ -25,3 +25,4 @@ dist/
 *.user
 site/serve.js
 !site/index.html
+boom_feedback.csv

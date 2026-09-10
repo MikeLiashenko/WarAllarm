@@ -52,6 +52,16 @@ public sealed class TelegramBot
         resize_keyboard = true,
     };
 
+    // Inline-кнопки під тривогою: «чи було чути вибух?» (краудсорс точності).
+    static readonly object BoomKb = new
+    {
+        inline_keyboard = new[] { new object[]
+        {
+            new { text = "💥 Чув вибух", callback_data = "boom_yes" },
+            new { text = "🤫 Тихо",      callback_data = "boom_no" },
+        }}
+    };
+
     // ── Фонові цикли ──────────────────────────────────────────────────────────
     public async Task RunAsync(CancellationToken ct = default)
     {
@@ -61,10 +71,11 @@ public sealed class TelegramBot
         {
             try
             {
-                foreach (var (id, chat, text) in await GetUpdates(ct))
+                foreach (var u in await GetUpdates(ct))
                 {
-                    _offset = id + 1;
-                    await Handle(chat, text.Trim());
+                    _offset = u.id + 1;
+                    if (u.cbData != null) await HandleCallback(u.chat, u.cbData, u.cbId!);
+                    else if (u.text != null) await Handle(u.chat, u.text.Trim());
                 }
             }
             catch (OperationCanceledException) { break; }
@@ -88,7 +99,9 @@ public sealed class TelegramBot
                 var (alarm, text) = _f.AlarmAt(place.Lat, place.Lon);
                 bool last = _lastAlarm.TryGetValue(chat, out var l) && l;
                 if (alarm && !last)
-                    try { await Send(chat, $"🔴 ТРИВОГА поруч — {place.Name}!\n{text}\n➤ В укриття! Подалі від вікон, правило двох стін."); } catch { }
+                    try { await SendInline(chat,
+                        $"🔴 ТРИВОГА поруч — {place.Name}!\n{text}\n➤ В укриття! Подалі від вікон, правило двох стін.\n\nЯк мине — познач, чи було чути вибух:",
+                        BoomKb); } catch { }
                 else if (!alarm && last)
                     try { await Send(chat, $"🟢 Відбій — {place.Name}. Наразі поруч чисто."); } catch { }
                 _lastAlarm[chat] = alarm;
@@ -201,18 +214,26 @@ public sealed class TelegramBot
             _offset = Math.Max(_offset, u.GetProperty("update_id").GetInt64() + 1);
     }
 
-    async Task<List<(long id, long chat, string text)>> GetUpdates(CancellationToken ct)
+    async Task<List<(long id, long chat, string? text, string? cbData, string? cbId)>> GetUpdates(CancellationToken ct)
     {
-        var outp = new List<(long, long, string)>();
-        using var doc = await GetJson($"{_api}/getUpdates?timeout=25&offset={_offset}&allowed_updates=[\"message\"]", ct);
+        var outp = new List<(long, long, string?, string?, string?)>();
+        using var doc = await GetJson($"{_api}/getUpdates?timeout=25&offset={_offset}&allowed_updates=[\"message\",\"callback_query\"]", ct);
         foreach (var u in doc.RootElement.GetProperty("result").EnumerateArray())
         {
             var id = u.GetProperty("update_id").GetInt64();
-            if (!u.TryGetProperty("message", out var m) ||
-                !m.TryGetProperty("text", out var t) ||
-                !m.TryGetProperty("chat", out var ch))
-            { _offset = Math.Max(_offset, id + 1); continue; }
-            outp.Add((id, ch.GetProperty("id").GetInt64(), t.GetString() ?? ""));
+            if (u.TryGetProperty("callback_query", out var cq) &&
+                cq.TryGetProperty("message", out var cm) && cm.TryGetProperty("chat", out var cch))
+            {
+                outp.Add((id, cch.GetProperty("id").GetInt64(), null,
+                    cq.TryGetProperty("data", out var d) ? d.GetString() : "",
+                    cq.GetProperty("id").GetString()));
+            }
+            else if (u.TryGetProperty("message", out var m) &&
+                     m.TryGetProperty("text", out var t) && m.TryGetProperty("chat", out var ch))
+            {
+                outp.Add((id, ch.GetProperty("id").GetInt64(), t.GetString() ?? "", null, null));
+            }
+            else { _offset = Math.Max(_offset, id + 1); }
         }
         return outp;
     }
@@ -225,6 +246,45 @@ public sealed class TelegramBot
         using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         var resp = await Http.PostAsync($"{_api}/sendMessage", content);
         if (!resp.IsSuccessStatusCode && (int)resp.StatusCode == 403) { _users.Remove(chat); SaveSubs(); }
+    }
+
+    async Task SendInline(long chat, string text, object markup)
+    {
+        var payload = JsonSerializer.Serialize(new { chat_id = chat, text, disable_web_page_preview = true, reply_markup = markup });
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        await Http.PostAsync($"{_api}/sendMessage", content);
+    }
+
+    async Task AnswerCallback(string cbId, string text)
+    {
+        var payload = JsonSerializer.Serialize(new { callback_query_id = cbId, text });
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        try { await Http.PostAsync($"{_api}/answerCallbackQuery", content); } catch { }
+    }
+
+    // Натиснули «чи було чути вибух?» → пишемо у журнал (краудсорс реальних прильотів).
+    async Task HandleCallback(long chat, string data, string cbId)
+    {
+        if (data is "boom_yes" or "boom_no")
+        {
+            var p = _users.TryGetValue(chat, out var pl) ? pl : null;
+            LogBoom(chat, p, data == "boom_yes");
+            await AnswerCallback(cbId, data == "boom_yes" ? "Дякую! Бережи себе 🇺🇦" : "Дякую за відгук!");
+        }
+        else await AnswerCallback(cbId, "");
+    }
+
+    void LogBoom(long chat, Place? p, bool heard)
+    {
+        try
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var line = $"{DateTime.Now:yyyy-MM-dd},{DateTime.Now:HH:mm:ss},{chat}," +
+                       $"{p?.Name},{(p != null ? p.Lat.ToString(inv) : "")},{(p != null ? p.Lon.ToString(inv) : "")}," +
+                       $"{(heard ? "boom" : "quiet")}";
+            File.AppendAllText("boom_feedback.csv", line + "\n");
+        }
+        catch { }
     }
 
     async Task SendPhoto(long chat, byte[] png, string caption)
