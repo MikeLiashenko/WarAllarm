@@ -537,36 +537,87 @@ async Task RunThreatNews(ChannelPoster channel)
             if (DateTime.Now - lastPost < TimeSpan.FromSeconds(20)) continue; // не спамимо
             lastKey = key;
             lastPost = DateTime.Now;
-            await channel.Post(BuildThreatPost(active), null); // текст; карта — окремо (10 хв)
+            // Налёт на велике місто (Київ/Харків/Дніпро) → короткий формат; інакше — по областях.
+            var raidCities = active.Select(NearBigCity).Where(c => c != null).Distinct().ToList();
+            var post = raidCities.Count > 0
+                ? BuildCityRaidPost(active, raidCities!)
+                : BuildOblastPost(active);
+            await channel.Post(post, null); // текст; карта — окремо (10 хв)
         }
         catch (Exception ex) { Console.Error.WriteLine("⚠ threatnews: " + ex.Message); }
     }
 }
 
-static string KindUa(ThreatKind k) => k switch
+static string KindShort(ThreatKind k) => k switch
 {
     ThreatKind.Ballistic => "Балістика",
-    ThreatKind.Missile => "Ракети",
-    ThreatKind.Kab => "КАБи",
+    ThreatKind.Missile => "Ракета",
+    ThreatKind.Kab => "КАБ",
     ThreatKind.Aviation => "Авіація",
-    ThreatKind.Drone => "Шахеди/БпЛА",
-    _ => "Цілі",
+    ThreatKind.Drone => "БпЛА",
+    _ => "Ціль",
 };
 
-// Короткий пост про цілі по Україні (без карти — вона окремо, раз на 10 хв).
-static string BuildThreatPost(List<Threat> active)
+// Велике місто (Київ/Харків/Дніпро) у радіусі ~35 км → «режим налёту».
+static string? NearBigCity(Threat t)
+{
+    if (t.Pos is not { } p) return null;
+    var big = new (string name, double lat, double lon)[]
+    {
+        ("Київ", 50.4501, 30.5234), ("Харків", 49.9935, 36.2304), ("Дніпро", 48.4647, 35.0462),
+    };
+    foreach (var c in big)
+        if (ThreatGeo.Km(p, (c.lat, c.lon)) <= 35) return c.name;
+    return null;
+}
+
+// Звичайний формат (вся Україна): згруповано по областях —  «🛩 БпЛА на Луцьк».
+static string BuildOblastPost(List<Threat> active)
 {
     var sb = new StringBuilder();
-    foreach (var g in active.GroupBy(t => t.Kind)
-                            .OrderByDescending(g => g.Sum(t => t.Amount)))
+    var byRegion = active.Where(t => t.Pos is not null)
+        .GroupBy(t => OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon))
+        .OrderByDescending(g => g.Sum(t => t.Amount))
+        .Take(12);
+    foreach (var g in byRegion)
     {
-        int amount = g.Sum(t => t.Amount);
-        var places = g.Where(t => t.LastPlace.Length > 0)
-                      .Select(t => t.LastPlace).Distinct().Take(5).ToList();
-        sb.Append(ThreatParser.Icon(g.Key)).Append(' ').Append(KindUa(g.Key));
-        if (amount > 1) sb.Append(" ×").Append(amount);
-        if (places.Count > 0) sb.Append(" → ").Append(string.Join(", ", places));
+        sb.Append("📍 ").Append(g.Key).AppendLine(":");
+        var seen = new HashSet<string>();
+        int lines = 0;
+        foreach (var t in g.OrderByDescending(t => t.Amount))
+        {
+            var place = t.LastPlace.Length > 0 ? t.LastPlace : g.Key;
+            if (!seen.Add($"{t.Kind}|{place}")) continue;
+            if (lines++ >= 8) { sb.AppendLine("…"); break; }
+            sb.Append(ThreatParser.Icon(t.Kind)).Append(' ').Append(KindShort(t.Kind))
+              .Append(t.Amount > 1 ? $" ×{t.Amount}" : "").Append(" на ").AppendLine(place);
+        }
         sb.AppendLine();
+    }
+    sb.Append("🤖 Авто · звіряйтесь з офіційними джерелами");
+    return sb.ToString();
+}
+
+// Режим налёту на велике місто: коротко — місто + райони/напрямки.
+static string BuildCityRaidPost(List<Threat> active, List<string> cities)
+{
+    var sb = new StringBuilder();
+    foreach (var city in cities)
+    {
+        var near = active.Where(t => NearBigCity(t) == city).ToList();
+        var icons = string.Concat(near.Select(t => ThreatParser.Icon(t.Kind)).Distinct());
+        var places = near.Where(t => t.LastPlace.Length > 0)
+                         .Select(t => t.LastPlace).Distinct().Take(12).ToList();
+        sb.Append("⚡ ").Append(city.ToUpper()).Append(' ').Append(icons).AppendLine(" — ЗАГРОЗА!");
+        if (places.Count > 0) sb.AppendLine("↳ " + string.Join(", ", places));
+        sb.AppendLine();
+    }
+    var other = active.Where(t => NearBigCity(t) == null && t.Pos is not null).ToList();
+    if (other.Count > 0)
+    {
+        var regions = other.Select(t => OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon))
+                           .Distinct().Take(6);
+        sb.Append("🛩 Ще по Україні: ").AppendLine(string.Join(", ", regions));
     }
     sb.Append("🤖 Авто · звіряйтесь з офіційними");
     return sb.ToString();
