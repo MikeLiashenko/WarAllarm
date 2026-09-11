@@ -11,6 +11,7 @@ import '../services/background_alarm.dart';
 import '../services/home_widget_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/alarm_overlay.dart';
+import '../widgets/boom_prompt.dart';
 import '../widgets/app_sidebar.dart';
 import '../widgets/responsive.dart';
 import 'ai_screen.dart';
@@ -138,6 +139,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           ),
           // Siren overlay + snooze bar, above every screen.
           const AlarmOverlay(),
+          // After an alarm ends, offer the optional "чи було чути вибух?" window.
+          const BoomPromptWatcher(),
         ],
       ),
     );

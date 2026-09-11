@@ -6,6 +6,7 @@ import 'controllers/ai_controller.dart';
 import 'controllers/alarm_controller.dart';
 import 'controllers/alerts_controller.dart';
 import 'controllers/api_keys_controller.dart';
+import 'controllers/boom_controller.dart';
 import 'controllers/chat_controller.dart';
 import 'controllers/map_data_controller.dart';
 import 'controllers/nav_controller.dart';
@@ -60,6 +61,15 @@ class WarAlarmApp extends StatelessWidget {
             ctx.read<MapDataController>(),
             ctx.read<SettingsController>(),
           ),
+        ),
+        // Asks "чи було чути вибух?" in a small window after an alarm ends.
+        ChangeNotifierProvider<BoomController>(
+          create: (ctx) => BoomController(
+            ctx.read<AlarmController>(),
+            ctx.read<MapDataController>(),
+            store,
+          ),
+          lazy: false,
         ),
         // Records forecast vs. reality to measure how accurate the model is.
         ChangeNotifierProvider<AccuracyController>(
