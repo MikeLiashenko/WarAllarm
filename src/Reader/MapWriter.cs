@@ -98,6 +98,9 @@ public static class MapWriter
             sb.Append(",\"heading\":").Append(t.Heading is { } h ? N(h) : "null");
             sb.Append(",\"seen\":").Append(((DateTimeOffset)t.LastUpdate).ToUnixTimeMilliseconds()); // час останнього спостереження позиції (для руху/екстраполяції)
             sb.Append(",\"place\":\"").Append(Esc(t.LastPlace)).Append('"');
+            // approx = ціль лише на рівні області (без точної точки/курсу). Для таких НЕ малюємо
+            // вигаданий напрямок і прогноз «→ місто?» — це виглядало як фейк під час масового нальоту.
+            sb.Append(",\"approx\":").Append(t.LastPlace.EndsWith("(обл.)") ? "true" : "false");
             sb.Append(",\"trail\":[");
             bool first = true;
             foreach (var seg in t.Trail)
@@ -540,7 +543,9 @@ function build(){
   // Розмір ФІКСОВАНИЙ на екрані (не роздувається при зумі) — applyZoom робить контр-масштаб.
   figNodes=[];
   S.threats.forEach(function(t){
-    var col=C[t.cat]||C.other, rot=(t.heading==null?0:t.heading), known=t.heading!=null;
+    // approx (лише область) → напрямок невідомий: не крутимо ніс і не прогнозуємо курс.
+    var approx=!!t.approx, known=(t.heading!=null)&&!approx, rot=known?t.heading:0;
+    var col=C[t.cat]||C.other;
     // прогноз курсу (під фігурою): пунктир уперед + «привид» силуета у передбаченій точці
     var pred=el('line',{'class':'pred',stroke:col});
     var ghost=el('g',{'class':'ghost'});
@@ -554,7 +559,7 @@ function build(){
       if(!p.s){ pa.setAttribute('stroke','rgba(10,15,25,.6)'); pa.setAttribute('stroke-width','0.35'); }
       g.appendChild(pa);
     });
-    var predlab = known ? el('text',{'class':'predlab',fill:col}) : null; // передбачене місто (ІІ)
+    var predlab = null; // прибрано «→ місто?»: це був чистий геометричний здогад, виглядав як фейк
     var nlab = t.n>1 ? el('text',{'class':'tlabel',fill:col},'×'+t.n) : null;   // ×N
     var plab = t.place ? el('text',{'class':'plabel',fill:col},esc(t.place)) : null; // назва міста цілі (за зумом)
     figNodes.push({g:g,pred:pred,ghost:ghost,predlab:predlab,nlab:nlab,plab:plab,
