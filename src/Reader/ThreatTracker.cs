@@ -189,11 +189,16 @@ public sealed class ThreatTracker
                 _ = mins;
             }
 
-            // Снятие с карты (точность!): цель НЕ должна «зависать». Приліт/пройшла — 90 сек;
-            // молчащая цель — 4 мин (за цей час шахед або пролетів, або збили). Карта = «зараз».
+            // Снятие с карты (точність!): ціль НЕ повинна «зависати», але й не має блимати.
+            // Приліт/пройшла — 90 сек. Точна локальна ціль — 4 хв (свіжі оновлення від
+            // локального монітора тримають її живою). Обласна ціль (всеукр. канал згадує
+            // область рідше, ніж раз на 4 хв) — тримаємо 15 хв, інакше карта пустіє посеред
+            // нальоту (баг «з'явилось і за хвилину зникло», 12.09).
+            var areaWide = t.Zone == "UA" || t.LastPlace.EndsWith("(обл.)");
+            var goneAfter = areaWide ? TimeSpan.FromMinutes(15) : TimeSpan.FromMinutes(4);
             var age = now - t.LastUpdate;
             if ((t.Stage is TrackStage.Impact or TrackStage.Passed && age > TimeSpan.FromSeconds(90))
-                || age > TimeSpan.FromMinutes(4))
+                || age > goneAfter)
             {
                 t.Stage = TrackStage.Gone;
                 _active.Remove(t.Id);
