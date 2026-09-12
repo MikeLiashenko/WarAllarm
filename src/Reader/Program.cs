@@ -365,6 +365,11 @@ using var client = new Client(Config);
 var me = await client.LoginUserIfNeeded();
 Console.WriteLine($"✅ Вошли как: {me.first_name} {me.last_name} (@{me.username})\n");
 
+// Час останньої будь-якої активності від Telegram (апдейт або keepalive). Сторож нижче
+// стежить за ним: якщо зв'язок «завмер» — примусово перепідключаємось. Це рятує від
+// тихого зависання, коли сокет обірвався, а пасивний слухач не переконектився (баг 12.09).
+var lastTgActivity = DateTime.Now;
+
 // ── Каналы оповещения: консоль + сирена (Windows) + push на телефон (ntfy) ────
 var notifiers = new List<INotifier> { new ConsoleNotifier() };
 if (OperatingSystem.IsWindows()) notifiers.Add(new SirenNotifier());
@@ -1059,11 +1064,39 @@ _ = Task.Run(async () =>
     }
 });
 
+// ── Сторож зв'язку (keepalive + автоперепідключення) ─────────────────────────
+// Пасивний слухач сам НЕ переконектиться, якщо сокет тихо обірвався (як 11.09 о 20:20):
+// процес живий, карту малює, але Telegram-повідомлень не отримує — «сліпе» зависання.
+// Раз на 2 хв робимо легкий виклик Updates_GetState(): він (а) як пінг тримає з'єднання,
+// (б) якщо канал мертвий — примушує WTelegram перепідключитися. Плюс попереджаємо в
+// консоль/лог, якщо оновлень немає підозріло довго.
+_ = Task.Run(async () =>
+{
+    while (true)
+    {
+        await Task.Delay(TimeSpan.FromMinutes(2));
+        try
+        {
+            await client.Updates_GetState();   // keepalive + форсує реконект, якщо зв'язок впав
+            lastTgActivity = DateTime.Now;
+        }
+        catch (Exception ex)
+        {
+            Ui.Line(ConsoleColor.Yellow, "⚠ keepalive: " + ex.Message + " — пробую перепідключитися…");
+            try { await client.LoginUserIfNeeded(); } catch (Exception e2) { Console.Error.WriteLine("⚠ reconnect fail: " + e2.Message); }
+        }
+        var idle = DateTime.Now - lastTgActivity;
+        if (idle > TimeSpan.FromMinutes(20))
+            Ui.Line(ConsoleColor.Yellow, $"⚠ {idle.TotalMinutes:0} хв без даних від Telegram — зв'язок міг обірватися.");
+    }
+});
+
 await Task.Delay(-1); // работаем, пока не закроют
 
 // ── обработка одного обновления ──────────────────────────────────────────────
 async Task OnUpdate(Update update)
 {
+    lastTgActivity = DateTime.Now; // будь-який апдейт = зв'язок живий (для сторожа)
     // UpdateNewChannelMessage наследуется от UpdateNewMessage — одна ветка ловит оба.
     if (update is not UpdateNewMessage { message: Message m } || string.IsNullOrEmpty(m.message))
         return;
