@@ -562,7 +562,7 @@ function build(){
     var predlab = null; // прибрано «→ місто?»: це був чистий геометричний здогад, виглядав як фейк
     var nlab = t.n>1 ? el('text',{'class':'tlabel',fill:col},'×'+t.n) : null;   // ×N
     var plab = t.place ? el('text',{'class':'plabel',fill:col},esc(t.place)) : null; // назва міста цілі (за зумом)
-    figNodes.push({g:g,pred:pred,ghost:ghost,predlab:predlab,nlab:nlab,plab:plab,
+    figNodes.push({g:g,pred:pred,ghost:ghost,predlab:predlab,nlab:nlab,plab:plab,approx:approx,
       lon0:t.lon,lat0:t.lat,mlon:t.lon,mlat:t.lat,rot:rot,known:known,base:figScale(t.cat),spd:speedKmMin(t),seen:(t.seen||S.ts)});
   });
   // дом
@@ -592,7 +592,7 @@ function layoutFig(f){
     if(f.predlab){ var nc=nearestCity(pd[0],pd[1]); if(nc){ f.predlab.setAttribute('display',''); f.predlab.textContent='→ '+nc[0]+'?'; f.predlab.setAttribute('x',(ps[0]+2*inv).toFixed(2)); f.predlab.setAttribute('y',(ps[1]-1.5*inv).toFixed(2)); f.predlab.style.fontSize=(3.2*inv).toFixed(2)+'px'; f.predlab.style.strokeWidth=(0.7*inv).toFixed(2)+'px'; } else f.predlab.setAttribute('display','none'); }
   } else { f.pred.setAttribute('display','none'); f.ghost.setAttribute('display','none'); if(f.predlab)f.predlab.setAttribute('display','none'); }
   if(f.nlab){ f.nlab.setAttribute('x',(cs[0]+5*inv).toFixed(2)); f.nlab.setAttribute('y',(cs[1]-5*inv).toFixed(2)); f.nlab.style.fontSize=(7*inv).toFixed(2)+'px'; f.nlab.style.strokeWidth=(1.0*inv).toFixed(2)+'px'; }
-  if(f.plab){ var sp=scale>=2.4; f.plab.setAttribute('display',sp?'':'none'); if(sp){ f.plab.setAttribute('x',(cs[0]+5*inv).toFixed(2)); f.plab.setAttribute('y',(cs[1]+6.5*inv).toFixed(2)); f.plab.style.fontSize=(3.6*inv).toFixed(2)+'px'; f.plab.style.strokeWidth=(0.7*inv).toFixed(2)+'px'; } }
+  if(f.plab){ var sp=f.approx||scale>=2.4; f.plab.setAttribute('display',sp?'':'none'); if(sp){ f.plab.setAttribute('x',(cs[0]+5*inv).toFixed(2)); f.plab.setAttribute('y',(cs[1]+6.5*inv).toFixed(2)); f.plab.style.fontSize=(3.6*inv).toFixed(2)+'px'; f.plab.style.strokeWidth=(0.7*inv).toFixed(2)+'px'; } }
 }
 // Рух цілей (dead-reckoning): екстраполюємо позицію за курсом і швидкістю від часу даних.
 // Коли з каналів приходить реальне місце — S оновлюється і ціль «телепортується» туди.
