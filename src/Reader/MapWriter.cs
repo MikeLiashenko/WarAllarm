@@ -23,6 +23,10 @@ public static class MapWriter
     // Офіційні тривоги по областях (JSON) — Program оновлює у фоновому циклі,
     // публікується у state → доступно через API (state/alerts.json).
     public static string AlertsJson = "";
+    // Розділення тривог по РАЙОНАХ: {"X район":"red|yellow"} — офіційні тривоги на рівні району.
+    public static string RaionsJson = "";
+    // Області, де тривога на ВСЮ область (заливаємо цілком): {"n":"red|yellow"}.
+    public static string OblastWholeJson = "";
 
     static string N(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
 
@@ -47,7 +51,8 @@ public static class MapWriter
         var state = BuildState(tracker, homeName, now);
         var html = Template.Replace("/*__STATE__*/", state)
                            .Replace("/*__ICON__*/", IconUri)
-                           .Replace("/*__OBLASTS__*/", MapOblasts.Json);
+                           .Replace("/*__OBLASTS__*/", MapOblasts.Json)
+                           .Replace("/*__RAIONS__*/", MapRaions.Json);
         try { File.WriteAllText(path, html, new UTF8Encoding(false)); } catch { /* карта не критична */ }
         if (Publisher is { } pub) { _ = pub.Publish("state", state); } // fire-and-forget
     }
@@ -143,6 +148,9 @@ public static class MapWriter
         }
         // Офіційні тривоги по областях (для API state/alerts.json).
         sb.Append(",\"alerts\":").Append(AlertsJson.Length > 0 ? AlertsJson : "{}");
+        // Розділення тривог: по районах + області, що горять цілком.
+        sb.Append(",\"raions\":").Append(RaionsJson.Length > 0 ? RaionsJson : "{}");
+        sb.Append(",\"oblastWhole\":").Append(OblastWholeJson.Length > 0 ? OblastWholeJson : "{}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.
         sb.Append(",\"aiText\":\"").Append(Esc(AiText)).Append('"');
         sb.Append(",\"aiAt\":").Append(AiAt is { } aa ? ((DateTimeOffset)aa.ToUniversalTime()).ToUnixTimeMilliseconds().ToString() : "null");
@@ -323,6 +331,7 @@ nav.tabs .b.show{display:inline-flex}
 .mapcard svg:active{cursor:grabbing}
 .ua-fill{fill:none;stroke:rgba(120,150,190,.35);stroke-width:.9;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .obl{stroke:rgba(130,150,180,.22);stroke-width:.4px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.rai{stroke:rgba(130,150,180,.30);stroke-width:.28px;fill:none;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .clabel2{fill:rgba(230,237,243,.6);font-size:6px;font-weight:600;font-family:var(--sans);paint-order:stroke;stroke:#0a1020;stroke-width:1.2px;text-anchor:middle}
 .city{fill:var(--mut)}.clabel{fill:var(--dim);font-size:6px;font-family:var(--mono)}
 .you{fill:var(--sky)}.you-ring{fill:none;stroke:var(--sky);stroke-width:1.1;animation:pip 2s ease-in-out infinite}
@@ -441,6 +450,7 @@ h3{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);
 <script>
 const S = /*__STATE__*/;
 const OBLASTS = /*__OBLASTS__*/;
+const RAIONS = /*__RAIONS__*/;
 const ICON="/*__ICON__*/";
 if(ICON){var mk=document.getElementById('mark');if(mk){mk.style.background='none';mk.innerHTML='<img src="'+ICON+'" alt="WarAlarm" style="width:100%;height:100%;object-fit:cover;border-radius:9px;display:block">';}}
 const NS='http://www.w3.org/2000/svg';
@@ -522,13 +532,25 @@ let built=false;
 function build(){
   if(built||!fit()) return;
   built=true;
-  // ОБЛАСТИ: регион заливается красным, если в нём есть цели (интенсивность ∝ кол-ву) — как на реальной карте.
+  // ── РОЗДІЛЕННЯ ТРИВОГ (як на офіційній карті) ──────────────────────────────
+  // Офіційний колір: червоний = тривога, жовтий = часткова/попередження.
+  function offColor(l){ return l==='red' ? 'rgba(255,59,48,0.50)' : l==='yellow' ? 'rgba(214,164,39,0.55)' : null; }
+  function pathD(rings){ return rings.map(function(ring){ if(ring.length<3)return ''; return 'M'+ring.map(function(p){var q=P(p[0],p[1]);return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join(' L')+'Z'; }).join(' '); }
+  // нормалізація апострофа: фід дає U+0027, геометрія — U+2019
+  function napo(s){ return (s||'').replace(/[’ʼ'`]/g,"'"); }
+  var raiLvl={}; if(S.raions) for(var rk in S.raions) raiLvl[napo(rk)] = S.raions[rk];
+  var oblWhole=S.oblastWhole||{};
+  // 1) Області: заливаємо цілком лише ті, де тривога на всю область; решта — ледь помітний фон.
   OBLASTS.forEach(function(o){
-    var outer=o.r[0]||[];
-    var cnt=0; S.threats.forEach(function(t){ if(t.lat!=null && pip(t.lon,t.lat,outer)) cnt+=(t.n||1); });
-    var fill = cnt>0 ? 'rgba(255,59,48,'+Math.min(0.60,0.20+cnt*0.07)+')' : 'rgba(70,110,90,0.10)';
-    var d=o.r.map(function(ring){ if(ring.length<3)return ''; return 'M'+ring.map(function(p){var q=P(p[0],p[1]);return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join(' L')+'Z'; }).join(' ');
-    el('path',{'class':'obl',d:d,fill:fill});
+    var fill = offColor(oblWhole[o.n]) || 'rgba(70,110,90,0.08)';
+    el('path',{'class':'obl',d:pathD(o.r),fill:fill});
+  });
+  // 2) Райони: тонкі межі скрізь (видно поділ) + заливка тих, де тривога саме в районі.
+  RAIONS.forEach(function(r){
+    var lvl=raiLvl[napo(r.n)];
+    var d=pathD(r.r);
+    if(lvl) el('path',{'class':'obl',d:d,fill:offColor(lvl)}); // заливка району офіційним кольором
+    el('path',{'class':'rai',d:d});                            // межа району (завжди)
   });
   // Города (3 рівні деталізації) — точки+підписи; видимість/розмір керує applyZoom за зумом.
   cityNodes=[];

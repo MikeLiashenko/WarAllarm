@@ -47,7 +47,9 @@ public static class OfficialAlerts
     public sealed record Snapshot(
         Dictionary<string, string> ByPolygon,
         List<string> RedUa,
-        List<string> YellowUa);
+        List<string> YellowUa,
+        Dictionary<string, string>? ByRaion = null,
+        Dictionary<string, string>? ByOblastWhole = null);
 
     /// Наш полігон «n» → "red"/"yellow". Порожній словник = немає тривог / офлайн.
     public static async Task<Dictionary<string, string>> Fetch() => (await FetchFull()).ByPolygon;
@@ -57,15 +59,17 @@ public static class OfficialAlerts
         var byPoly = new Dictionary<string, string>();
         var redUa = new List<string>();
         var yellowUa = new List<string>();
+        var byRaion = new Dictionary<string, string>();       // «X район» → red/yellow (для розділення на карті)
+        var byOblastWhole = new Dictionary<string, string>(); // «n» → red/yellow ЛИШЕ коли тривога на всю область
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, Url);
             req.Headers.Add("User-Agent", "WarAlarm/1.0");
             var resp = await Http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return new Snapshot(byPoly, redUa, yellowUa);
+            if (!resp.IsSuccessStatusCode) return new Snapshot(byPoly, redUa, yellowUa, byRaion, byOblastWhole);
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
             if (!doc.RootElement.TryGetProperty("states", out var states))
-                return new Snapshot(byPoly, redUa, yellowUa);
+                return new Snapshot(byPoly, redUa, yellowUa, byRaion, byOblastWhole);
 
             foreach (var st in states.EnumerateObject())
             {
@@ -77,8 +81,16 @@ public static class OfficialAlerts
                 int districtsOn = 0;
                 if (v.TryGetProperty("districts", out var ds) && ds.ValueKind == JsonValueKind.Object)
                     foreach (var d in ds.EnumerateObject())
-                        if (d.Value.TryGetProperty("enabled", out var de) && de.ValueKind == JsonValueKind.True)
-                            districtsOn++;
+                    {
+                        bool don = d.Value.TryGetProperty("enabled", out var de) && de.ValueKind == JsonValueKind.True;
+                        if (!don) continue;
+                        districtsOn++;
+                        string dlvl = d.Value.TryGetProperty("alert_level", out var dal) && dal.GetString() == "yellow"
+                            ? "yellow" : "red";
+                        byRaion[d.Name] = dlvl; // ключ — назва району як у фіді
+                    }
+
+                if (enabled) byOblastWhole[en] = lvl == "yellow" ? "yellow" : "red";
 
                 string? level = enabled ? (lvl == "yellow" ? "yellow" : "red")
                               : districtsOn > 0 ? "yellow" : null;
@@ -88,7 +100,7 @@ public static class OfficialAlerts
             }
         }
         catch { /* офлайн — порожньо */ }
-        return new Snapshot(byPoly, redUa, yellowUa);
+        return new Snapshot(byPoly, redUa, yellowUa, byRaion, byOblastWhole);
     }
 
     /// Читабельний перелік для команди /alerts, + чи є тривога у місті [myCity].

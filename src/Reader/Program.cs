@@ -457,6 +457,11 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             var snap = await OfficialAlerts.FetchFull();
             // 1) API: покласти тривоги у state → публікується у Firebase (state/alerts).
             MapWriter.AlertsJson = BuildAlertsJson(snap);
+            // Розділення тривог по районах + області, що горять цілком (для карти map.html).
+            MapWriter.RaionsJson = snap.ByRaion is { Count: > 0 }
+                ? System.Text.Json.JsonSerializer.Serialize(snap.ByRaion) : "";
+            MapWriter.OblastWholeJson = snap.ByOblastWhole is { Count: > 0 }
+                ? System.Text.Json.JsonSerializer.Serialize(snap.ByOblastWhole) : "";
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
             // 2) Канал: новини при змінах.
             var nowRed = new HashSet<string>(snap.RedUa, StringComparer.OrdinalIgnoreCase);
