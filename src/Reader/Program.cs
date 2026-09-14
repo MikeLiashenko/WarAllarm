@@ -624,6 +624,10 @@ static string KindShort(ThreatKind k) => k switch
 static string? NearBigCity(Threat t)
 {
     if (t.Pos is not { } p) return null;
+    // ВАЖЛИВО: обласна ціль («Київ (обл.)») прив'язана до центру області (≈ центр
+    // міста) і хибно вмикала «КИЇВ — ЗАГРОЗА!». Режим налёту — лише для ТОЧНИХ цілей,
+    // не для обласних згадок. Інакше канал кричить фейкову тривогу на місто.
+    if (t.LastPlace.EndsWith("(обл.)")) return null;
     var big = new (string name, double lat, double lon)[]
     {
         ("Київ", 50.4501, 30.5234), ("Харків", 49.9935, 36.2304), ("Дніпро", 48.4647, 35.0462),
