@@ -43,7 +43,12 @@ class OfficialAlertsService {
     'м. Київ': 'Kiev City',
   };
 
-  Future<Map<String, String>> fetch() async {
+  /// Legacy: oblast polygon name -> level (whole-oblast red, or yellow if any
+  /// district is on). Kept for callers that only need the oblast view.
+  Future<Map<String, String>> fetch() async => (await fetchFull()).oblasts;
+
+  /// Full snapshot for the raion-level map split (like the official map).
+  Future<OfficialAlertsSnapshot> fetchFull() async {
     final res = await _client.get(
       Uri.parse(_url),
       headers: const {'User-Agent': 'WarAlarm/1.0'},
@@ -53,7 +58,9 @@ class OfficialAlertsService {
     }
     final data = jsonDecode(utf8.decode(res.bodyBytes));
     final states = (data is Map ? data['states'] : null);
-    final out = <String, String>{};
+    final oblasts = <String, String>{};       // legacy per-oblast view
+    final raions = <String, String>{};         // "X район" -> level
+    final oblastWhole = <String, String>{};    // "n" -> level (whole oblast only)
     if (states is Map) {
       states.forEach((k, v) {
         if (v is! Map) return;
@@ -61,25 +68,34 @@ class OfficialAlertsService {
         if (en == null) return;
         final lvl = (v['alert_level'] ?? '').toString();
 
-        // Count district (hromada) alerts inside this oblast.
         var districtsOn = 0;
         final ds = v['districts'];
         if (ds is Map) {
-          ds.forEach((_, dv) {
-            if (dv is Map && dv['enabled'] == true) districtsOn++;
+          ds.forEach((dk, dv) {
+            if (dv is! Map || dv['enabled'] != true) return;
+            districtsOn++;
+            final dlvl = (dv['alert_level'] ?? '').toString();
+            raions[dk.toString()] = dlvl == 'yellow' ? 'yellow' : 'red';
           });
         }
 
         if (v['enabled'] == true) {
-          // Oblast-wide alarm: red, unless the feed marks it yellow (e.g. Kyiv).
-          out[en] = lvl == 'yellow' ? 'yellow' : 'red';
+          final l = lvl == 'yellow' ? 'yellow' : 'red';
+          oblasts[en] = l;
+          oblastWhole[en] = l; // whole-oblast alarm → fill the whole region
         } else if (districtsOn > 0) {
-          // Only some districts under alarm → partial → yellow (matches the
-          // official map, which shows these oblasts orange/yellow).
-          out[en] = 'yellow';
+          oblasts[en] = 'yellow';
         }
       });
     }
-    return out;
+    return OfficialAlertsSnapshot(oblasts, raions, oblastWhole);
   }
+}
+
+/// Official alerts at two levels: whole oblasts and individual raions.
+class OfficialAlertsSnapshot {
+  final Map<String, String> oblasts;      // legacy per-oblast
+  final Map<String, String> raions;       // "X район" -> red/yellow
+  final Map<String, String> oblastWhole;  // "n" -> red/yellow (whole oblast)
+  const OfficialAlertsSnapshot(this.oblasts, this.raions, this.oblastWhole);
 }

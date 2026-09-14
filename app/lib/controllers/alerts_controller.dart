@@ -19,6 +19,13 @@ class AlertsController extends ChangeNotifier {
   Map<String, String> _levels = const {};
   Map<String, String> get levels => _levels;
 
+  // Raion-level split (like the official map): "X район" -> red/yellow, and the
+  // oblasts that are under alarm as a WHOLE (filled entirely).
+  Map<String, String> _raions = const {};
+  Map<String, String> get raions => _raions;
+  Map<String, String> _oblastWhole = const {};
+  Map<String, String> get oblastWhole => _oblastWhole;
+
   bool _ok = false;
   bool get ok => _ok;
 
@@ -30,7 +37,10 @@ class AlertsController extends ChangeNotifier {
 
   Future<void> _poll() async {
     try {
-      _levels = await _svc.fetch();
+      final snap = await _svc.fetchFull();
+      _levels = snap.oblasts;
+      _raions = snap.raions;
+      _oblastWhole = snap.oblastWhole;
       _ok = true;
       _at = DateTime.now();
     } catch (_) {

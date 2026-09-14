@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../data/ukraine_geo.dart';
 import '../data/ukraine_oblasts.dart';
+import '../data/ukraine_raions.dart';
 import '../models/map_target.dart';
 import '../theme/app_colors.dart';
 import '../utils/svg_path.dart';
@@ -50,6 +51,8 @@ class UkraineMap extends StatefulWidget {
     this.audibilityKm = 0,
     this.showAudibility = false,
     this.oblastLevels = const {},
+    this.raionLevels = const {},
+    this.oblastWhole = const {},
   });
 
   final List<MapTarget> targets;
@@ -61,6 +64,12 @@ class UkraineMap extends StatefulWidget {
   /// Official air-raid status: oblast polygon name -> 'red' | 'yellow'.
   final Map<String, String> oblastLevels;
 
+  /// Raion-level split (like the official map): "X район" -> 'red' | 'yellow'.
+  final Map<String, String> raionLevels;
+
+  /// Oblasts under alarm as a WHOLE (filled entirely): "n" -> 'red' | 'yellow'.
+  final Map<String, String> oblastWhole;
+
   @override
   State<UkraineMap> createState() => _UkraineMapState();
 }
@@ -69,6 +78,7 @@ class _UkraineMapState extends State<UkraineMap>
     with SingleTickerProviderStateMixin {
   late final Map<String, List<_FigPathPart>> _figs;
   late final List<_Oblast> _oblasts;
+  late final List<_Oblast> _raions;
   late final AnimationController _anim;
 
   double _scale = 1;
@@ -85,15 +95,16 @@ class _UkraineMapState extends State<UkraineMap>
   void initState() {
     super.initState();
     _figs = _buildFigs();
-    _oblasts = _parseOblasts();
+    _oblasts = _parsePolys(kOblastsJson);
+    _raions = _parsePolys(kRaionsJson);
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     )..repeat();
   }
 
-  List<_Oblast> _parseOblasts() {
-    final data = jsonDecode(kOblastsJson) as List;
+  List<_Oblast> _parsePolys(String json) {
+    final data = jsonDecode(json) as List;
     final out = <_Oblast>[];
     for (final o in data) {
       final rings = <List<Offset>>[];
@@ -203,9 +214,12 @@ class _UkraineMapState extends State<UkraineMap>
                     nowMs: DateTime.now().millisecondsSinceEpoch,
                     textDir: Directionality.of(context),
                     oblasts: _oblasts,
+                    raions: _raions,
                     audibilityKm:
                         widget.showAudibility ? widget.audibilityKm : 0,
                     oblastLevels: widget.oblastLevels,
+                    raionLevels: widget.raionLevels,
+                    oblastWhole: widget.oblastWhole,
                   ),
                 ),
               ),
@@ -297,8 +311,11 @@ class _MapPainter extends CustomPainter {
     required this.nowMs,
     required this.textDir,
     required this.oblasts,
+    required this.raions,
     required this.audibilityKm,
     required this.oblastLevels,
+    required this.raionLevels,
+    required this.oblastWhole,
   });
 
   final Map<String, List<_FigPathPart>> figs;
@@ -308,10 +325,20 @@ class _MapPainter extends CustomPainter {
   final int nowMs;
   final TextDirection textDir;
   final List<_Oblast> oblasts;
+  final List<_Oblast> raions;
   final double audibilityKm;
   final Map<String, String> oblastLevels;
+  final Map<String, String> raionLevels;
+  final Map<String, String> oblastWhole;
 
   Offset _toScreen(Offset base) => Offset(tx + scale * base.dx, ty + scale * base.dy);
+
+  /// Apostrophe normalization (feed uses U+0027, geometry uses U+2019) so raion
+  /// names match between the alert feed and the polygons.
+  static String _napo(String s) => s
+      .replaceAll('’', "'")
+      .replaceAll('ʼ', "'")
+      .replaceAll('`', "'");
 
   static Offset _moveKm(double lon, double lat, double brgDeg, double dkm) {
     const rad = math.pi / 180;
@@ -375,9 +402,10 @@ class _MapPainter extends CustomPainter {
     for (final ob in oblasts) {
       canvas.drawPath(obPaths[ob]!, landPaint);
     }
-    // Official air-raid shading — clean red / yellow like the official map.
+    // Official shading — fill a WHOLE oblast only when the whole oblast is under
+    // alarm (like the official map). Per-raion alarms are drawn below.
     for (final ob in oblasts) {
-      final lvl = oblastLevels[ob.name];
+      final lvl = oblastWhole[ob.name];
       if (lvl == null) continue;
       final red = lvl == 'red';
       final base = red ? const Color(0xFFE23A34) : const Color(0xFFFFC400);
@@ -386,6 +414,43 @@ class _MapPainter extends CustomPainter {
           Paint()
             ..style = PaintingStyle.fill
             ..color = base.withValues(alpha: red ? 0.52 : 0.46));
+    }
+    // --- Raion split: fill alarmed raions individually + faint raion borders,
+    //     so partially-alarmed oblasts show WHICH raions (official-style). ---
+    if (raionLevels.isNotEmpty || raions.isNotEmpty) {
+      final raiLvl = <String, String>{
+        for (final e in raionLevels.entries) _napo(e.key): e.value,
+      };
+      final borderPath = Path();
+      for (final r in raions) {
+        final rp = Path()..fillType = PathFillType.evenOdd;
+        for (final ring in r.rings) {
+          for (var i = 0; i < ring.length; i++) {
+            final s = _toScreen(fit.project(ring[i].dx, ring[i].dy));
+            i == 0 ? rp.moveTo(s.dx, s.dy) : rp.lineTo(s.dx, s.dy);
+            i == 0 ? borderPath.moveTo(s.dx, s.dy) : borderPath.lineTo(s.dx, s.dy);
+          }
+          rp.close();
+          borderPath.close();
+        }
+        final lvl = raiLvl[_napo(r.name)];
+        if (lvl != null) {
+          final red = lvl == 'red';
+          final base = red ? const Color(0xFFE23A34) : const Color(0xFFFFC400);
+          canvas.drawPath(
+              rp,
+              Paint()
+                ..style = PaintingStyle.fill
+                ..color = base.withValues(alpha: red ? 0.52 : 0.5));
+        }
+      }
+      canvas.drawPath(
+          borderPath,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.6
+            ..strokeJoin = StrokeJoin.round
+            ..color = const Color(0xFF8296B4).withValues(alpha: 0.28));
     }
     // Oblast borders (also the country outline — the outer edges).
     final borderPaint = Paint()
@@ -396,9 +461,9 @@ class _MapPainter extends CustomPainter {
     for (final ob in oblasts) {
       canvas.drawPath(obPaths[ob]!, borderPaint);
     }
-    // Colored edge on alert oblasts, on top of the blue border, for definition.
+    // Colored edge on wholly-alarmed oblasts, on top of the blue border.
     for (final ob in oblasts) {
-      final lvl = oblastLevels[ob.name];
+      final lvl = oblastWhole[ob.name];
       if (lvl == null) continue;
       final red = lvl == 'red';
       canvas.drawPath(

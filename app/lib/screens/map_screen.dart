@@ -110,6 +110,8 @@ class MapScreen extends StatelessWidget {
                       audibilityKm: settings.audibilityKm,
                       showAudibility: settings.showAudibility,
                       oblastLevels: alerts.levels,
+                      raionLevels: alerts.raions,
+                      oblastWhole: alerts.oblastWhole,
                     ),
                   ),
                 ),
