@@ -32,7 +32,9 @@ public static class MapImage
         string title,
         string subtitle,
         Dictionary<string, string>? oblastLevels = null,
-        bool showHome = true)
+        bool showHome = true,
+        Dictionary<string, string>? raionLevels = null,
+        Dictionary<string, string>? oblastWhole = null)
     {
         const int W = 1000, padTop = 96, pad = 16;
         double midLat = (Lat1 + (Lat1 - LatSpan)) / 2;
@@ -61,7 +63,12 @@ public static class MapImage
         {
             var level = oblastLevels != null && oblastLevels.TryGetValue(name, out var lv) ? lv : "";
             if (level == "red") reds++; else if (level == "yellow") yellows++;
-            var fill = level == "red" ? landRed : level == "yellow" ? landYellow : land;
+            // Заливаємо ЦІЛУ область лише коли тривога на всю область (oblastWhole).
+            // Якщо oblastWhole не передано — стара поведінка (заливка за level).
+            var wlv = oblastWhole != null
+                ? (oblastWhole.TryGetValue(name, out var w) ? w : "")
+                : level;
+            var fill = wlv == "red" ? landRed : wlv == "yellow" ? landYellow : land;
             using var path = new SKPath();
             foreach (var ring in rings)
             {
@@ -72,6 +79,28 @@ public static class MapImage
             }
             canvas.DrawPath(path, fill);
             canvas.DrawPath(path, border);
+        }
+
+        // ── Райони: розділення тривог (як на офіційній) — заливаємо ті, де тривога ─
+        if (raionLevels is { Count: > 0 })
+        {
+            var rl = new Dictionary<string, string>();
+            foreach (var kv in raionLevels) rl[Napo(kv.Key)] = kv.Value;
+            using var raiBorder = new SKPaint { Color = new SKColor(0x82, 0x96, 0xB4, 0x55), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 0.6f };
+            foreach (var (rname, rings) in ParseRaions())
+            {
+                using var path = new SKPath();
+                foreach (var ring in rings)
+                {
+                    if (ring.Count < 3) continue;
+                    path.MoveTo(P(ring[0][0], ring[0][1]));
+                    for (int i = 1; i < ring.Count; i++) path.LineTo(P(ring[i][0], ring[i][1]));
+                    path.Close();
+                }
+                if (rl.TryGetValue(Napo(rname), out var rlv))
+                    canvas.DrawPath(path, rlv == "red" ? landRed : landYellow);
+                canvas.DrawPath(path, raiBorder);
+            }
         }
 
         // ── Міста (крапка + підпис, як у застосунку) ───────────────────────────
@@ -229,13 +258,19 @@ public static class MapImage
         canvas.Restore();
     }
 
-    // Полігони областей з MapOblasts.Json: (назва «n», список кілець з точок [lon,lat]).
-    static List<(string name, List<List<double[]>> rings)> ParseOblasts()
+    // Нормалізація апострофа (фід дає U+0027, геометрія — U+2019) для збігу назв районів.
+    static string Napo(string s) => s.Replace('’', '\'').Replace('ʼ', '\'').Replace('`', '\'');
+
+    static List<(string name, List<List<double[]>> rings)> ParseOblasts() => ParsePolys(MapOblasts.Json);
+    static List<(string name, List<List<double[]>> rings)> ParseRaions() => ParsePolys(MapRaions.Json);
+
+    // Полігони з JSON у форматі [{"n":назва,"r":[[[lon,lat]...]]}]: (назва, список кілець).
+    static List<(string name, List<List<double[]>> rings)> ParsePolys(string json)
     {
         var outp = new List<(string, List<List<double[]>>)>();
         try
         {
-            using var doc = JsonDocument.Parse(MapOblasts.Json);
+            using var doc = JsonDocument.Parse(json);
             foreach (var o in doc.RootElement.EnumerateArray())
             {
                 var name = o.TryGetProperty("n", out var n) ? n.GetString() ?? "" : "";

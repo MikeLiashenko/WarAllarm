@@ -717,11 +717,13 @@ async Task<byte[]?> BuildBotMapPng(bool channel = false)
     if (channel)
     {
         var subtitle = $"Тривога: {snap.RedUa.Count} обл · часткова: {snap.YellowUa.Count} · цілей: {live.Count}";
-        return MapImage.Render((HomeLat, HomeLon), live, "WarAlarm · Карта тривог", subtitle, snap.ByPolygon, showHome: false);
+        return MapImage.Render((HomeLat, HomeLon), live, "WarAlarm · Карта тривог", subtitle, snap.ByPolygon,
+            showHome: false, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
     }
     var a = RiskModel.For((HomeLat, HomeLon), live.Select(t => (t, t.Amount)).ToList());
     return MapImage.Render((HomeLat, HomeLon), live, $"WarAlarm · {MyCity}",
-        $"Ймовірність удару: {a.Percent}% — {a.Verdict}", snap.ByPolygon, showHome: true);
+        $"Ймовірність удару: {a.Percent}% — {a.Verdict}", snap.ByPolygon,
+        showHome: true, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
 }
 
 static string KindName(string cat) => cat switch
