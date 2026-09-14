@@ -1077,6 +1077,7 @@ _ = Task.Run(async () =>
 // консоль/лог, якщо оновлень немає підозріло довго.
 _ = Task.Run(async () =>
 {
+    int fails = 0;
     while (true)
     {
         await Task.Delay(TimeSpan.FromMinutes(2));
@@ -1084,11 +1085,21 @@ _ = Task.Run(async () =>
         {
             await client.Updates_GetState();   // keepalive + форсує реконект, якщо зв'язок впав
             lastTgActivity = DateTime.Now;
+            fails = 0;
         }
         catch (Exception ex)
         {
-            Ui.Line(ConsoleColor.Yellow, "⚠ keepalive: " + ex.Message + " — пробую перепідключитися…");
+            fails++;
+            Ui.Line(ConsoleColor.Yellow, $"⚠ keepalive ({fails}): " + ex.Message + " — пробую перепідключитися…");
             try { await client.LoginUserIfNeeded(); } catch (Exception e2) { Console.Error.WriteLine("⚠ reconnect fail: " + e2.Message); }
+            // Клієнт WTelegram інколи «зависає» намертво (мережа падала — NetworkUnreachable),
+            // і жоден in-process реконект не рятує. Після ~6 хв мертвого зв'язку виходимо з
+            // кодом 2 — start.bat крутить у циклі й підніме СВІЖИЙ процес із чистим конектом.
+            if (fails >= 3)
+            {
+                Console.Error.WriteLine("⛔ Зв'язок мертвий 6+ хв — перезапускаю процес (start.bat підніме).");
+                Environment.Exit(2);
+            }
         }
         var idle = DateTime.Now - lastTgActivity;
         if (idle > TimeSpan.FromMinutes(20))
