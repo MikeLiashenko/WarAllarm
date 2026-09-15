@@ -437,9 +437,9 @@ async Task RunMapLoop(ChannelPoster channel)
         try
         {
             var snap = await OfficialAlerts.FetchFull();
-            bool active = tracker.Active.Any(t => t.Pos is not null);
-            if (!active && snap.RedUa.Count == 0 && snap.YellowUa.Count == 0) continue;
-            await channel.Post("🗺 Карта загроз — оновлення", await BuildBotMapPng(channel: true));
+            int liveN = tracker.Active.Count(t => t.Pos is not null);
+            if (liveN == 0 && snap.RedUa.Count == 0 && snap.YellowUa.Count == 0) continue;
+            await channel.Post(MapCaption(snap, liveN), await BuildBotMapPng(channel: true));
         }
         catch (Exception ex) { Console.Error.WriteLine("⚠ maploop: " + ex.Message); }
     }
@@ -553,6 +553,11 @@ static string BigLabel(string ua) =>
 static string BuildAlarmPost(List<string> newly, OfficialAlerts.Snapshot s)
 {
     var sb = new StringBuilder();
+    if (s.RedUa.Count + s.YellowUa.Count >= 18)
+    {
+        sb.AppendLine("⚠️ МАСШТАБНА ТРИВОГА — майже по всій Україні (ймовірно зліт МіГ-31К / балістика). В укриття!");
+        sb.AppendLine();
+    }
     var big = newly.Where(r => r.Contains("Київ") || r.Contains("Харків") || r.Contains("Дніпро"))
                    .Select(BigLabel).Distinct().ToList();
     if (big.Count > 0)
@@ -562,6 +567,29 @@ static string BuildAlarmPost(List<string> newly, OfficialAlerts.Snapshot s)
     sb.AppendLine();
     sb.AppendLine($"Загалом по країні: 🔴 {s.RedUa.Count} · 🟡 {s.YellowUa.Count} обл.");
     sb.Append("\n🤖 Авто-дані WarAlarm · перевіряйте офіційні джерела");
+    return sb.ToString();
+}
+
+// Підпис до карти в канал: пояснює обстановку (а не гола картинка). При масовій
+// тривозі майже по всій країні — окреме попередження (типова ознака зльоту МіГ-31К
+// чи балістичної загрози).
+static string MapCaption(OfficialAlerts.Snapshot s, int targets)
+{
+    int red = s.RedUa.Count, yel = s.YellowUa.Count;
+    bool mass = red + yel >= 18; // майже вся країна під тривогою одночасно
+    var sb = new StringBuilder();
+    if (mass)
+    {
+        sb.AppendLine("⚠️ МАСШТАБНА ТРИВОГА — майже по всій Україні одночасно.");
+        sb.AppendLine("Так буває при зльоті МіГ-31К або балістичній загрозі. Будьте в укритті.");
+        sb.AppendLine();
+    }
+    sb.AppendLine("🗺 Карта тривог");
+    sb.AppendLine($"🔴 {red} обл · 🟡 {yel} обл · 🎯 цілей: {targets}");
+    if (red > 0)
+        sb.AppendLine("Тривога: " + string.Join(", ", s.RedUa.Take(12).Select(ShortReg))
+            + (red > 12 ? "…" : ""));
+    sb.Append("\n🤖 Авто · звіряйтесь з офіційними джерелами.");
     return sb.ToString();
 }
 
