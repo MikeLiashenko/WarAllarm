@@ -153,14 +153,19 @@ if (args.Length >= 1 && (args[0].Equals("parse", StringComparison.OrdinalIgnoreC
 // Пише siren_impact.wav тим самим синтезом, що й у боті — щоб звук збігався.
 if (args.Length >= 1 && args[0].Equals("gensound", StringComparison.OrdinalIgnoreCase))
 {
-    var wav = SirenSound.BuildImpactHome();
+    var sounds = new (string name, byte[] data)[]
+    {
+        ("siren_impact.wav", SirenSound.BuildImpactHome()),
+        ("siren_nuclear.wav", SirenSound.BuildNuclear()),
+    };
     foreach (var dir in new[] { "../../app/assets", "app/assets" })
         if (Directory.Exists(dir))
-        {
-            var p = Path.Combine(dir, "siren_impact.wav");
-            File.WriteAllBytes(p, wav);
-            Console.WriteLine($"🔊 Записав {Path.GetFullPath(p)} ({wav.Length} байт)");
-        }
+            foreach (var (name, data) in sounds)
+            {
+                var p = Path.Combine(dir, name);
+                File.WriteAllBytes(p, data);
+                Console.WriteLine($"🔊 Записав {Path.GetFullPath(p)} ({data.Length} байт)");
+            }
     return;
 }
 
@@ -435,6 +440,7 @@ else
 var dayRed = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 var daySeen = new HashSet<string>();
 var ppoSeen = new Dictionary<string, DateTime>(); // зона → коли востаннє згадали роботу ППО
+DateTime? nuclearUntil = null; // ☢️ доки активна радіаційна/ядерна небезпека (30 хв від згадки)
 
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
@@ -547,6 +553,20 @@ string BuildDigest()
 static string H(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 // Згадка про роботу ППО в пості локального каналу («працює ППО», «робота ППО», зенітки).
 static bool PpoMention(string s) => Regex.IsMatch(s.ToLowerInvariant(), @"\bппо\b|протиповітрян|зенітн");
+
+// ☢️ Явна РАДІАЦІЙНА/ЯДЕРНА НЕБЕЗПЕКА — тільки офіційне формулювання сигналу, НЕ новини.
+// Найвищий пріоритет → хибний спрацьовує неприпустимий, тож фільтр суворий:
+//   • ловимо формальні сигнали: «радіаційна небезпека/тривога», «ядерний удар/вибух/тривога»;
+//   • відкидаємо політичну балаканину: «погроза/ризик/заява/навчання/шантаж/риторика».
+static bool NuclearMention(string s)
+{
+    var l = s.ToLowerInvariant();
+    bool strong = Regex.IsMatch(l,
+        @"радіаційн\w*\s+(небезпек|тривог|загроз)|оголош\w*\s+радіац|ядерн\w*\s+(удар|вибух|тривог)|радіоактивн\w*\s+(хмар|заражен|викид)");
+    bool newsy = Regex.IsMatch(l,
+        @"погроз|погрож|ризик|заяв|може застосув|навчанн|навчальн|шантаж|риторик|імовірн|ймовірн|аналіт|експерт|сценарі");
+    return strong && !newsy;
+}
 static string ShortReg(string ua) => ua.Replace(" область", "").Replace("м. ", "").Trim();
 static string KindShortEnum(string k) => k switch
 {
@@ -1155,6 +1175,14 @@ _ = Task.Run(async () =>
                     Ui.Line(u.Threat.Stage == TrackStage.Passed ? ConsoleColor.Green : ConsoleColor.Red,
                             $"   ⏱ {u.Note}");
             }
+            // ☢️ Вийшов час радіаційної небезпеки без нових згадок → знімаємо (відбій).
+            if (nuclearUntil is { } nu && DateTime.Now >= nu && MapWriter.NuclearJson.Contains("\"active\":true"))
+            {
+                nuclearUntil = null;
+                MapWriter.NuclearJson = "{\"active\":false}";
+                Ui.Line(ConsoleColor.Green, "☢️ Радіаційна небезпека — знято (немає нових повідомлень).");
+                dirty = true;
+            }
             if (dirty || tracker.Active.Count > 0) MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
         }
         catch { /* пульс не должен ронять слушателя */ }
@@ -1220,6 +1248,29 @@ async Task OnUpdate(Update update)
     // Дедуп: одинаковый текст из разных каналов за короткое окно — обрабатываем один раз
     // (частый случай: репост/копипаста одной и той же угрозы). Так не пищит дважды.
     if (SeenRecently(oneLine)) return;
+
+    // ── ☢️ РАДІАЦІЙНА/ЯДЕРНА НЕБЕЗПЕКА — найвищий пріоритет над усім ──────────────
+    // Тільки з наших моніторених каналів і лише за явним сигналом (NuclearMention).
+    bool fromOurChannel = uname != null &&
+        (khChannels.Contains(uname) || kyChannels.Contains(uname) || uaChannels.Contains(uname));
+    if (fromOurChannel && NuclearMention(m.message))
+    {
+        bool wasActive = nuclearUntil is { } nu && DateTime.Now < nu;
+        nuclearUntil = DateTime.Now.AddMinutes(30); // тримаємо активним; кожна нова згадка продовжує
+        var msg = oneLine.Length > 160 ? oneLine[..160] : oneLine;
+        var ms = ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeMilliseconds();
+        MapWriter.NuclearJson = $"{{\"active\":true,\"msg\":\"{msg.Replace("\\", "\\\\").Replace("\"", "\\\"")}\",\"ts\":{ms}}}";
+        MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // одразу у Firebase → застосунок
+        Ui.Line(ConsoleColor.Red, $"☢️ [{time}] {src} · РАДІАЦІЙНА/ЯДЕРНА НЕБЕЗПЕКА · {oneLine}");
+        if (!wasActive) // сигнал і пуш — один раз на активацію (не спамимо на кожен репост)
+        {
+            if (OperatingSystem.IsWindows()) SirenSound.PlayNuclear();
+            await Notify("UA", new AlarmInfo(time, src,
+                "☢️ РАДІАЦІЙНА НЕБЕЗПЕКА! Зайдіть у приміщення, зачиніть вікна й двері, вимкніть вентиляцію. Подалі від вікон. Йод — лише за вказівкою ДСНС. Слухайте офіційні джерела.",
+                oneLine, ThreatKind.Unknown, true, Silent: false), clear: false);
+        }
+        return;
+    }
 
     // ── Харьковские каналы → монитор до района ────────────────────────────────
     if (WatchKharkiv && uname != null && khChannels.Contains(uname))

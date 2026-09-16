@@ -18,9 +18,10 @@ class AlarmService {
 
   // Which threat's siren/ping to play (per-kind, ported from the Reader).
   static const _kinds = {'shahed', 'missile', 'balist', 'kab', 'avia', 'other'};
-  // 'impact' — окремий найсильніший сигнал «приліт над домом» (siren_impact.wav).
+  // 'impact' — приліт над домом (siren_impact.wav); 'nuclear' — радіаційна небезпека.
+  static const _special = {'impact', 'nuclear'};
   static String _norm(String? cat) =>
-      (cat == 'impact' || _kinds.contains(cat)) ? cat! : 'other';
+      (_special.contains(cat) || _kinds.contains(cat)) ? cat! : 'other';
 
   bool _sirenOn = false;
   bool _vibrating = false;

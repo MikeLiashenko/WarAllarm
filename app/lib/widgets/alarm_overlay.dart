@@ -80,7 +80,11 @@ class _AlarmOverlayState extends State<AlarmOverlay>
     // only the 🚨 icon pulses, for the "alarm" feel.
     return Positioned.fill(
       child: Container(
-        color: AppColors.threat.withValues(alpha: 0.97),
+        // Радіація — окремий, темний «не-червоний» фон, щоб миттєво відрізнявся.
+        color: (alarm.nuclearAlarm
+                ? const Color(0xFF241C00)
+                : AppColors.threat)
+            .withValues(alpha: 0.98),
         child: SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(28),
@@ -90,21 +94,34 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                 children: [
                   FadeTransition(
                     opacity: _pulse.drive(Tween(begin: 0.45, end: 1.0)),
-                    child: Text(alarm.impactAlarm ? '💥' : '🚨',
+                    child: Text(
+                        alarm.nuclearAlarm
+                            ? '☢️'
+                            : alarm.impactAlarm
+                                ? '💥'
+                                : '🚨',
                         style: const TextStyle(fontSize: 72),
                         textAlign: TextAlign.center),
                   ),
                   const SizedBox(height: 8),
-                  Text(alarm.impactAlarm ? 'ПРИЛІТ ПОРУЧ' : 'ТРИВОГА',
+                  Text(
+                      alarm.nuclearAlarm
+                          ? 'РАДІАЦІЙНА НЕБЕЗПЕКА'
+                          : alarm.impactAlarm
+                              ? 'ПРИЛІТ ПОРУЧ'
+                              : 'ТРИВОГА',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                           color: Colors.white,
-                          fontSize: alarm.impactAlarm ? 40 : 46,
+                          fontSize: alarm.nuclearAlarm
+                              ? 28
+                              : alarm.impactAlarm
+                                  ? 40
+                                  : 46,
                           fontWeight: FontWeight.w900,
-                          letterSpacing: 2)),
-                  // Прилёт над домом — предупреждаем, что сейчас может быть громко
-                  // (взрывы / работа ППО), чтобы грохот не был неожиданностью.
-                  if (alarm.impactAlarm) ...[
+                          letterSpacing: 1.5)),
+                  // Прилёт над домом — предупреждаем, что сейчас может быть громко.
+                  if (alarm.impactAlarm && !alarm.nuclearAlarm) ...[
                     const SizedBox(height: 12),
                     const Text('⚠️ Зараз може бути гучно',
                         textAlign: TextAlign.center,
@@ -118,6 +135,27 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                         style: TextStyle(
                             color: Colors.white, fontSize: 14.5, height: 1.35)),
                   ],
+                  // Радіація — дії ІНШІ, ніж при звичайній тривозі (не в підвал за стіни,
+                  // а укритися в приміщенні й загерметизуватися).
+                  if (alarm.nuclearAlarm) ...[
+                    const SizedBox(height: 12),
+                    const Text('Негайно в приміщення',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 8),
+                    const Text(
+                        '• Зачини вікна, двері, вимкни вентиляцію/кондиціонер\n'
+                        '• Углиб будівлі, подалі від вікон і зовнішніх стін\n'
+                        '• Не виходь надвір. Був надворі — зніми верхній одяг, прийми душ\n'
+                        '• Йод (калію йодид) — ЛИШЕ за вказівкою ДСНС\n'
+                        '• Слухай офіційні джерела (ДСНС, ОВА), чекай відбою',
+                        textAlign: TextAlign.left,
+                        style: TextStyle(
+                            color: Colors.white, fontSize: 14.5, height: 1.5)),
+                  ],
                   const SizedBox(height: 12),
                   Text(
                     alarm.detail.isEmpty
@@ -129,12 +167,13 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                         fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 22),
-                  const Text(
-                    'Подалі від вікон · правило двох стін · будь з дорослими',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        color: Colors.white, fontSize: 14.5, height: 1.4),
-                  ),
+                  if (!alarm.nuclearAlarm)
+                    const Text(
+                      'Подалі від вікон · правило двох стін · будь з дорослими',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          color: Colors.white, fontSize: 14.5, height: 1.4),
+                    ),
                   const SizedBox(height: 34),
                   ElevatedButton(
                     onPressed: () =>

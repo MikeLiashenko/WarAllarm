@@ -27,6 +27,9 @@ public static class MapWriter
     public static string RaionsJson = "";
     // Області, де тривога на ВСЮ область (заливаємо цілком): {"n":"red|yellow"}.
     public static string OblastWholeJson = "";
+    // ☢️ Ядерна/радіаційна небезпека: {"active":bool,"msg":"…","ts":ms}. Program вмикає
+    // ЛИШЕ за явним сигналом (не новинна балаканина). Найвищий пріоритет у застосунку.
+    public static string NuclearJson = "";
 
     static string N(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
 
@@ -151,6 +154,8 @@ public static class MapWriter
         // Розділення тривог: по районах + області, що горять цілком.
         sb.Append(",\"raions\":").Append(RaionsJson.Length > 0 ? RaionsJson : "{}");
         sb.Append(",\"oblastWhole\":").Append(OblastWholeJson.Length > 0 ? OblastWholeJson : "{}");
+        // ☢️ Ядерна/радіаційна небезпека (застосунок показує окремий екран).
+        sb.Append(",\"nuclear\":").Append(NuclearJson.Length > 0 ? NuclearJson : "{\"active\":false}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.
         sb.Append(",\"aiText\":\"").Append(Esc(AiText)).Append('"');
         sb.Append(",\"aiAt\":").Append(AiAt is { } aa ? ((DateTimeOffset)aa.ToUniversalTime()).ToUnixTimeMilliseconds().ToString() : "null");

@@ -49,6 +49,12 @@ class MapDataController extends ChangeNotifier {
   int _stateTs = DateTime.now().millisecondsSinceEpoch;
   int get stateTs => _stateTs;
 
+  // ☢️ Радіаційна/ядерна небезпека (з боту). Найвищий пріоритет у тривозі.
+  bool _nuclear = false;
+  bool get nuclear => _nuclear && _live; // тільки на живих даних, ніколи в демо
+  String _nuclearMsg = '';
+  String get nuclearMsg => _nuclearMsg;
+
   bool _live = false;
   bool get live => _live;
 
@@ -180,6 +186,15 @@ class MapDataController extends ChangeNotifier {
     _aiText = (data['aiText'] ?? '').toString();
     final aiAt = data['aiAt'];
     if (aiAt is num) _aiAt = DateTime.fromMillisecondsSinceEpoch(aiAt.toInt());
+
+    final nuc = data['nuclear'];
+    if (nuc is Map) {
+      _nuclear = nuc['active'] == true;
+      _nuclearMsg = (nuc['msg'] ?? '').toString();
+    } else {
+      _nuclear = false;
+      _nuclearMsg = '';
+    }
 
     notifyListeners();
   }

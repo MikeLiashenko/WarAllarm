@@ -176,6 +176,34 @@ public static class SirenSound
         catch { /* звук не критичен */ }
     }
 
+    // ── ☢️ РАДІАЦІЙНА/ЯДЕРНА НЕБЕЗПЕКА — окремий зловісний сигнал ЦО ──────────────
+    // Повільний вій «attack signal»: підйом і спад, низько й гучно. Ні з чим не сплутати,
+    // навмисно відрізняється від усіх інших звуків. Зациклюваний.
+    public static byte[] BuildNuclear()
+    {
+        var buf = new List<short>();
+        AppendSweep(buf, 300, 620, 1800); // повільний підйом
+        AppendSweep(buf, 620, 300, 1800); // повільний спад
+        return Wav(buf.ToArray());
+    }
+
+    public static void PlayNuclear()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            const string key = "nuclear";
+            if (!Cache.TryGetValue(key, out var path) || !File.Exists(path))
+            {
+                path = Path.Combine(Path.GetTempPath(), "waralarm_nuclear.wav");
+                File.WriteAllBytes(path, BuildNuclear());
+                Cache[key] = path;
+            }
+            PlaySound(path, IntPtr.Zero, SND_ASYNC | SND_FILENAME);
+        }
+        catch { /* звук не критичен */ }
+    }
+
     static string FileFor(ThreatKind kind, bool urgent, bool clear)
     {
         var key = $"{kind}_{urgent}_{clear}";

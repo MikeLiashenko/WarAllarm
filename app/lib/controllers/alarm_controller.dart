@@ -38,6 +38,10 @@ class AlarmController extends ChangeNotifier {
   bool get impactAlarm => _impactRinging;
   DateTime? _impactAckUntil; // користувач натиснув «Стоп» ПІД ЧАС прильоту — тиша на вікно
 
+  bool _nuclearRinging = false; // ☢️ активна радіаційна/ядерна небезпека
+  bool get nuclearAlarm => _nuclearRinging;
+  DateTime? _nuclearAckUntil; // «Стоп» під час радіаційної небезпеки — тиша на вікно
+
   /// 'calm' | 'warn' | 'alarm'
   String _level = 'calm';
   String get level => _level;
@@ -63,14 +67,19 @@ class AlarmController extends ChangeNotifier {
   void hush() {
     _snoozeUntil =
         DateTime.now().add(Duration(seconds: _settings.snoozeSeconds));
-    // «Стоп» під час прильоту — свідоме підтвердження: гасимо сильний сигнал на вікно.
+    // «Стоп» під час прильоту/радіації — свідоме підтвердження: гасимо на вікно.
     if (_impactRinging) {
       _impactAckUntil =
+          DateTime.now().add(Duration(seconds: _settings.snoozeSeconds));
+    }
+    if (_nuclearRinging) {
+      _nuclearAckUntil =
           DateTime.now().add(Duration(seconds: _settings.snoozeSeconds));
     }
     _svc.stopAll();
     _ringing = false;
     _impactRinging = false;
+    _nuclearRinging = false;
     notifyListeners();
     _reevaluate();
   }
@@ -100,6 +109,38 @@ class AlarmController extends ChangeNotifier {
   void _reevaluate() {
     // Never alarm on sample/demo data — it must never be mistaken for real.
     final demo = _map.isDemo;
+
+    // ☢️ Найвищий пріоритет — радіаційна/ядерна небезпека (окремий екран і звук).
+    if (_map.nuclear) {
+      final acked = _nuclearAckUntil != null &&
+          DateTime.now().isBefore(_nuclearAckUntil!);
+      _title = '☢️ РАДІАЦІЙНА НЕБЕЗПЕКА';
+      _detail = _map.nuclearMsg.isNotEmpty
+          ? _map.nuclearMsg
+          : 'Зайдіть у приміщення, зачиніть вікна й двері.';
+      _level = 'alarm';
+      if (!acked && !_nuclearRinging) {
+        _nuclearRinging = true;
+        _impactRinging = false;
+        _ringing = true;
+        _svc.stopAll();
+        _svc.startSiren(
+          sound: _settings.soundAlerts,
+          vibrate: _settings.vibration,
+          volume: 1.0,
+          cat: 'nuclear',
+          impact: true,
+        );
+      }
+      notifyListeners();
+      return;
+    }
+    if (_nuclearRinging) {
+      _nuclearRinging = false;
+      _nuclearAckUntil = null;
+      _ringing = false;
+      _svc.stopAll();
+    }
 
     // Найсильніший випадок: приліт/над районом за ≤7 км від обраного місця.
     // Перебиває звичайний snooze — прилёт поруч не можна пропустити. Але свідомий
