@@ -636,8 +636,10 @@ async Task RunThreatNews(ChannelPoster channel)
             var active = tracker.Active.Where(t => t.Pos is not null).ToList();
             if (active.Count == 0) continue;
             foreach (var t in active) daySeen.Add($"{t.Kind}|{t.LastPlace}"); // для зведення
+            // Стадія у ключі: перехід наближається→приліт→далі має дати НОВИЙ пост
+            // (для живих коротких оновлень на Київ/Харків: «💥 Гучно», «🇺🇦 Далі на…»).
             var key = string.Join("|", active
-                .Select(t => $"{t.Kind}:{t.LastPlace}:{t.Amount}")
+                .Select(t => $"{t.Kind}:{t.LastPlace}:{t.Amount}:{t.Stage}")
                 .OrderBy(x => x));
             if (key == lastKey) continue;                                  // нічого нового
             if (DateTime.Now - lastPost < TimeSpan.FromSeconds(20)) continue; // не спамимо
@@ -714,26 +716,40 @@ static string BuildOblastPost(List<Threat> active)
 // Режим налёту на велике місто: коротко — місто + райони/напрямки.
 static string BuildCityRaidPost(List<Threat> active, List<string> cities)
 {
-    // Стиль «Реального Києва»: коротко — місто «ховаємось!», далі кожен район/пункт
-    // окремим рядком зі своєю іконою. Без зайвих абзаців і нацогляду — під час нальоту
-    // важлива швидкість читання.
+    // Стиль локальних каналів («Реальний Київ»): короткі живі рядки по стадії —
+    // «🛩 Троєщина», «💥 Гучно», «🇺🇦 Далі на Теремки». Швидкість читання під нальотом.
     var sb = new StringBuilder();
     foreach (var city in cities)
     {
-        var near = active.Where(t => NearBigCity(t) == city).ToList();
-        var icons = string.Concat(near.Select(t => ThreatParser.Icon(t.Kind)).Distinct());
-        sb.Append(icons.Length > 0 ? icons : "🛩").Append(" <b>").Append(H(city.ToUpper())).AppendLine("</b> — ховаємось!");
+        var near = active.Where(t => NearBigCity(t) == city).OrderBy(t => t.DistKm ?? 1e9).ToList();
+        sb.Append("🚨 <b>").Append(H(city.ToUpper())).AppendLine("</b>");
         var seen = new HashSet<string>();
-        foreach (var t in near.OrderBy(t => t.DistKm ?? 1e9))
+        int n = 0;
+        foreach (var t in near)
         {
-            if (t.LastPlace.Length == 0 || !seen.Add(t.LastPlace)) continue;
-            if (seen.Count > 12) { sb.AppendLine("…"); break; }
-            sb.Append(H(t.LastPlace)).Append(' ').AppendLine(ThreatParser.Icon(t.Kind));
+            var line = RaidLine(t);
+            if (!seen.Add(line)) continue;
+            if (n++ >= 8) { sb.AppendLine("…"); break; }
+            sb.AppendLine(line);
         }
         sb.AppendLine();
     }
     sb.Append("🤖 WarAlarm");
     return sb.ToString();
+}
+
+// Один короткий рядок про ціль у стилі локальних каналів.
+static string RaidLine(Threat t)
+{
+    var p = t.LastPlace;
+    return t.Stage switch
+    {
+        TrackStage.Impact   => p.Length > 0 ? $"💥 Гучно — {H(p)}" : "💥 Гучно",
+        TrackStage.Passed   => p.Length > 0 ? $"🇺🇦 Далі на {H(p)}" : "🇺🇦 Пройшла далі",
+        TrackStage.Overhead => p.Length > 0 ? $"⚠️ Над {H(p)}" : "⚠️ Над районом",
+        TrackStage.Imminent => p.Length > 0 ? $"❗ На підльоті — {H(p)}" : "❗ На підльоті",
+        _                   => p.Length > 0 ? $"{ThreatParser.Icon(t.Kind)} {H(p)}" : $"{ThreatParser.Icon(t.Kind)} ціль",
+    };
 }
 
 // Статус по ТОЧЦІ (місто користувача): ймовірність + найближчі цілі.
