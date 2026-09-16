@@ -112,10 +112,13 @@ public static class ThreatParser
     static ThreatEvent? ParseTargetLine(string line, string? oblast)
     {
         int count = 1;
-        var mc = Regex.Match(line, @"^\s*(\d+)\s+");
+        // Кол-во в начале строки: «3 БпЛА» и множитель «2х/2x/2×» (формат @rozvidkaneba).
+        var mc = Regex.Match(line, @"^\s*(\d+)\s*[хx×]?\s*(?=\S)");
         if (mc.Success) int.TryParse(mc.Groups[1].Value, out count);
 
         var kind = DetectKind(line);
+        // «Реактивний» шахед летит ~500 км/ч (обычный ~180) — помечаем для верной ETA.
+        string? extra = Regex.IsMatch(line, "реактивн", RegexOptions.IgnoreCase) ? "реакт. шахед" : null;
 
         var mn = Regex.Match(line, @"\bна\s+(.+)$", RegexOptions.IgnoreCase);
         string? city = mn.Success ? mn.Groups[1].Value.Trim().TrimEnd('.', ' ') : null;
@@ -124,7 +127,7 @@ public static class ThreatParser
             city = Regex.Split(city, @"\s+(повз|через|у напрямку|в напрямку|курс|напрямок)\b", RegexOptions.IgnoreCase)[0].Trim();
 
         if (city == null && kind == ThreatKind.Unknown) return null; // не похоже на цель
-        return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, oblast, city, count, null, line);
+        return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, oblast, city, count, extra, line);
     }
 
     static ThreatKind DetectKind(string line)

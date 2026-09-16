@@ -62,9 +62,12 @@ var khChannels = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 var kyChannels = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "nebo_raketa", "chyste_neboo" };
 // Всеукраинские каналы-сводки → уровень город/область (парсер ThreatParser).
-// Настраивается в settings.local.txt:  ua_channels=raketa_trevoga,chomu_trivoga,...
+// По умолчанию @rozvidkaneba («Розвідка неба») — постит ЧАЩЕ (каждые неск. минут во
+// время налёта) и СТРОГО в формате «Область:\nNх ТИП курсом на Місто», который наш
+// парсер читает нативно; каждый пост — полный срез по областям (идеально под SweepKind).
+// Меняется в settings.local.txt:  ua_channels=rozvidkaneba,raketa_trevoga,...
 var uaChannels = new HashSet<string>(
-    cfg.GetValueOrDefault("ua_channels", "raketa_trevoga")
+    cfg.GetValueOrDefault("ua_channels", "rozvidkaneba")
        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
        .Select(s => s.TrimStart('@')),
     StringComparer.OrdinalIgnoreCase);
