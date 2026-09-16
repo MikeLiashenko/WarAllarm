@@ -714,26 +714,25 @@ static string BuildOblastPost(List<Threat> active)
 // Режим налёту на велике місто: коротко — місто + райони/напрямки.
 static string BuildCityRaidPost(List<Threat> active, List<string> cities)
 {
+    // Стиль «Реального Києва»: коротко — місто «ховаємось!», далі кожен район/пункт
+    // окремим рядком зі своєю іконою. Без зайвих абзаців і нацогляду — під час нальоту
+    // важлива швидкість читання.
     var sb = new StringBuilder();
     foreach (var city in cities)
     {
         var near = active.Where(t => NearBigCity(t) == city).ToList();
         var icons = string.Concat(near.Select(t => ThreatParser.Icon(t.Kind)).Distinct());
-        var places = near.Where(t => t.LastPlace.Length > 0)
-                         .Select(t => t.LastPlace).Distinct().Take(12).ToList();
-        sb.Append("⚡ <b>").Append(H(city.ToUpper())).Append("</b> ").Append(icons).AppendLine(" — ЗАГРОЗА!");
-        if (places.Count > 0) sb.AppendLine("↳ " + H(string.Join(", ", places)));
+        sb.Append(icons.Length > 0 ? icons : "🛩").Append(" <b>").Append(H(city.ToUpper())).AppendLine("</b> — ховаємось!");
+        var seen = new HashSet<string>();
+        foreach (var t in near.OrderBy(t => t.DistKm ?? 1e9))
+        {
+            if (t.LastPlace.Length == 0 || !seen.Add(t.LastPlace)) continue;
+            if (seen.Count > 12) { sb.AppendLine("…"); break; }
+            sb.Append(H(t.LastPlace)).Append(' ').AppendLine(ThreatParser.Icon(t.Kind));
+        }
         sb.AppendLine();
     }
-    sb.AppendLine("🏃 Не зволікайте — пройдіть в укриття.");
-    var other = active.Where(t => NearBigCity(t) == null && t.Pos is not null).ToList();
-    if (other.Count > 0)
-    {
-        var regions = other.Select(t => OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon))
-                           .Distinct().Take(6);
-        sb.Append("🌍 Ще по Україні: ").AppendLine(H(string.Join(", ", regions)));
-    }
-    sb.Append("🤖 Авто · звіряйтесь з офіційними");
+    sb.Append("🤖 WarAlarm");
     return sb.ToString();
 }
 
