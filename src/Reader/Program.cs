@@ -419,6 +419,7 @@ else
 // + помічені цілі за типом/місцем). Накопичуються в циклах, скидаються після зведення.
 var dayRed = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 var daySeen = new HashSet<string>();
+var ppoSeen = new Dictionary<string, DateTime>(); // зона → коли востаннє згадали роботу ППО
 
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
@@ -529,6 +530,8 @@ string BuildDigest()
 
 // HTML-екранування динамічного тексту для постів у канал (parse_mode=HTML).
 static string H(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+// Згадка про роботу ППО в пості локального каналу («працює ППО», «робота ППО», зенітки).
+static bool PpoMention(string s) => Regex.IsMatch(s.ToLowerInvariant(), @"\bппо\b|протиповітрян|зенітн");
 static string ShortReg(string ua) => ua.Replace(" область", "").Replace("м. ", "").Trim();
 static string KindShortEnum(string k) => k switch
 {
@@ -647,8 +650,11 @@ async Task RunThreatNews(ChannelPoster channel)
             lastPost = DateTime.Now;
             // Налёт на велике місто (Київ/Харків/Дніпро) → короткий формат; інакше — по областях.
             var raidCities = active.Select(NearBigCity).Where(c => c != null).Distinct().ToList();
+            // Міста, де щойно (≤3 хв) згадали роботу ППО — для банера «🛡 Працює ППО».
+            var ppoNow = new HashSet<string>(
+                ppoSeen.Where(kv => DateTime.Now - kv.Value < TimeSpan.FromMinutes(3)).Select(kv => kv.Key));
             var post = raidCities.Count > 0
-                ? BuildCityRaidPost(active, raidCities!)
+                ? BuildCityRaidPost(active, raidCities!, ppoNow)
                 : BuildOblastPost(active);
             await channel.Post(post, null); // текст; карта — окремо (10 хв)
         }
@@ -714,7 +720,8 @@ static string BuildOblastPost(List<Threat> active)
 }
 
 // Режим налёту на велике місто: коротко — місто + райони/напрямки.
-static string BuildCityRaidPost(List<Threat> active, List<string> cities)
+// [ppoCities] — міста, де щойно згадали роботу ППО (показуємо банер «🛡 Працює ППО»).
+static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSet<string>? ppoCities = null)
 {
     // Стиль локальних каналів («Реальний Київ»): короткі живі рядки по стадії —
     // «🛩 Троєщина», «💥 Гучно», «🇺🇦 Далі на Теремки». Швидкість читання під нальотом.
@@ -723,6 +730,7 @@ static string BuildCityRaidPost(List<Threat> active, List<string> cities)
     {
         var near = active.Where(t => NearBigCity(t) == city).OrderBy(t => t.DistKm ?? 1e9).ToList();
         sb.Append("🚨 <b>").Append(H(city.ToUpper())).AppendLine("</b>");
+        if (ppoCities != null && ppoCities.Contains(city)) sb.AppendLine("🛡 <b>Працює ППО</b>");
         var seen = new HashSet<string>();
         int n = 0;
         foreach (var t in near)
@@ -1201,6 +1209,7 @@ async Task OnUpdate(Update update)
     // ── Харьковские каналы → монитор до района ────────────────────────────────
     if (WatchKharkiv && uname != null && khChannels.Contains(uname))
     {
+        if (PpoMention(m.message)) ppoSeen["Харків"] = DateTime.Now;
         await HandleKh(KharkivMonitor.Analyze(m.message, MyDistrict), src, time, "Харків");
         return;
     }
@@ -1208,6 +1217,7 @@ async Task OnUpdate(Update update)
     // ── Киевские каналы → монитор по городу (ты бываешь в Киеве) ───────────────
     if (WatchKyiv && uname != null && kyChannels.Contains(uname))
     {
+        if (PpoMention(m.message)) ppoSeen["Київ"] = DateTime.Now;
         await HandleKh(KyivMonitor.Analyze(m.message), src, time, "Київ");
         return;
     }
