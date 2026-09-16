@@ -510,21 +510,25 @@ async Task RunDailyDigest(ChannelPoster channel)
 string BuildDigest()
 {
     var sb = new StringBuilder();
-    sb.AppendLine("📊 Зведення за добу");
+    sb.AppendLine("📊 <b>Зведення за добу</b>");
+    sb.AppendLine();
     int announces = dayRed.Values.Sum();
-    sb.AppendLine($"🔴 Оголошень тривог по областях: {announces}");
+    sb.AppendLine($"🔴 Тривог по областях: {announces}");
     if (dayRed.Count > 0)
-        sb.AppendLine("Найактивніше: " + string.Join(", ",
-            dayRed.OrderByDescending(k => k.Value).Take(3).Select(k => $"{ShortReg(k.Key)} ×{k.Value}")));
+        sb.AppendLine("🔥 Найгарячіше: " + H(string.Join(", ",
+            dayRed.OrderByDescending(k => k.Value).Take(3).Select(k => $"{ShortReg(k.Key)} ×{k.Value}"))));
     var byKind = daySeen.GroupBy(x => x.Split('|')[0]).ToDictionary(g => g.Key, g => g.Count());
     if (byKind.Count > 0)
-        sb.AppendLine("🛸 Цілі помічено: " + string.Join(" · ",
-            byKind.OrderByDescending(k => k.Value).Select(k => $"{KindShortEnum(k.Key)} {k.Value}")));
+        sb.AppendLine("🛸 Цілей помічено: " + H(string.Join(" · ",
+            byKind.OrderByDescending(k => k.Value).Select(k => $"{KindShortEnum(k.Key)} {k.Value}"))));
     if (announces == 0 && byKind.Count == 0) sb.AppendLine("😌 Доба була відносно спокійною.");
-    sb.Append("\n🤖 Авто-дані WarAlarm · бережіть себе 🇺🇦");
+    sb.AppendLine();
+    sb.Append("🕊 Бережіть себе 🇺🇦 · автозведення WarAlarm");
     return sb.ToString();
 }
 
+// HTML-екранування динамічного тексту для постів у канал (parse_mode=HTML).
+static string H(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 static string ShortReg(string ua) => ua.Replace(" область", "").Replace("м. ", "").Trim();
 static string KindShortEnum(string k) => k switch
 {
@@ -558,18 +562,20 @@ static string BuildAlarmPost(List<string> newly, OfficialAlerts.Snapshot s)
     var sb = new StringBuilder();
     if (s.RedUa.Count + s.YellowUa.Count >= 18)
     {
-        sb.AppendLine("⚠️ МАСШТАБНА ТРИВОГА — майже по всій Україні (ймовірно зліт МіГ-31К / балістика). В укриття!");
+        sb.AppendLine("🚨🚨 <b>МАСШТАБНА ТРИВОГА</b> — майже вся Україна!");
+        sb.AppendLine("🛫 Схоже на зліт МіГ-31К або балістику. Усі в укриття!");
         sb.AppendLine();
     }
     var big = newly.Where(r => r.Contains("Київ") || r.Contains("Харків") || r.Contains("Дніпро"))
                    .Select(BigLabel).Distinct().ToList();
     if (big.Count > 0)
-        sb.AppendLine("🚨 " + string.Join(", ", big) + " — ТРИВОГА!");
-    sb.AppendLine("🔴 Повітряна тривога:");
-    sb.AppendLine(string.Join(", ", newly));
+        sb.AppendLine("🚨 <b>" + H(string.Join(" · ", big)) + "</b> — тривога!");
+    sb.AppendLine("🔴 <b>Повітряна тривога</b>");
+    sb.AppendLine("📍 " + H(string.Join(", ", newly.Select(ShortReg))));
     sb.AppendLine();
-    sb.AppendLine($"Загалом по країні: 🔴 {s.RedUa.Count} · 🟡 {s.YellowUa.Count} обл.");
-    sb.Append("\n🤖 Авто-дані WarAlarm · перевіряйте офіційні джерела");
+    sb.AppendLine($"🗺 По країні: 🔴 {s.RedUa.Count} обл · 🟡 {s.YellowUa.Count} обл");
+    sb.AppendLine("⚠️ Прямуйте в укриття, бережіть себе 🇺🇦");
+    sb.Append("🤖 WarAlarm · звіряйтесь з офіційними джерелами");
     return sb.ToString();
 }
 
@@ -583,27 +589,34 @@ static string MapCaption(OfficialAlerts.Snapshot s, int targets)
     var sb = new StringBuilder();
     if (mass)
     {
-        sb.AppendLine("⚠️ МАСШТАБНА ТРИВОГА — майже по всій Україні одночасно.");
-        sb.AppendLine("Так буває при зльоті МіГ-31К або балістичній загрозі. Будьте в укритті.");
+        sb.AppendLine("⚠️ <b>МАСШТАБНА ТРИВОГА</b> — майже вся Україна одночасно.");
+        sb.AppendLine("🛫 Так буває при зльоті МіГ-31К або балістиці. Будьте в укритті.");
         sb.AppendLine();
     }
-    sb.AppendLine("🗺 Карта тривог");
+    sb.AppendLine("🗺 <b>Карта тривог</b>");
     sb.AppendLine($"🔴 {red} обл · 🟡 {yel} обл · 🎯 цілей: {targets}");
     if (red > 0)
-        sb.AppendLine("Тривога: " + string.Join(", ", s.RedUa.Take(12).Select(ShortReg))
+        sb.AppendLine("🔥 Тривога: " + H(string.Join(", ", s.RedUa.Take(12).Select(ShortReg)))
             + (red > 12 ? "…" : ""));
-    sb.Append("\n🤖 Авто · звіряйтесь з офіційними джерелами.");
+    sb.Append("🤖 Авто · звіряйтесь з офіційними джерелами");
     return sb.ToString();
 }
 
 static string BuildClearPost(List<string> cleared, int remaining)
 {
     var sb = new StringBuilder();
-    sb.AppendLine("🟢 Відбій:");
-    sb.AppendLine(string.Join(", ", cleared));
+    if (remaining == 0)
+    {
+        sb.AppendLine("🟢 <b>ВІДБІЙ</b> — по всій країні чисто! 🕊");
+        sb.AppendLine("✅ " + H(string.Join(", ", cleared.Select(ShortReg))));
+        sb.Append("🤖 WarAlarm · бережіть себе 🇺🇦");
+        return sb.ToString();
+    }
+    sb.AppendLine("🟢 <b>ВІДБІЙ</b>");
+    sb.AppendLine("✅ " + H(string.Join(", ", cleared.Select(ShortReg))));
     sb.AppendLine();
     sb.AppendLine($"Ще під тривогою: 🔴 {remaining} обл.");
-    sb.Append("🤖 Авто-дані WarAlarm");
+    sb.Append("🤖 WarAlarm");
     return sb.ToString();
 }
 
@@ -675,19 +688,22 @@ static string BuildOblastPost(List<Threat> active)
     var byRegion = active.Where(t => t.Pos is not null)
         .GroupBy(t => OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon))
         .OrderByDescending(g => g.Sum(t => t.Amount))
-        .Take(12);
+        .Take(12).ToList();
+    int total = active.Where(t => t.Pos is not null).Sum(t => t.Amount);
+    sb.Append("🛸 <b>Рух цілей по Україні</b> — ").Append(total).AppendLine(" на карті");
+    sb.AppendLine();
     foreach (var g in byRegion)
     {
-        sb.Append("📍 ").Append(g.Key).AppendLine(":");
+        sb.Append("📍 <b>").Append(H(g.Key)).AppendLine("</b>");
         var seen = new HashSet<string>();
         int lines = 0;
         foreach (var t in g.OrderByDescending(t => t.Amount))
         {
             var place = t.LastPlace.Length > 0 ? t.LastPlace : g.Key;
             if (!seen.Add($"{t.Kind}|{place}")) continue;
-            if (lines++ >= 8) { sb.AppendLine("…"); break; }
-            sb.Append(ThreatParser.Icon(t.Kind)).Append(' ').Append(KindShort(t.Kind))
-              .Append(t.Amount > 1 ? $" ×{t.Amount}" : "").Append(" на ").AppendLine(place);
+            if (lines++ >= 8) { sb.AppendLine("   …"); break; }
+            sb.Append("   ").Append(ThreatParser.Icon(t.Kind)).Append(' ').Append(KindShort(t.Kind))
+              .Append(t.Amount > 1 ? $" ×{t.Amount}" : "").Append(" → ").AppendLine(H(place));
         }
         sb.AppendLine();
     }
@@ -705,16 +721,17 @@ static string BuildCityRaidPost(List<Threat> active, List<string> cities)
         var icons = string.Concat(near.Select(t => ThreatParser.Icon(t.Kind)).Distinct());
         var places = near.Where(t => t.LastPlace.Length > 0)
                          .Select(t => t.LastPlace).Distinct().Take(12).ToList();
-        sb.Append("⚡ ").Append(city.ToUpper()).Append(' ').Append(icons).AppendLine(" — ЗАГРОЗА!");
-        if (places.Count > 0) sb.AppendLine("↳ " + string.Join(", ", places));
+        sb.Append("⚡ <b>").Append(H(city.ToUpper())).Append("</b> ").Append(icons).AppendLine(" — ЗАГРОЗА!");
+        if (places.Count > 0) sb.AppendLine("↳ " + H(string.Join(", ", places)));
         sb.AppendLine();
     }
+    sb.AppendLine("🏃 Не зволікайте — пройдіть в укриття.");
     var other = active.Where(t => NearBigCity(t) == null && t.Pos is not null).ToList();
     if (other.Count > 0)
     {
         var regions = other.Select(t => OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon))
                            .Distinct().Take(6);
-        sb.Append("🛩 Ще по Україні: ").AppendLine(string.Join(", ", regions));
+        sb.Append("🌍 Ще по Україні: ").AppendLine(H(string.Join(", ", regions)));
     }
     sb.Append("🤖 Авто · звіряйтесь з офіційними");
     return sb.ToString();
