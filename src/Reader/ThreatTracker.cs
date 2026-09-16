@@ -22,6 +22,7 @@ public sealed class Threat
     public required string Zone;          // "Харків" / "Київ"
     public ThreatKind Kind;
     public string? Ammo;
+    public bool Recon;                    // «розвідка/дорозвідка» — низький пріоритет: не виє, не будить
     public (double lat, double lon)? Pos; // последняя геопривязка
     public string LastPlace = "";
     public double? DistKm;                // до дома
@@ -102,6 +103,10 @@ public sealed class ThreatTracker
             _active[key] = t;
         }
         t!.Ammo ??= e.Extra;
+        // Розвідка/дорозвідка — низький пріоритет (не виє, не будить). Якщо в апдейті
+        // з'явилось слово удару — знімаємо позначку (ціль ескалювала з розвідки в удар).
+        t.Recon = Regex.IsMatch(low, @"розвід|дорозвід")
+                  && !Regex.IsMatch(low, @"вибух|влучанн|приліт|удар|шахед на|каб|ракет");
         t.LastUpdate = now;
         foreach (var pn in e.Places) t.Hits.Add(pn);
         if (place.Length > 0) t.Hits.Add(place);
@@ -133,6 +138,7 @@ public sealed class ThreatTracker
         else t.Stage = Classify(t);
 
         var sound = SoundFor(t.Stage, prev, isNew);
+        if (t.Recon) sound = TrackSound.None; // разведка — тихо (только карта/консоль)
         var note = Note(t);
         if (t.Stage is TrackStage.Approaching && sound == TrackSound.Ping) t.LastPing = now;
         return new TrackUpdate(t, t.Stage != prev || isNew, sound, note);
@@ -158,6 +164,7 @@ public sealed class ThreatTracker
             bool isNew = !_active.TryGetValue(key, out var t);
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
             t!.Ammo ??= ev.Extra;
+            t.Recon = ((ev.Extra ?? "") + " " + ev.Raw).ToLowerInvariant().Contains("розвід");
             t.LastUpdate = now;
             t.Hits.Add(ev.City ?? gp.name);
             t.Count = ev.Count > 0 ? ev.Count : 1;
@@ -220,8 +227,9 @@ public sealed class ThreatTracker
             if (t.Stage == TrackStage.Approaching)
             {
                 // Пикаем только по близким целям (≤55 км). Далёкие по стране — только на карте.
+                // Разведку НЕ пикаем совсем — иначе «орёт постоянно» без реальной угрозы удара.
                 double every = PingEverySec(EtaNow(t, now), t.DistKm);
-                if (t.DistKm is { } dd && dd <= 55 && (now - t.LastPing).TotalSeconds >= every)
+                if (!t.Recon && t.DistKm is { } dd && dd <= 55 && (now - t.LastPing).TotalSeconds >= every)
                 {
                     t.LastPing = now;
                     outp.Add(new TrackUpdate(t, false, TrackSound.Ping, Note(t)));
@@ -267,6 +275,7 @@ public sealed class ThreatTracker
     static TrackStage Classify(Threat t)
     {
         if (t.Stage is TrackStage.Impact or TrackStage.Passed) return t.Stage; // терминальные держим
+        if (t.Recon) return TrackStage.Approaching;                            // разведка НЕ воет и не «над районом»
         if (t.Kind == ThreatKind.Ballistic) return TrackStage.Imminent;        // всегда секунды
         double? eta = t.EtaMin;
         double dist = t.DistKm ?? 999;

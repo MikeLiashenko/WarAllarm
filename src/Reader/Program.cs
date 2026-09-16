@@ -1308,15 +1308,23 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
             // Прилёт → отдельная запись в журнал (для аналитики «прильотів»).
             if (u.StageChanged && u.Threat.Stage == TrackStage.Impact)
                 try { File.AppendAllText("alarms.csv", $"{DateTime.Now:yyyy-MM-dd},{DateTime.Now:HH:mm:ss},{zone},{u.Threat.Kind},impact,\"{u.Note.Replace('"', '\'')}\"\n"); } catch { }
-            bool trackerPlayed = OperatingSystem.IsWindows() && u.Threat.DistKm is not null;
+            // Звук — ТОЛЬКО на реальное событие стадии (новая цель/подлёт/приліт).
+            // Раньше пустое None подменялось Ping → пикало на КАЖДЫЙ перепост той же цели
+            // («орёт постоянно»). Разведка — молчит совсем.
+            bool trackerPlayed = OperatingSystem.IsWindows() && u.Threat.DistKm is not null
+                                 && !u.Threat.Recon && u.Sound != TrackSound.None;
             if (trackerPlayed)
-                SirenSound.PlayStage(u.Sound == TrackSound.None ? TrackSound.Ping : u.Sound, u.Threat.Kind);
+                SirenSound.PlayStage(u.Sound, u.Threat.Kind);
 
             // Будим (пуш), если по твоему району/городу ИЛИ уже на подлёте/над нами/прилёт.
-            bool wake = e.Tier is KhTier.MyArea or KhTier.CityWide
-                     || u.Threat.Stage is TrackStage.Imminent or TrackStage.Overhead or TrackStage.Impact;
-            if (wake)
-                await Notify(zone, new AlarmInfo(time, src, $"{emoji} {u.Note}", oneLine, e.Kind, true, Silent: trackerPlayed), clear: false);
+            // Разведку/дорозвідку — НЕ будим (телефон молчит), она только на карте.
+            bool wake = !u.Threat.Recon
+                     && (e.Tier is KhTier.MyArea or KhTier.CityWide
+                        || u.Threat.Stage is TrackStage.Imminent or TrackStage.Overhead or TrackStage.Impact);
+            if (u.Threat.Recon)
+                Ui.Line(ConsoleColor.DarkGray, $"🛰 [{time}] {src} · {u.Note}  (розвідка — тихо)");
+            else if (wake)
+                await Notify(zone, new AlarmInfo(time, src, $"{emoji} {u.Note}", oneLine, e.Kind, true, Silent: OperatingSystem.IsWindows() && u.Threat.DistKm is not null), clear: false);
             else // сосед. район/пригород — слышно, поэтому звук есть, но телефон молчит
                 Ui.Line(ConsoleColor.Yellow, $"{emoji} [{time}] {src} · {u.Note}  (сусід — тихіше, телефон мовчить)");
         }
