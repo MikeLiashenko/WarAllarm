@@ -1330,7 +1330,7 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
             {
                 if (OperatingSystem.IsWindows()) SirenSound.PlayImpactHome();
                 Ui.Line(ConsoleColor.Red, $"💥 [{time}] {src} · ПРИЛІТ ПОРУЧ · {u.Note}");
-                await Notify(zone, new AlarmInfo(time, src, $"💥 ПРИЛІТ ПОРУЧ! В укриття, від вікон!", oneLine, e.Kind, true, Silent: false), clear: false);
+                await Notify(zone, new AlarmInfo(time, src, $"💥 ПРИЛІТ ПОРУЧ! Може бути гучно — вибухи/робота ППО. В укриття, від вікон.", oneLine, e.Kind, true, Silent: false), clear: false);
                 await MaybeAi(false);
                 return;
             }

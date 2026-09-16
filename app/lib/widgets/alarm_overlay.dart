@@ -90,17 +90,34 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                 children: [
                   FadeTransition(
                     opacity: _pulse.drive(Tween(begin: 0.45, end: 1.0)),
-                    child: const Text('🚨', style: TextStyle(fontSize: 72),
+                    child: Text(alarm.impactAlarm ? '💥' : '🚨',
+                        style: const TextStyle(fontSize: 72),
                         textAlign: TextAlign.center),
                   ),
                   const SizedBox(height: 8),
-                  const Text('ТРИВОГА',
+                  Text(alarm.impactAlarm ? 'ПРИЛІТ ПОРУЧ' : 'ТРИВОГА',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                           color: Colors.white,
-                          fontSize: 46,
+                          fontSize: alarm.impactAlarm ? 40 : 46,
                           fontWeight: FontWeight.w900,
                           letterSpacing: 2)),
+                  // Прилёт над домом — предупреждаем, что сейчас может быть громко
+                  // (взрывы / работа ППО), чтобы грохот не был неожиданностью.
+                  if (alarm.impactAlarm) ...[
+                    const SizedBox(height: 12),
+                    const Text('⚠️ Зараз може бути гучно',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 4),
+                    const Text('Вибухи або робота ППО поруч. Тримайся, це нормально боятися.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Colors.white, fontSize: 14.5, height: 1.35)),
+                  ],
                   const SizedBox(height: 12),
                   Text(
                     alarm.detail.isEmpty
