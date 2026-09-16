@@ -18,8 +18,9 @@ class AlarmService {
 
   // Which threat's siren/ping to play (per-kind, ported from the Reader).
   static const _kinds = {'shahed', 'missile', 'balist', 'kab', 'avia', 'other'};
+  // 'impact' — окремий найсильніший сигнал «приліт над домом» (siren_impact.wav).
   static String _norm(String? cat) =>
-      _kinds.contains(cat) ? cat! : 'other';
+      (cat == 'impact' || _kinds.contains(cat)) ? cat! : 'other';
 
   bool _sirenOn = false;
   bool _vibrating = false;
@@ -48,6 +49,7 @@ class AlarmService {
     required bool vibrate,
     double? volume,
     String? cat,
+    bool impact = false, // приліт над домом — окремий звук + жорсткіша вібрація
   }) async {
     if (volume != null) _volume = volume.clamp(0.0, 1.0);
     await _keepAwake(true);
@@ -63,7 +65,7 @@ class AlarmService {
         debugPrint('siren play failed: $e');
       }
     }
-    if (vibrate) await _startVibration();
+    if (vibrate) await _startVibration(impact: impact);
   }
 
   /// One short "approaching" blip (used to pulse while a threat is on the way).
@@ -90,16 +92,20 @@ class AlarmService {
 
   // --- vibration --------------------------------------------------------------
 
-  Future<void> _startVibration() async {
+  Future<void> _startVibration({bool impact = false}) async {
     if (_vibrating) return;
     try {
       final has = await Vibration.hasVibrator();
       if (has != true) return;
       _vibrating = true;
-      // Long buzz / short gap, repeating — an urgent, unmistakable pattern.
+      // Impact над домом — частый жёсткий стаккато (паника). Иначе — длинный вой/пауза.
       Vibration.vibrate(
-        pattern: const [0, 700, 300, 700, 300, 700, 900],
-        intensities: const [0, 255, 0, 255, 0, 255, 0],
+        pattern: impact
+            ? const [0, 400, 110, 400, 110, 400, 110, 400, 110, 400, 110]
+            : const [0, 700, 300, 700, 300, 700, 900],
+        intensities: impact
+            ? const [0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0]
+            : const [0, 255, 0, 255, 0, 255, 0],
         repeat: 0,
       );
     } catch (_) {

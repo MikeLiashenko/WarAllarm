@@ -34,6 +34,10 @@ class AlarmController extends ChangeNotifier {
   bool _ringing = false;
   bool get ringing => _ringing;
 
+  bool _impactRinging = false; // зараз грає сильний сигнал «приліт над домом»
+  bool get impactAlarm => _impactRinging;
+  DateTime? _impactAckUntil; // користувач натиснув «Стоп» ПІД ЧАС прильоту — тиша на вікно
+
   /// 'calm' | 'warn' | 'alarm'
   String _level = 'calm';
   String get level => _level;
@@ -59,8 +63,14 @@ class AlarmController extends ChangeNotifier {
   void hush() {
     _snoozeUntil =
         DateTime.now().add(Duration(seconds: _settings.snoozeSeconds));
+    // «Стоп» під час прильоту — свідоме підтвердження: гасимо сильний сигнал на вікно.
+    if (_impactRinging) {
+      _impactAckUntil =
+          DateTime.now().add(Duration(seconds: _settings.snoozeSeconds));
+    }
     _svc.stopAll();
     _ringing = false;
+    _impactRinging = false;
     notifyListeners();
     _reevaluate();
   }
@@ -90,6 +100,39 @@ class AlarmController extends ChangeNotifier {
   void _reevaluate() {
     // Never alarm on sample/demo data — it must never be mistaken for real.
     final demo = _map.isDemo;
+
+    // Найсильніший випадок: приліт/над районом за ≤7 км від обраного місця.
+    // Перебиває звичайний snooze — прилёт поруч не можна пропустити. Але свідомий
+    // «Стоп» під час прильоту (_impactAckUntil) поважаємо на вікно snooze.
+    if (!demo && _impactNearHome()) {
+      final acked = _impactAckUntil != null &&
+          DateTime.now().isBefore(_impactAckUntil!);
+      _title = '💥 ПРИЛІТ ПОРУЧ';
+      _detail = _impactDetail();
+      _level = 'alarm';
+      if (!acked && !_impactRinging) {
+        _impactRinging = true;
+        _ringing = true;
+        _svc.stopAll();
+        _svc.startSiren(
+          sound: _settings.soundAlerts,
+          vibrate: _settings.vibration,
+          volume: _settings.alarmVolume.clamp(0.7, 1.0),
+          cat: 'impact',
+          impact: true,
+        );
+      }
+      notifyListeners();
+      return;
+    }
+    // Прилёт минув → повертаємось до звичайної логіки (нижче вирішить рівень).
+    _impactAckUntil = null;
+    if (_impactRinging) {
+      _impactRinging = false;
+      _ringing = false;
+      _svc.stopAll();
+    }
+
     final worst = demo ? null : _worstRisk();
 
     final score = worst?.score ?? 0;
@@ -143,6 +186,31 @@ class AlarmController extends ChangeNotifier {
       _level = newLevel;
     }
     notifyListeners();
+  }
+
+  /// Приліт/над районом (стадія Impact/Overhead) за ≤7 км від обраного місця.
+  bool _impactNearHome() {
+    for (final pl in _map.selectedPlaces) {
+      for (final t in placeThreats(pl, _map.targets)) {
+        final d = t.pdist ?? double.infinity;
+        if (d <= 7 && (t.stage == 'Impact' || t.stage == 'Overhead')) return true;
+      }
+    }
+    return false;
+  }
+
+  /// Рядок опису для сильного сигналу «приліт поруч».
+  String _impactDetail() {
+    for (final pl in _map.selectedPlaces) {
+      for (final t in placeThreats(pl, _map.targets)) {
+        final d = t.pdist ?? double.infinity;
+        if (d <= 7 && (t.stage == 'Impact' || t.stage == 'Overhead')) {
+          final where = t.place.isNotEmpty ? ' · ${t.place}' : '';
+          return '${t.label} · ${d.round()} км від «${pl.name}»$where';
+        }
+      }
+    }
+    return 'Вибух поруч. В укриття, подалі від вікон.';
   }
 
   /// Nearest target distance (km) to any selected place, or infinity.

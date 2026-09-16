@@ -149,6 +149,21 @@ if (args.Length >= 1 && (args[0].Equals("parse", StringComparison.OrdinalIgnoreC
     return;
 }
 
+// ── Генерація звуку «ПРИЛІТ НАД ДОМОМ» у ассети застосунку:  dotnet run -- gensound
+// Пише siren_impact.wav тим самим синтезом, що й у боті — щоб звук збігався.
+if (args.Length >= 1 && args[0].Equals("gensound", StringComparison.OrdinalIgnoreCase))
+{
+    var wav = SirenSound.BuildImpactHome();
+    foreach (var dir in new[] { "../../app/assets", "app/assets" })
+        if (Directory.Exists(dir))
+        {
+            var p = Path.Combine(dir, "siren_impact.wav");
+            File.WriteAllBytes(p, wav);
+            Console.WriteLine($"🔊 Записав {Path.GetFullPath(p)} ({wav.Length} байт)");
+        }
+    return;
+}
+
 // ── Харьковский монитор (оффлайн):  dotnet run -- kh [район] [файл] ──────────
 if (args.Length >= 1 && args[0].Equals("kh", StringComparison.OrdinalIgnoreCase))
 {
@@ -1308,6 +1323,18 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
             // Прилёт → отдельная запись в журнал (для аналитики «прильотів»).
             if (u.StageChanged && u.Threat.Stage == TrackStage.Impact)
                 try { File.AppendAllText("alarms.csv", $"{DateTime.Now:yyyy-MM-dd},{DateTime.Now:HH:mm:ss},{zone},{u.Threat.Kind},impact,\"{u.Note.Replace('"', '\'')}\"\n"); } catch { }
+            // ПРИЛІТ/НАД ДОМОМ (≤7 км) — окремий найсильніший сигнал і пуш «в укриття».
+            bool impactHome = !u.Threat.Recon && u.Threat.DistKm is <= 7
+                              && u.Threat.Stage is TrackStage.Impact or TrackStage.Overhead;
+            if (impactHome)
+            {
+                if (OperatingSystem.IsWindows()) SirenSound.PlayImpactHome();
+                Ui.Line(ConsoleColor.Red, $"💥 [{time}] {src} · ПРИЛІТ ПОРУЧ · {u.Note}");
+                await Notify(zone, new AlarmInfo(time, src, $"💥 ПРИЛІТ ПОРУЧ! В укриття, від вікон!", oneLine, e.Kind, true, Silent: false), clear: false);
+                await MaybeAi(false);
+                return;
+            }
+
             // Звук — ТОЛЬКО на реальное событие стадии (новая цель/подлёт/приліт).
             // Раньше пустое None подменялось Ping → пикало на КАЖДЫЙ перепост той же цели
             // («орёт постоянно»). Разведка — молчит совсем.

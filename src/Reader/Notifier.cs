@@ -144,6 +144,38 @@ public static class SirenSound
         catch { /* звук не критичен */ }
     }
 
+    // ── «ПРИЛІТ НАД ДОМОМ» — окремий, найсильніший сигнал ────────────────────────
+    // Швидкий двотоновий аварійний вій (як EU-emergency) — гучний, безперервний,
+    // ні з чим не сплутати. Зациклюваний (тони згасають на межах — чисте повторення).
+    public static byte[] BuildImpactHome()
+    {
+        var buf = new List<short>();
+        for (int r = 0; r < 4; r++)
+        {
+            AppendTone(buf, 1040, 150); // высокий
+            AppendTone(buf, 720, 150);  // низкий — резкий контраст, «паника»
+        }
+        return Wav(buf.ToArray());
+    }
+
+    // Проиграть сильный сигнал прилёта над домом (Windows).
+    public static void PlayImpactHome()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            const string key = "impact_home";
+            if (!Cache.TryGetValue(key, out var path) || !File.Exists(path))
+            {
+                path = Path.Combine(Path.GetTempPath(), "waralarm_impact_home.wav");
+                File.WriteAllBytes(path, BuildImpactHome());
+                Cache[key] = path;
+            }
+            PlaySound(path, IntPtr.Zero, SND_ASYNC | SND_FILENAME);
+        }
+        catch { /* звук не критичен */ }
+    }
+
     static string FileFor(ThreatKind kind, bool urgent, bool clear)
     {
         var key = $"{kind}_{urgent}_{clear}";
