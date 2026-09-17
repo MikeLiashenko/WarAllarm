@@ -35,6 +35,13 @@ public static class Geo
 
 public static class ThreatParser
 {
+    // Усі ходові назви дронів/шахедів/приманок/розвідників (сленг каналів) — ОДНЕ джерело
+    // правди для всіх трьох парсерів (ThreatParser / KyivMonitor / KharkivMonitor).
+    // шахед · герань(geran) · гербера-пастка · бандероль · мопед · FPV · молнія · шаболда ·
+    // ланцет · мавік · орлан · зала · supercam.
+    public const string DroneRe =
+        @"бпла|дрон|шахед|шахід|shahed|геран|geran|гербер|бандерол|мопед|\bfpv\b|молні|шаболд|ланцет|мавік|mavic|орлан|\bзала\b|supercam|суперкам";
+
     // Строки-шум: подписки, ссылки, донаты, комментарии к фото, новости о прошлых ударах.
     static readonly string[] Noise =
     {
@@ -133,10 +140,10 @@ public static class ThreatParser
     static ThreatKind DetectKind(string line)
     {
         var l = line.ToLowerInvariant();
-        if (l.Contains("бпла") || l.Contains("дрон") || l.Contains("шахед") || l.Contains("шахід") || l.Contains("мопед") || l.Contains("geran")) return ThreatKind.Drone;
-        if (l.Contains("каб")) return ThreatKind.Kab;
-        if (l.Contains("балісти")) return ThreatKind.Ballistic;
-        if (l.Contains("ракет") || l.Contains("крилат") || l.Contains("калібр") || l.Contains("кинджал") || l.Contains("іскандер")) return ThreatKind.Missile;
+        if (Regex.IsMatch(l, DroneRe)) return ThreatKind.Drone;
+        if (l.Contains("каб") || l.Contains("умпк") || l.Contains("умпб") || Regex.IsMatch(l, @"фаб[-\s]?\d")) return ThreatKind.Kab;
+        if (Regex.IsMatch(l, @"балісти|кн-?23|точка[-\s]?у")) return ThreatKind.Ballistic;
+        if (Regex.IsMatch(l, @"ракет|крилат|калібр|кинджал|іскандер|циркон|онікс|onyx|х[-\s]?\d{2,3}|с[-\s]?300")) return ThreatKind.Missile;
         if (l.Contains("ціль")) return ThreatKind.Target;
         return ThreatKind.Unknown;
     }

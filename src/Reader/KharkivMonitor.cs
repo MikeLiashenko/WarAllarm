@@ -176,16 +176,17 @@ public static class KharkivMonitor
     // Тип угрозы + уточнение боеприпаса (местный сленг Харькова).
     static (ThreatKind, string?) DetectKind(string l)
     {
-        if (l.Contains("бандерол")) return (ThreatKind.Kab, "Бандероль");        // реакт. авиабомба
-        if (l.Contains("каб")) return (ThreatKind.Kab, null);
-        if (l.Contains("балісти") || l.Contains("баллист")) return (ThreatKind.Ballistic, null);
+        if (l.Contains("бандерол")) return (ThreatKind.Kab, "Бандероль");        // у Харкові — реакт. авиабомба
+        if (l.Contains("каб") || l.Contains("умпк") || l.Contains("умпб")) return (ThreatKind.Kab, null);
+        if (l.Contains("балісти") || l.Contains("баллист") || Regex.IsMatch(l, @"кн-?23|точка[-\s]?у")) return (ThreatKind.Ballistic, null);
         if (l.Contains("молні")) return (ThreatKind.Drone, "Молнія");
         if (l.Contains("шаболд")) return (ThreatKind.Drone, "реакт. шахед");
         if (l.Contains("fpv")) return (ThreatKind.Drone, "FPV");
-        if (l.Contains("шахед") || l.Contains("шахід")) return (ThreatKind.Drone, "шахед");
-        if (Regex.IsMatch(l, @"розвід|развед")) return (ThreatKind.Drone, "розвідувальний");
-        if (l.Contains("бпла") || l.Contains("дрон") || l.Contains("мопед") || l.Contains("geran")) return (ThreatKind.Drone, null);
-        if (l.Contains("ракет") || l.Contains("крилат") || l.Contains("кинджал") || l.Contains("іскандер")) return (ThreatKind.Missile, null);
+        if (l.Contains("гербер")) return (ThreatKind.Drone, "гербера-пастка");
+        if (l.Contains("шахед") || l.Contains("шахід") || l.Contains("геран") || l.Contains("geran")) return (ThreatKind.Drone, "шахед");
+        if (Regex.IsMatch(l, @"розвід|развед|мавік|mavic|орлан|\bзала\b|supercam|суперкам")) return (ThreatKind.Drone, "розвідувальний");
+        if (Regex.IsMatch(l, ThreatParser.DroneRe)) return (ThreatKind.Drone, null);
+        if (l.Contains("ракет") || l.Contains("крилат") || l.Contains("кинджал") || l.Contains("іскандер") || l.Contains("циркон") || l.Contains("онікс") || Regex.IsMatch(l, @"х[-\s]?\d{2,3}|с[-\s]?300")) return (ThreatKind.Missile, null);
         if (l.Contains("петух") || Regex.IsMatch(l, @"(су|ту|міг)[-\s]?\d")) return (ThreatKind.Aviation, "пуски КАБ");
         return (ThreatKind.Unknown, null);
     }
