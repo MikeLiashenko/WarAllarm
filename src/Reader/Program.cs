@@ -474,12 +474,38 @@ async Task RunMapLoop(ChannelPoster channel)
 async Task RunAlertsLoop(ChannelPoster? channel)
 {
     var prevRed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    bool seeded = false;
+    var prevActive = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // області з тривогою (полігони)
+    bool seeded = false, activeSeeded = false;
     while (true)
     {
         try
         {
             var snap = await OfficialAlerts.FetchFull();
+
+            // ── Офіційний відбій прибирає цілі (щоб шахеди не висіли після відбою) ──
+            // ByPolygon = області з червоною/жовтою тривогою. Коли область виходить із
+            // цього набору — офіційно відбій, прибираємо цілі, що фізично в ній.
+            var nowActive = new HashSet<string>(snap.ByPolygon.Keys, StringComparer.OrdinalIgnoreCase);
+            if (activeSeeded)
+            {
+                // Тільки «затихлі» цілі (без оновлень >2 хв): жива ціль, яку радар ще
+                // веде, лишається — інакше на початку нальоту (тривогу ще не оголосили)
+                // ми б стирали свіже раннє попередження.
+                bool Quiet(Threat t) => (DateTime.Now - t.LastUpdate) > TimeSpan.FromMinutes(2);
+                int removed = 0;
+                if (nowActive.Count == 0)
+                    removed = tracker.SweepWhere(t => t.Pos is not null && Quiet(t)).Count; // ніде тривоги → знімаємо затихлі
+                else
+                    foreach (var obl in prevActive.Where(o => !nowActive.Contains(o)))
+                        removed += tracker.SweepWhere(t => t.Pos is { } p && Quiet(t) && OblastGeo.PolyName(p.lat, p.lon) == obl).Count;
+                if (removed > 0)
+                {
+                    Ui.Line(ConsoleColor.Green, $"✅ Офіційний відбій — прибрано цілей: {removed}");
+                    MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+                }
+            }
+            prevActive = nowActive;
+            activeSeeded = true;
             // 1) API: покласти тривоги у state → публікується у Firebase (state/alerts).
             MapWriter.AlertsJson = BuildAlertsJson(snap);
             // Розділення тривог по районах + області, що горять цілком (для карти map.html).

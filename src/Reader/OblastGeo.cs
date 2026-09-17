@@ -47,6 +47,10 @@ public static class OblastGeo
         return en != null && ShortUa.TryGetValue(en, out var s) ? s : "Україна";
     }
 
+    /// Англ. назва полігона області для точки (збіг із ключами OfficialAlerts.ByPolygon),
+    /// або null поза межами. Для звірки «чи є офіційна тривога в області цілі».
+    public static string? PolyName(double lat, double lon) => NameAt(lat, lon);
+
     static string? NameAt(double lat, double lon)
     {
         foreach (var (en, rings) in Polys)

@@ -258,6 +258,17 @@ public sealed class ThreatTracker
         }
     }
 
+    // Погасить цели по произвольному условию (например, все цели в области, где офиц. отбой).
+    public List<Threat> SweepWhere(Func<Threat, bool> pred)
+    {
+        lock (_gate)
+        {
+            var gone = _active.Values.Where(pred).ToList();
+            foreach (var t in gone) _active.Remove(t.Id);
+            return gone;
+        }
+    }
+
     // Погасить цели зоны по типам (например, сбросить старые дроны при выходе новой всеукраинской сводки).
     public List<Threat> SweepKind(string zone, params ThreatKind[] kinds)
     {
