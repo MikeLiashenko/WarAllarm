@@ -595,14 +595,27 @@ static bool NuclearMention(string s)
     return strong && !newsy;
 }
 
-// 🚀 Пуски ракет / зліт носіїв → ракетна небезпека (окреме коротке попередження).
+// 🚀 Пуски ракет/КАБ/ШАХЕДІВ, зліт носіїв, ракетна небезпека — окреме попередження.
 static bool LaunchMention(string s)
 {
     var l = s.ToLowerInvariant();
     bool strong = Regex.IsMatch(l,
-        @"ракетн\w*\s+небезпек|пуск\w*\s+(ракет|каб|крилат)|зафіксован\w*\s+пуск|старт\w*\s+ракет|(зліт|злетів|піднял)\w*.{0,25}(міг|ту-?\d|су-?\d|стратег|носі)");
-    bool newsy = Regex.IsMatch(l, @"можлив|ймовірн|імовірн|ризик|погроз|навчанн|аналіт|сценарі|минул|вчора");
+          @"ракетн\w*\s+небезпек"
+        + @"|(пуск|запуск|запустил|старт|злет|піднял|зафіксован\w*\s+пуск)\w*[^.\n]{0,40}(ракет|каб|крилат|шахед|шахід|бпла|дрон|геран|мопед|ударн|носі|міг|ту-?\d|су-?\d)"
+        + @"|(\d{1,3})\s*[^.\n]{0,15}(шахед|шахід|ударн\w*\s+бпла)[^.\n]{0,25}(запуст|пуск|курс на україн|на україн|стартув)");
+    bool newsy = Regex.IsMatch(l, @"можлив|ймовірн|імовірн|ризик|погроз|навчанн|аналіт|сценарі|минул|вчора|за добу|за ніч.{0,10}(підсум|збит)|збили|збито|знищено");
     return strong && !newsy;
+}
+
+// Кількість із поста про пуск: «~30 шахедів», «30 ударних БпЛА», «пуск 30 …».
+static int? LaunchCount(string s)
+{
+    var l = s.ToLowerInvariant();
+    var m = Regex.Match(l, @"(\d{1,3})\s*(?:[a-zа-яїієґ'ʼ\-]+\s+){0,2}(шахед|шахід|бпла|дрон|геран|ціл|борт|од)");
+    if (m.Success && int.TryParse(m.Groups[1].Value, out var n) && n is > 0 and <= 1000) return n;
+    var m2 = Regex.Match(l, @"пуск\w*\s*~?\s*(\d{1,3})");
+    if (m2.Success && int.TryParse(m2.Groups[1].Value, out var n2) && n2 is > 0 and <= 1000) return n2;
+    return null;
 }
 static string ShortReg(string ua) => ua.Replace(" область", "").Replace("м. ", "").Trim();
 static string KindShortEnum(string k) => k switch
@@ -1310,19 +1323,28 @@ async Task OnUpdate(Update update)
         return;
     }
 
-    // ── 🚀 ПУСКИ / ракетна небезпека — окреме попередження (пост у канал + пуш) ──
+    // ── 🚀 ПУСКИ (ракети/КАБ/ШАХЕДИ) / ракетна небезпека — попередження ──────────
     if (fromOurChannel && LaunchMention(m.message))
     {
         bool recent = lastLaunch is { } ll && (DateTime.Now - ll) < TimeSpan.FromMinutes(3);
         lastLaunch = DateTime.Now;
+        var low = m.message.ToLowerInvariant();
+        bool drones = Regex.IsMatch(low, @"шахед|шахід|бпла|дрон|геран|мопед");
+        int? cnt = LaunchCount(m.message);
+        // Заголовок за типом: шахеди / ракети-КАБ / загальна ракетна небезпека.
+        var head = drones
+            ? (cnt is { } c ? $"ПУСК ~{c} ШАХЕДІВ" : "ПУСК ШАХЕДІВ")
+            : Regex.IsMatch(low, @"ракет|каб|крилат|міг|ту-?\d|су-?\d") ? "ПУСКИ РАКЕТ/КАБ"
+            : "РАКЕТНА НЕБЕЗПЕКА";
         var txt = oneLine.Length > 200 ? oneLine[..200] : oneLine;
-        Ui.Line(ConsoleColor.Red, $"🚀 [{time}] {src} · ПУСКИ / ракетна небезпека · {oneLine}");
+        Ui.Line(ConsoleColor.Red, $"🚀 [{time}] {src} · {head} · {oneLine}");
         if (!recent)
         {
-            if (OperatingSystem.IsWindows()) SirenSound.PlayStage(TrackSound.Imminent, ThreatKind.Missile);
-            await Notify("UA", new AlarmInfo(time, src, $"🚀 ПУСКИ — ракетна небезпека! {txt}", oneLine, ThreatKind.Missile, true, Silent: false), clear: false);
+            if (OperatingSystem.IsWindows()) SirenSound.PlayStage(TrackSound.Imminent, drones ? ThreatKind.Drone : ThreatKind.Missile);
+            await Notify("UA", new AlarmInfo(time, src, $"🚀 {head} — прямують на Україну! {txt}", oneLine, drones ? ThreatKind.Drone : ThreatKind.Missile, true, Silent: false), clear: false);
             if (channelPoster is not null)
-                await channelPoster.Post($"🚀 <b>УВАГА — ПУСКИ</b>\n{H(txt)}\n\n⚠️ Ракетна небезпека. Будьте в укритті.\n🤖 WarAlarm", null);
+                await channelPoster.Post(
+                    $"🚀 <b>УВАГА — {H(head)}</b>\n{H(txt)}\n\n⚠️ Прямують на Україну — очікуйте появу на карті. Будьте на зв'язку.\n🤖 WarAlarm", null);
         }
         // не return — у пості можуть бути й цілі; хай далі теж розпарситься
     }
