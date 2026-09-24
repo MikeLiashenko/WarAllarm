@@ -441,6 +441,7 @@ var dayRed = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 var daySeen = new HashSet<string>();
 var ppoSeen = new Dictionary<string, DateTime>(); // зона → коли востаннє згадали роботу ППО
 DateTime? nuclearUntil = null; // ☢️ доки активна радіаційна/ядерна небезпека (30 хв від згадки)
+DateTime? lastLaunch = null;   // 🚀 коли востаннє попереджали про пуски (щоб не спамити)
 
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
@@ -462,7 +463,7 @@ async Task RunMapLoop(ChannelPoster channel)
         try
         {
             var snap = await OfficialAlerts.FetchFull();
-            int liveN = tracker.Active.Count(t => t.Pos is not null);
+            int liveN = tracker.Active.Where(t => t.Pos is not null).Sum(t => t.Amount); // сумарно бортів у повітрі
             if (liveN == 0 && snap.RedUa.Count == 0 && snap.YellowUa.Count == 0) continue;
             await channel.Post(MapCaption(snap, liveN), await BuildBotMapPng(channel: true));
         }
@@ -593,6 +594,16 @@ static bool NuclearMention(string s)
         @"погроз|погрож|ризик|заяв|може застосув|навчанн|навчальн|шантаж|риторик|імовірн|ймовірн|аналіт|експерт|сценарі");
     return strong && !newsy;
 }
+
+// 🚀 Пуски ракет / зліт носіїв → ракетна небезпека (окреме коротке попередження).
+static bool LaunchMention(string s)
+{
+    var l = s.ToLowerInvariant();
+    bool strong = Regex.IsMatch(l,
+        @"ракетн\w*\s+небезпек|пуск\w*\s+(ракет|каб|крилат)|зафіксован\w*\s+пуск|старт\w*\s+ракет|(зліт|злетів|піднял)\w*.{0,25}(міг|ту-?\d|су-?\d|стратег|носі)");
+    bool newsy = Regex.IsMatch(l, @"можлив|ймовірн|імовірн|ризик|погроз|навчанн|аналіт|сценарі|минул|вчора");
+    return strong && !newsy;
+}
 static string ShortReg(string ua) => ua.Replace(" область", "").Replace("м. ", "").Trim();
 static string KindShortEnum(string k) => k switch
 {
@@ -658,7 +669,7 @@ static string MapCaption(OfficialAlerts.Snapshot s, int targets)
         sb.AppendLine();
     }
     sb.AppendLine("🗺 <b>Карта тривог</b>");
-    sb.AppendLine($"🔴 {red} обл · 🟡 {yel} обл · 🎯 цілей: {targets}");
+    sb.AppendLine($"🔴 {red} обл · 🟡 {yel} обл · 🛸 у повітрі: ~{targets}");
     if (red > 0)
         sb.AppendLine("🔥 Тривога: " + H(string.Join(", ", s.RedUa.Take(12).Select(ShortReg)))
             + (red > 12 ? "…" : ""));
@@ -759,7 +770,8 @@ static string BuildOblastPost(List<Threat> active)
         .OrderByDescending(g => g.Sum(t => t.Amount))
         .Take(12).ToList();
     int total = active.Where(t => t.Pos is not null).Sum(t => t.Amount);
-    sb.Append("🛸 <b>Рух цілей по Україні</b> — ").Append(total).AppendLine(" на карті");
+    sb.Append("🛸 <b>У повітрі зараз: ~").Append(total).AppendLine("</b>");
+    sb.AppendLine("(рух по областях)");
     sb.AppendLine();
     foreach (var g in byRegion)
     {
@@ -1296,6 +1308,23 @@ async Task OnUpdate(Update update)
                 oneLine, ThreatKind.Unknown, true, Silent: false), clear: false);
         }
         return;
+    }
+
+    // ── 🚀 ПУСКИ / ракетна небезпека — окреме попередження (пост у канал + пуш) ──
+    if (fromOurChannel && LaunchMention(m.message))
+    {
+        bool recent = lastLaunch is { } ll && (DateTime.Now - ll) < TimeSpan.FromMinutes(3);
+        lastLaunch = DateTime.Now;
+        var txt = oneLine.Length > 200 ? oneLine[..200] : oneLine;
+        Ui.Line(ConsoleColor.Red, $"🚀 [{time}] {src} · ПУСКИ / ракетна небезпека · {oneLine}");
+        if (!recent)
+        {
+            if (OperatingSystem.IsWindows()) SirenSound.PlayStage(TrackSound.Imminent, ThreatKind.Missile);
+            await Notify("UA", new AlarmInfo(time, src, $"🚀 ПУСКИ — ракетна небезпека! {txt}", oneLine, ThreatKind.Missile, true, Silent: false), clear: false);
+            if (channelPoster is not null)
+                await channelPoster.Post($"🚀 <b>УВАГА — ПУСКИ</b>\n{H(txt)}\n\n⚠️ Ракетна небезпека. Будьте в укритті.\n🤖 WarAlarm", null);
+        }
+        // не return — у пості можуть бути й цілі; хай далі теж розпарситься
     }
 
     // ── Харьковские каналы → монитор до района ────────────────────────────────

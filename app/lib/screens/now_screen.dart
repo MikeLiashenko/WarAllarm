@@ -198,7 +198,8 @@ class NowScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  '${data.selectedId == 'all' ? data.targets.length : sel.length}',
+                  // «Вся Україна» → скільки бортів у повітрі всього (сума ×N).
+                  data.selectedId == 'all' ? '~${data.airborne}' : '${sel.length}',
                   style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,

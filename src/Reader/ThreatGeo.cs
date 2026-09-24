@@ -203,12 +203,16 @@ public static class ThreatGeo
             // основа: имя без последней буквы (снимает падежное окончание -а/-у/-о)
             var stem = k.Length > 4 ? k[..^1] : k;
             var cstem = c.Length > 4 ? c[..^1] : c;
-            bool hit = c == k || c.StartsWith(stem) || k.StartsWith(cstem)
+            bool exact = c == k;
+            bool hit = exact || c.StartsWith(stem) || k.StartsWith(cstem)
                     || (k.Contains(' ') && c.Contains(k[..Math.Min(k.Length, 6)]));
-            if (hit && stem.Length > bestLen)
+            // Точное совпадение бьёт любое частичное — иначе «на Київ» цеплялся за
+            // «Київський» (район Харкова, 417 км!). Среди частичных — самое длинное.
+            int score = exact ? 1000 : stem.Length;
+            if (hit && score > bestLen)
             {
                 best = (kv.Key, kv.Value.lat, kv.Value.lon);
-                bestLen = stem.Length;
+                bestLen = score;
             }
         }
         return best;

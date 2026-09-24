@@ -108,6 +108,27 @@ public static class ThreatParser
                     }
                 }
             }
+            // Инлайн-формат @rozvidkaneba: "Xщина: N× БпЛА на A, M× БпЛА на B, ..."
+            // (несколько целей в одной строке через запятую, с префиксом области).
+            var colon = line.IndexOf(':');
+            string body = line;
+            bool pref = false;
+            if (colon > 0 && Geo.Canonical(line[..colon]) is { } oc)
+            {
+                oblast = oc;
+                body = line[(colon + 1)..].Trim();
+                pref = true;
+            }
+            if (pref || body.Contains(','))
+            {
+                bool any = false;
+                foreach (var seg in body.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var te = ParseTargetLine(seg.Trim().TrimEnd('.', ';', ' '), oblast);
+                    if (te != null) { events.Add(te); any = true; }
+                }
+                if (any || pref) continue; // цель(и) разобраны ИЛИ это чистый заголовок области
+            }
             // Обычная строка цели: "[N] ТИП на Місто"
             var t = ParseTargetLine(line, oblast);
             if (t != null) events.Add(t);
@@ -125,7 +146,7 @@ public static class ThreatParser
 
         var kind = DetectKind(line);
         // «Реактивний» шахед летит ~500 км/ч (обычный ~180) — помечаем для верной ETA.
-        string? extra = Regex.IsMatch(line, "реактивн", RegexOptions.IgnoreCase) ? "реакт. шахед" : null;
+        string? extra = Regex.IsMatch(line, @"реактивн|рбпла", RegexOptions.IgnoreCase) ? "реакт. шахед" : null;
 
         var mn = Regex.Match(line, @"\bна\s+(.+)$", RegexOptions.IgnoreCase);
         string? city = mn.Success ? mn.Groups[1].Value.Trim().TrimEnd('.', ' ') : null;

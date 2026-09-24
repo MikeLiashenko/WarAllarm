@@ -149,6 +149,15 @@ class MapDataController extends ChangeNotifier {
 
   int get activeCount => _targets.length;
 
+  /// Скільки бортів у повітрі ВСЬОГО — сума ×N по всіх цілях («скільки летить»).
+  int get airborne {
+    var n = 0;
+    for (final t in _targets) {
+      n += t.amount;
+    }
+    return n;
+  }
+
   // --- RTDB ingest ------------------------------------------------------------
 
   void _onData(dynamic data) {
