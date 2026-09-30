@@ -16,7 +16,8 @@ public record AlarmInfo(
     ThreatKind Kind,
     bool Urgent,        // 🔴 прямая угроза (район/город) — макс. приоритет
     bool Clear = false, // ✅ это отбой, а не тревога — тихий зелёный пуш, без сирены
-    bool Silent = false);// звук уже играет трекер (стадии) — не дублировать одиночным воем
+    bool Silent = false,// звук уже играет трекер (стадии) — не дублировать одиночным воем
+    bool Power = false);// 🔌 оповещение про свет (отключение/восстановление) — без сирены
 
 public interface INotifier
 {
@@ -40,8 +41,16 @@ public sealed class ConsoleNotifier : INotifier
 
     public Task Notify(AlarmInfo a)
     {
-        if (a.Clear) CalmBlock(a); else HardBlock(a);
+        if (a.Power) PowerBlock(a); else if (a.Clear) CalmBlock(a); else HardBlock(a);
         return Task.CompletedTask;
+    }
+
+    static void PowerBlock(AlarmInfo a)
+    {
+        Console.WriteLine();
+        Row(ConsoleColor.DarkYellow, ConsoleColor.Black, "  " + Strip(a.Headline));
+        Row(ConsoleColor.DarkYellow, ConsoleColor.Black, "  ДЖЕРЕЛО: " + a.Source + "   " + a.Time);
+        Console.WriteLine();
     }
 
     // Убираем эмодзи (astral + BMP-символы), оставляем текст и стрелки — для строгого вида.
@@ -93,7 +102,7 @@ public sealed class ConsoleNotifier : INotifier
 // Сирена на ПК (реальный синтезированный звук через winmm — не пищалка).
 public sealed class SirenNotifier : INotifier
 {
-    public Task Notify(AlarmInfo a) { if (!a.Silent) SirenSound.Play(a.Kind, a.Urgent, a.Clear); return Task.CompletedTask; }
+    public Task Notify(AlarmInfo a) { if (!a.Silent && !a.Power) SirenSound.Play(a.Kind, a.Urgent, a.Clear); return Task.CompletedTask; }
     public static void Play(ThreatKind kind, bool urgent, bool clear) => SirenSound.Play(kind, urgent, clear);
 }
 
@@ -404,17 +413,19 @@ public sealed class NtfyNotifier : INotifier
 
     public async Task Notify(AlarmInfo a)
     {
-        var title = a.Clear ? "✅ ВІДБІЙ — можна виходити"
+        var title = a.Power  ? "🔌 Світло"
+                  : a.Clear  ? "✅ ВІДБІЙ — можна виходити"
                   : a.Urgent ? "🔴 В УКРИТТЯ — НЕГАЙНО"
                              : "🔴 ПОВІТРЯНА ТРИВОГА";
-        var body = a.Clear ? a.Text : $"{a.Headline}\n➤ В УКРИТТЯ. Подалі від вікон.\n{a.Text}";
+        var body = a.Power || a.Clear ? $"{a.Headline}\n{a.Text}"
+                                      : $"{a.Headline}\n➤ В УКРИТТЯ. Подалі від вікон.\n{a.Text}";
         var payload = JsonSerializer.Serialize(new
         {
             topic = _topic,
             title,
             message = body,
-            priority = a.Clear ? 3 : 5,   // тревога — всегда максимум (пробивается сквозь тишину)
-            tags = new[] { a.Clear ? "white_check_mark" : "rotating_light" },
+            priority = a.Power ? 4 : a.Clear ? 3 : 5, // свет — высокий, но не «сирена сквозь тишину»
+            tags = new[] { a.Power ? "electric_plug" : a.Clear ? "white_check_mark" : "rotating_light" },
         });
         using var content = new StringContent(payload, Encoding.UTF8, "application/json");
         var resp = await Http.PostAsync(_server, content);

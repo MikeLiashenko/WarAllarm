@@ -86,6 +86,41 @@ class NowScreen extends StatelessWidget {
             const SizedBox(height: 14),
           ],
 
+          // 🔌 Світло (відключення/відновлення) — окремий банер.
+          if (data.powerStatus.isNotEmpty) ...[
+            Builder(builder: (_) {
+              final off = data.powerStatus == 'off';
+              final c = off ? const Color(0xFFF59E0B) : const Color(0xFF34D399);
+              return Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: c.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: c.withValues(alpha: 0.5)),
+                ),
+                child: Row(
+                  children: [
+                    Text(off ? '🔌' : '💡',
+                        style: const TextStyle(fontSize: 20)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        off
+                            ? 'Світло: відключення — ${data.powerArea}'
+                            : 'Світло відновлюють — ${data.powerArea}',
+                        style: const TextStyle(
+                                fontSize: 14.5, fontWeight: FontWeight.w700)
+                            .copyWith(color: AppColors.textPrimary),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 14),
+          ],
+
           // Status hero
           GlassContainer(
             padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),

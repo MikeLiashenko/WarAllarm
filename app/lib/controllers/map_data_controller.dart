@@ -55,6 +55,20 @@ class MapDataController extends ChangeNotifier {
   String _nuclearMsg = '';
   String get nuclearMsg => _nuclearMsg;
 
+  // 🔌 Світло (відключення/відновлення) з каналу про світло.
+  String _powerStatus = ''; // 'off' | 'on' | ''
+  String _powerArea = '';
+  String _powerMsg = '';
+  int _powerTs = 0;
+  String get powerArea => _powerArea;
+  String get powerMsg => _powerMsg;
+  /// 'off' | 'on' | '' — показуємо, лише поки подія свіжа (≤12 год).
+  String get powerStatus =>
+      (_powerTs > 0 &&
+              DateTime.now().millisecondsSinceEpoch - _powerTs < 12 * 3600 * 1000)
+          ? _powerStatus
+          : '';
+
   bool _live = false;
   bool get live => _live;
 
@@ -203,6 +217,14 @@ class MapDataController extends ChangeNotifier {
     } else {
       _nuclear = false;
       _nuclearMsg = '';
+    }
+
+    final pw = data['power'];
+    if (pw is Map) {
+      _powerStatus = (pw['status'] ?? '').toString();
+      _powerArea = (pw['area'] ?? '').toString();
+      _powerMsg = (pw['msg'] ?? '').toString();
+      _powerTs = (pw['ts'] as num?)?.toInt() ?? 0;
     }
 
     notifyListeners();

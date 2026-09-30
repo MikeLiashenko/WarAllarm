@@ -72,6 +72,14 @@ var uaChannels = new HashSet<string>(
        .Select(s => s.TrimStart('@')),
     StringComparer.OrdinalIgnoreCase);
 
+// 🔌 Каналы про свет (отключения/восстановления) → PowerMonitor. По умолчанию
+// @esvitlo_kyiv_ua («єСвітло Київ»). Настраивается: power_channels=esvitlo_kyiv_ua,...
+var powerChannels = new HashSet<string>(
+    cfg.GetValueOrDefault("power_channels", "esvitlo_kyiv_ua")
+       .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+       .Select(s => s.TrimStart('@')),
+    StringComparer.OrdinalIgnoreCase);
+
 // Внутренние логи WTelegram уводим в файл, чтобы консоль оставалась чистой.
 WTelegram.Helpers.Log = (level, message) =>
 {
@@ -1184,6 +1192,7 @@ try
     if (WatchKharkiv) needed.AddRange(khChannels);
     if (WatchKyiv) needed.AddRange(kyChannels);
     needed.AddRange(uaChannels);
+    needed.AddRange(powerChannels);
     var missing = needed.Where(u => !subscribed.Contains(u)).ToList();
     if (missing.Count > 0)
         Ui.Line(ConsoleColor.Yellow, "⚠ НЕ підписаний на: " + string.Join(", ", missing.Select(u => "@" + u)) + " — по ним live не прийде! Вступи в них.");
@@ -1347,6 +1356,27 @@ async Task OnUpdate(Update update)
                     $"🚀 <b>УВАГА — {H(head)}</b>\n{H(txt)}\n\n⚠️ Прямують на Україну — очікуйте появу на карті. Будьте на зв'язку.\n🤖 WarAlarm", null);
         }
         // не return — у пості можуть бути й цілі; хай далі теж розпарситься
+    }
+
+    // ── 🔌 Світло (відключення/відновлення) → окреме оповіщення (без сирени) ─────
+    if (uname != null && powerChannels.Contains(uname))
+    {
+        var pe = PowerMonitor.Analyze(m.message);
+        if (pe.Kind is PowerKind.Off or PowerKind.On)
+        {
+            var icon = pe.Kind == PowerKind.Off ? "🔌" : "💡";
+            var word = pe.Kind == PowerKind.Off ? "Відключення світла" : "Світло відновлюють";
+            var head = $"{icon} {word} — {pe.Area}";
+            var msg = oneLine.Length > 180 ? oneLine[..180] : oneLine;
+            var ms = ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeMilliseconds();
+            static string J(string x) => x.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            MapWriter.PowerJson = $"{{\"status\":\"{(pe.Kind == PowerKind.Off ? "off" : "on")}\",\"area\":\"{J(pe.Area)}\",\"msg\":\"{J(msg)}\",\"ts\":{ms}}}";
+            MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // одразу у Firebase → застосунок
+            await Alert(new AlarmInfo(time, src, head, oneLine, ThreatKind.Unknown, Urgent: false, Power: true));
+        }
+        else
+            Ui.Line(ConsoleColor.DarkGray, $"💡 [{time}] {src} · {(pe.Kind == PowerKind.Schedule ? "графік відключень" : "новина про світло")} (тихо)");
+        return;
     }
 
     // ── Харьковские каналы → монитор до района ────────────────────────────────

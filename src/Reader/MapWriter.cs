@@ -30,6 +30,8 @@ public static class MapWriter
     // ☢️ Ядерна/радіаційна небезпека: {"active":bool,"msg":"…","ts":ms}. Program вмикає
     // ЛИШЕ за явним сигналом (не новинна балаканина). Найвищий пріоритет у застосунку.
     public static string NuclearJson = "";
+    // 🔌 Світло: {"status":"off|on","area":"…","msg":"…","ts":ms} — з каналу @esvitlo_kyiv_ua.
+    public static string PowerJson = "";
 
     static string N(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
 
@@ -156,6 +158,8 @@ public static class MapWriter
         sb.Append(",\"oblastWhole\":").Append(OblastWholeJson.Length > 0 ? OblastWholeJson : "{}");
         // ☢️ Ядерна/радіаційна небезпека (застосунок показує окремий екран).
         sb.Append(",\"nuclear\":").Append(NuclearJson.Length > 0 ? NuclearJson : "{\"active\":false}");
+        // 🔌 Світло (відключення/відновлення) — застосунок показує індикатор.
+        sb.Append(",\"power\":").Append(PowerJson.Length > 0 ? PowerJson : "{}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.
         sb.Append(",\"aiText\":\"").Append(Esc(AiText)).Append('"');
         sb.Append(",\"aiAt\":").Append(AiAt is { } aa ? ((DateTimeOffset)aa.ToUniversalTime()).ToUnixTimeMilliseconds().ToString() : "null");
