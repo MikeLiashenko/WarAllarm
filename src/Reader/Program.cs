@@ -1372,7 +1372,9 @@ async Task OnUpdate(Update update)
             static string J(string x) => x.Replace("\\", "\\\\").Replace("\"", "\\\"");
             MapWriter.PowerJson = $"{{\"status\":\"{(pe.Kind == PowerKind.Off ? "off" : "on")}\",\"area\":\"{J(pe.Area)}\",\"msg\":\"{J(msg)}\",\"ts\":{ms}}}";
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // одразу у Firebase → застосунок
-            await Alert(new AlarmInfo(time, src, head, oneLine, ThreatKind.Unknown, Urgent: false, Power: true));
+            await Alert(new AlarmInfo(time, src, head, oneLine, ThreatKind.Unknown, Urgent: false, Power: true)); // пуш + консоль
+            if (channelPoster is not null) // і в канал
+                await channelPoster.Post($"{icon} <b>{H(word)} — {H(pe.Area)}</b>\n{H(msg)}\n🤖 WarAlarm", null);
         }
         else
             Ui.Line(ConsoleColor.DarkGray, $"💡 [{time}] {src} · {(pe.Kind == PowerKind.Schedule ? "графік відключень" : "новина про світло")} (тихо)");
