@@ -124,19 +124,28 @@ class _AddPlaceDialogState extends State<_AddPlaceDialog> {
     super.dispose();
   }
 
+  // Нормалізація для пошуку: прибираємо пробіли/дефіси/апострофи/«й», щоб
+  // «603 мікрорайон», «603-мікрорайон», «603-й мкр» знаходили «603-й мікрорайон».
+  static String _norm(String s) => s
+      .toLowerCase()
+      .replaceAll('мікрорайон', 'мкр')
+      .replaceAll('-й', '')
+      .replaceAll(RegExp(r"[\s\-'ʼ’]"), '');
+
   List<GeoPlace> get _matches {
     final q = _q.trim().toLowerCase();
     if (q.isEmpty) {
       // Biggest cities as a starting set.
       return _searchPlaces.take(12).toList();
     }
+    final nq = _norm(q);
     final starts = <GeoPlace>[];
     final contains = <GeoPlace>[];
     for (final c in _searchPlaces) {
       final n = c.name.toLowerCase();
       if (n.startsWith(q)) {
         starts.add(c);
-      } else if (n.contains(q)) {
+      } else if (n.contains(q) || (nq.length >= 2 && _norm(n).contains(nq))) {
         contains.add(c);
       }
       if (starts.length >= 30) break; // enough prefix matches
