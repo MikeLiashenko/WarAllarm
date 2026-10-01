@@ -41,29 +41,76 @@ public static class KharkivMonitor
 
     // Справочник географии. stem (нижний регистр) → роль + каноническое имя.
     // Микрорайоны/шоссе сводим к «своему» административному району города.
+    // Мікрорайон/масив Харкова → його адмінрайон (для визначення тиру: «твій/інший район»).
+    static readonly Dictionary<string, string> MicroRaion = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Салтівка"] = "Салтівський", ["Північна Салтівка"] = "Салтівський",
+        ["Горизонт"] = "Салтівський", ["Велика Данилівка"] = "Салтівський",
+        ["Олексіївка"] = "Шевченківський", ["П'ятихатки"] = "Шевченківський",
+        ["Павлове Поле"] = "Шевченківський", ["Шатилівка"] = "Шевченківський",
+        ["Основа"] = "Основ'янський", ["Нові Дома"] = "Основ'янський",
+        ["Левада"] = "Основ'янський", ["Москалівка"] = "Основ'янський", ["Одеська"] = "Основ'янський",
+        ["Журавлівка"] = "Київський", ["Сокольники"] = "Київський",
+        ["Тюрінка"] = "Київський", ["Жуковського"] = "Київський",
+        ["Холодна Гора"] = "Холодногірський", ["Залютине"] = "Холодногірський",
+        ["Лиса Гора"] = "Немишлянський", ["Баварія"] = "Новобаварський",
+        ["ХТЗ"] = "Індустріальний", ["Рогань"] = "Індустріальний",
+    };
+
     static readonly (string stem, GeoRole role, string name)[] Gaz =
     {
-        // ── районы и микрорайоны Харькова ───────────────────────────────────
-        ("салтівське шосе", GeoRole.CityDistrict, "Салтівський"),
-        ("салтівськ",       GeoRole.CityDistrict, "Салтівський"),
-        ("салтовк",         GeoRole.CityDistrict, "Салтівський"),
+        // ── масиви Салтівського (дім) ───────────────────────────────────────
+        ("салтівське шосе", GeoRole.CityDistrict, "Салтівка"),
+        ("салтівськ",       GeoRole.CityDistrict, "Салтівка"),
+        ("салтівк",         GeoRole.CityDistrict, "Салтівка"), // Салтівка/Салтівки/Салтівку
+        ("салтівц",         GeoRole.CityDistrict, "Салтівка"), // «на Салтівці» (місцевий відмінок)
+        ("салтовк",         GeoRole.CityDistrict, "Салтівка"),
+        ("північна салтівка",GeoRole.CityDistrict,"Північна Салтівка"),
+        ("горизонт",        GeoRole.CityDistrict, "Горизонт"),
+        ("велика данилівк", GeoRole.CityDistrict, "Велика Данилівка"),
+        ("большая данилов", GeoRole.CityDistrict, "Велика Данилівка"),
+        // ── Шевченківський ──────────────────────────────────────────────────
+        ("шевченківськ",    GeoRole.CityDistrict, "Шевченківський"),
+        ("олексіївк",       GeoRole.CityDistrict, "Олексіївка"),
+        ("олексеевк",       GeoRole.CityDistrict, "Олексіївка"),
+        ("п'ятихатк",       GeoRole.CityDistrict, "П'ятихатки"),
+        ("пятихатк",        GeoRole.CityDistrict, "П'ятихатки"),
+        ("павлове поле",    GeoRole.CityDistrict, "Павлове Поле"),
+        ("павлово поле",    GeoRole.CityDistrict, "Павлове Поле"),
+        ("шатилівк",        GeoRole.CityDistrict, "Шатилівка"),
+        ("шатиловк",        GeoRole.CityDistrict, "Шатилівка"),
+        // ── Основ'янський ───────────────────────────────────────────────────
+        ("основ",           GeoRole.CityDistrict, "Основа"),
+        ("сортув",          GeoRole.CityDistrict, "Основа"),
+        ("нові дома",       GeoRole.CityDistrict, "Нові Дома"),
+        ("новые дома",      GeoRole.CityDistrict, "Нові Дома"),
+        ("левад",           GeoRole.CityDistrict, "Левада"),
+        ("москалівк",       GeoRole.CityDistrict, "Москалівка"),
+        ("москалевк",       GeoRole.CityDistrict, "Москалівка"),
+        ("одеська",         GeoRole.CityDistrict, "Одеська"),
+        // ── Київський ───────────────────────────────────────────────────────
+        ("київському районі",GeoRole.CityDistrict,"Київський"),
+        ("журавл",          GeoRole.CityDistrict, "Журавлівка"),
+        ("сокольник",       GeoRole.CityDistrict, "Сокольники"),
+        ("тюрінк",          GeoRole.CityDistrict, "Тюрінка"),
+        ("тюринк",          GeoRole.CityDistrict, "Тюрінка"),
+        ("жуковськ",        GeoRole.CityDistrict, "Жуковського"),
+        ("жуковск",         GeoRole.CityDistrict, "Жуковського"),
+        // ── Холодногірський / Новобаварський ────────────────────────────────
+        ("холодногір",      GeoRole.CityDistrict, "Холодна Гора"),
+        ("холодна гора",    GeoRole.CityDistrict, "Холодна Гора"),
+        ("залютин",         GeoRole.CityDistrict, "Залютине"),
+        ("новобаварськ",    GeoRole.CityDistrict, "Новобаварський"),
+        ("баварі",          GeoRole.CityDistrict, "Баварія"),
+        // ── Немишлянський / Індустріальний ──────────────────────────────────
         ("немишл",          GeoRole.CityDistrict, "Немишлянський"),
         ("немышл",          GeoRole.CityDistrict, "Немишлянський"),
+        ("лиса гора",       GeoRole.CityDistrict, "Лиса Гора"),
+        ("лысая гора",      GeoRole.CityDistrict, "Лиса Гора"),
         ("слобідськ",       GeoRole.CityDistrict, "Слобідський"),
-        ("шевченківськ",    GeoRole.CityDistrict, "Шевченківський"),
-        ("олексіївк",       GeoRole.CityDistrict, "Шевченківський"),
-        ("олексеевк",       GeoRole.CityDistrict, "Шевченківський"),
-        ("п'ятихатк",       GeoRole.CityDistrict, "Шевченківський"),
-        ("пятихатк",        GeoRole.CityDistrict, "Шевченківський"),
-        ("павлове поле",    GeoRole.CityDistrict, "Шевченківський"),
-        ("основ",           GeoRole.CityDistrict, "Основ'янський"),
-        ("сортув",          GeoRole.CityDistrict, "Основ'янський"),
-        ("київському районі",GeoRole.CityDistrict,"Київський"),
-        ("журавл",          GeoRole.CityDistrict, "Київський"),
-        ("холодногір",      GeoRole.CityDistrict, "Холодногірський"),
-        ("холодна гора",    GeoRole.CityDistrict, "Холодногірський"),
         ("індустріальн",    GeoRole.CityDistrict, "Індустріальний"),
-        ("новобаварськ",    GeoRole.CityDistrict, "Новобаварський"),
+        ("хтз",             GeoRole.CityDistrict, "ХТЗ"),
+        ("рогань",          GeoRole.CityDistrict, "Рогань"),
         // ── общегородское (весь Харьков) ────────────────────────────────────
         ("на харків",       GeoRole.CityGeneral, "Харків"),
         ("над містом",      GeoRole.CityGeneral, "Харків"),
@@ -147,9 +194,11 @@ public static class KharkivMonitor
             var found = new List<(string name, KhTier tier)>();
             void Add(string name, GeoRole role)
             {
+                // Мікрорайон → його район (для тиру). «Салтівка» → «Салтівський» = твій дім.
+                var raion = MicroRaion.GetValueOrDefault(name, name);
                 var tier = role switch
                 {
-                    GeoRole.CityDistrict => string.Equals(name, myDistrict, StringComparison.OrdinalIgnoreCase)
+                    GeoRole.CityDistrict => string.Equals(raion, myDistrict, StringComparison.OrdinalIgnoreCase)
                                              ? KhTier.MyArea : KhTier.OtherDistrict,
                     GeoRole.CityGeneral => KhTier.CityWide,
                     GeoRole.Suburb      => KhTier.Suburb,
