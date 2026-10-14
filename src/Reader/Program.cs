@@ -80,6 +80,15 @@ var powerChannels = new HashSet<string>(
        .Select(s => s.TrimStart('@')),
     StringComparer.OrdinalIgnoreCase);
 
+// ПРИВАТНЫЕ каналы-радары (у них нет @username) → парсер UA, матчим по числовому ID.
+// Розвідка неба пішла в закритий канал (ID 1913069725); публічний @rozvidkaneba помер.
+// Настраивается: private_ua_channels=1913069725,...
+var privateUaIds = new HashSet<long>(
+    cfg.GetValueOrDefault("private_ua_channels", "1913069725")
+       .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+       .Select(s => long.TryParse(s, out var id) ? id : 0)
+       .Where(id => id != 0));
+
 // Внутренние логи WTelegram уводим в файл, чтобы консоль оставалась чистой.
 WTelegram.Helpers.Log = (level, message) =>
 {
@@ -1324,10 +1333,12 @@ async Task OnUpdate(Update update)
     if (update is not UpdateNewMessage { message: Message m } || string.IsNullOrEmpty(m.message))
         return;
 
-    // username канала-источника
+    // username + ID канала-источника (ID нужен для приватных каналов без username)
     string? uname = null, title = null;
-    try { if (manager.UserOrChat(m.peer_id) is Channel ch) { uname = ch.username; title = ch.title; } }
+    long chId = 0;
+    try { if (manager.UserOrChat(m.peer_id) is Channel ch) { uname = ch.username; title = ch.title; chId = ch.ID; } }
     catch { /* неизвестный peer — пропустим */ }
+    bool isUaPrivate = chId != 0 && privateUaIds.Contains(chId); // приватна Розвідка неба тощо
     var src = uname is { Length: > 0 } ? "@" + uname : title ?? "?";
     var time = m.date.ToString("HH:mm:ss");
     var oneLine = m.message.Replace("\n", " ").Trim();
@@ -1338,8 +1349,8 @@ async Task OnUpdate(Update update)
 
     // ── ☢️ РАДІАЦІЙНА/ЯДЕРНА НЕБЕЗПЕКА — найвищий пріоритет над усім ──────────────
     // Тільки з наших моніторених каналів і лише за явним сигналом (NuclearMention).
-    bool fromOurChannel = uname != null &&
-        (khChannels.Contains(uname) || kyChannels.Contains(uname) || uaChannels.Contains(uname));
+    bool fromOurChannel = isUaPrivate || (uname != null &&
+        (khChannels.Contains(uname) || kyChannels.Contains(uname) || uaChannels.Contains(uname)));
     if (fromOurChannel && NuclearMention(m.message))
     {
         bool wasActive = nuclearUntil is { } nu && DateTime.Now < nu;
@@ -1424,8 +1435,8 @@ async Task OnUpdate(Update update)
         return;
     }
 
-    // ── Всеукраинский → город/область ─────────────────────────────────────────
-    if (uname != null && uaChannels.Contains(uname))
+    // ── Всеукраинский (вкл. приватную Розвідку неба по ID) → город/область ─────
+    if (isUaPrivate || (uname != null && uaChannels.Contains(uname)))
     {
         var events = ThreatParser.Parse(m.message);
         if (events.Count == 0) return;
@@ -1598,6 +1609,31 @@ async Task WarmStart()
                 foreach (var ev in events) tracker.IngestUa(ev, when);
             }
         }
+    }
+
+    // Приватні UA-канали (без @username, напр. закрита Розвідка неба) — резолвимо по ID.
+    if (privateUaIds.Count > 0)
+    {
+        try
+        {
+            var dialogs = await client.Messages_GetAllDialogs();
+            foreach (var channel in dialogs.chats.Values.OfType<Channel>().Where(c => privateUaIds.Contains(c.ID)))
+            {
+                Message[] msgs;
+                try { msgs = (await client.Messages_GetHistory(channel, limit: 12)).Messages.OfType<Message>().Reverse().ToArray(); }
+                catch { continue; }
+                foreach (var msg in msgs)
+                {
+                    if (string.IsNullOrWhiteSpace(msg.message)) continue;
+                    var when = msg.date.ToLocalTime();
+                    var events = ThreatParser.Parse(msg.message);
+                    if (events.Any(x => x.Kind == ThreatKind.AllClear)) tracker.Sweep("UA");
+                    else if (events.Any(x => x.Kind is ThreatKind.Drone or ThreatKind.Target)) tracker.SweepKind("UA", ThreatKind.Drone, ThreatKind.Target);
+                    foreach (var ev in events) tracker.IngestUa(ev, when);
+                }
+            }
+        }
+        catch { /* приватні недоступні — старт не роняем */ }
     }
 
     tracker.Tick(DateTime.Now);                                  // погасить устаревшее по реальному времени
