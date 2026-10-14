@@ -15,7 +15,13 @@ public static class NightSummary
 {
     public record Point(double Lat, double Lon, ThreatKind Kind, int N, string Place, DateTime At, bool Approx = false); // Approx = центр області (місто не знайдено)
     public record Impact(double Lat, double Lon, string Place, DateTime At);
-    public record Ballistic(string Origin, double OLat, double OLon, double TLat, double TLon, string Target, DateTime At);
+    // N — скільки ракет у цьому пуску («5х Балістик на Київ»); Guessed — місце пуску не
+    // назване в пості, взято найближчий до цілі район пусків балістики (орієнтовно).
+    public record Ballistic(string Origin, double OLat, double OLon, double TLat, double TLon, string Target, DateTime At,
+                            int N = 1, bool Guessed = false);
+
+    // Райони, звідки зазвичай б'ють балістикою (для «орієнтовного» місця пуску).
+    static readonly string[] BallisticSites = { "Брянськ", "Курськ", "Бєлгород", "Воронеж", "Таганрог", "Крим" };
     public record Track(ThreatKind Kind, List<(double lat, double lon)> Pts, string? Site);
 
     public record Data(DateTime From, DateTime To, List<Point> Points, List<Impact> Impacts,
@@ -133,24 +139,53 @@ public static class NightSummary
 
     // Балістика з тексту: «пуск балістики з Брянська на Київ», «Балістика з Курська!».
     // Прогнози («загроза балістики…», «можлива») — не пуск, пропускаємо.
-    static void BallisticFrom(string text, DateTime at, bool kyivLocal, List<(string origin, string? target, DateTime at)> outp)
+    // Діагностика: усі пости про балістику за ніч (пишемо в night_ball.log).
+    public static readonly List<string> BallLog = new();
+
+    // Ціль із назви: місто («Київ», «Ічню (Чернігівщина)») або область («Сумщині»).
+    static (double lat, double lon, string name)? TargetOf(string raw)
+    {
+        var t = Regex.Replace(raw, @"\(.*?\)", " ").Trim().TrimEnd('.', '!', ',');
+        var w = Regex.Split(t, @"\s+(?:від|з|із|через|повз|курс)\b", RegexOptions.IgnoreCase)[0].Trim();
+        if (w.Length < 3) return null;
+        if (ThreatGeo.Resolve(w) is { } g) return (g.lat, g.lon, g.name);
+        // Короткі назви у знахідному відмінку («на Ічню» → Ічня, «на Суму»): пробуємо -я/-а.
+        if (w.Length >= 4 && "юуі".Contains(char.ToLowerInvariant(w[^1])))
+            foreach (var alt in new[] { w[..^1] + "я", w[..^1] + "а" })
+                if (ThreatGeo.Resolve(alt) is { } g2) return (g2.lat, g2.lon, g2.name);
+        var obl = Geo.Oblasts.FirstOrDefault(kv => w.ToLowerInvariant().StartsWith(kv.Key[..^1])).Value;
+        return ThreatGeo.ResolveOblast(obl) is { } o ? (o.lat, o.lon, o.name + " (обл.)") : null;
+    }
+
+    // Балістика з постів радара: «2х Балістики на Київ», «Ще 3х Балістики на Київ»,
+    // «Швидкісна ціль на Харків», «Балістика на Павлоград від Лозової». Кожен рядок окремо.
+    // «Загроза застосування…»/«Відбій…» — не пуск. Місце пуску: з тексту, інакше орієнтовно.
+    static void BallisticFrom(string text, DateTime at, bool kyivLocal, List<Ballistic> outp)
     {
         var low = text.ToLowerInvariant();
-        if (!Regex.IsMatch(low, @"балісти|баллист|іскандер|кинджал|кн-?23")) return;
-        if (Regex.IsMatch(low, @"загроз|можлив|ймовірн|імовірн|відбій|чисто|прогноз")) return;
+        if (!Regex.IsMatch(low, @"балісти|баллист|іскандер|кинджал|кн-?23|швидкісн")) return;
+        lock (BallLog) BallLog.Add($"[{at:dd.MM HH:mm}]{(kyivLocal ? " К" : "")} {text.Replace("\n", " ⏎ ")}");
         var origins = LaunchFeed.OriginsIn(text).Where(o => LaunchFeed.SiteCoords(o) is not null).ToList();
-        if (origins.Count == 0) return; // без місця пуску лінію не намалюєш
-        var targets = new List<string>();
-        foreach (Match m in Regex.Matches(text, @"(?:\bна\b|\bдля\b|в бік|у бік|напрямку)\s+([^.!?\n]+)", RegexOptions.IgnoreCase))
-            foreach (var part in Regex.Split(m.Groups[1].Value, @",|\sта\s|\sі\s|\sй\s"))
-            {
-                var w = part.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-                if (w is { Length: >= 3 } && ThreatGeo.Resolve(w) is { } g && !targets.Contains(g.name)) targets.Add(g.name);
+        foreach (var line in text.Replace("\r", "").Split('\n'))
+        {
+            var ll = line.ToLowerInvariant();
+            if (Regex.IsMatch(ll, @"загроз|можлив|ймовірн|імовірн|відбій|чисто|прогноз|рсзв")) continue;
+            var m = Regex.Match(line,
+                @"(?:(\d{1,2})\s*[хx×]\s*)?(?:балістик\w*|баллист\w*|іскандер\w*|кинджал\w*|кн-?23|швидкісн\w*\s+ціл\w*)\s+(?:на|в бік|у бік|по)\s+(.+)$",
+                RegexOptions.IgnoreCase);
+            if (!m.Success) continue;
+            int n = int.TryParse(m.Groups[1].Value, out var k) && k is > 0 and < 60 ? k : 1;
+            if (TargetOf(m.Groups[2].Value) is not { } tg) continue;
+            string site; bool guessed = false;
+            if (origins.Count > 0) site = origins[0];
+            else
+            {   // найближчий до цілі район пусків балістики
+                site = BallisticSites.OrderBy(s => ThreatGeo.Km(LaunchFeed.SiteCoords(s)!.Value, (tg.lat, tg.lon))).First();
+                guessed = true;
             }
-        if (targets.Count == 0 && kyivLocal) targets.Add("Київ");
-        foreach (var o in origins)
-            if (targets.Count == 0) outp.Add((o, null, at));
-            else foreach (var t in targets) outp.Add((o, t, at));
+            var sc = LaunchFeed.SiteCoords(site)!.Value;
+            outp.Add(new(site, sc.lat, sc.lon, tg.lat, tg.lon, tg.name, at, n, guessed));
+        }
     }
 
     public static async Task<Data> Collect(WTelegram.Client client,
@@ -160,7 +195,10 @@ public static class NightSummary
         var points = new List<Point>();
         var impacts = new List<Impact>();
         var waves = new List<LaunchBatch>();
-        var ball = new List<(string origin, string? target, DateTime at)>();
+        var ball = new List<Ballistic>();      // з радара — основне джерело
+        var ballOther = new List<Ballistic>(); // Київ/канал пусків — лише якщо радар мовчав (інакше дублі)
+        // Один канал може бути в діалогах двічі (так з @rozvidkaneba) — інакше все подвоюється.
+        radars = radars.DistinctBy(c => c.ID).ToList(); kyivLocal = kyivLocal.DistinctBy(c => c.ID).ToList(); launch = launch.DistinctBy(c => c.ID).ToList();
         int maxAir = 0;
 
         // Радари: «Область:\nN× ТИП курсом на Місто» → точки.
@@ -185,7 +223,7 @@ public static class NightSummary
             foreach (var m in await Safe(() => History(client, ch, from, to)))
             {
                 var at = m.date.ToLocalTime();
-                BallisticFrom(m.message, at, true, ball);
+                BallisticFrom(m.message, at, true, ballOther);
                 var e = KyivMonitor.Analyze(m.message);
                 var low = m.message.ToLowerInvariant();
                 var places = e.Places.Select(p => (p, c: ThreatGeo.Of(p))).Where(x => x.c is not null).ToList();
@@ -205,7 +243,7 @@ public static class NightSummary
         foreach (var ch in launch)
             foreach (var m in await Safe(() => History(client, ch, from, to)))
             {
-                BallisticFrom(m.message, m.date.ToLocalTime(), false, ball);
+                BallisticFrom(m.message, m.date.ToLocalTime(), false, ballOther);
                 if (LaunchFeed.ParseLaunch(m.message) is { } b) waves.Add(b);
                 else if (LaunchFeed.ParseAirborne(m.message) is int a) maxAir = Math.Max(maxAir, a);
             }
@@ -214,21 +252,8 @@ public static class NightSummary
         impacts = impacts.GroupBy(i => (i.Place, Slot: i.At.Ticks / TimeSpan.FromMinutes(20).Ticks))
                          .Select(g => g.First()).ToList();
 
-        // Балістика: ціль із тексту, інакше — найближчий за часом вибух (±15 хв).
-        var ballistics = new List<Ballistic>();
-        foreach (var (origin, target, at) in ball)
-        {
-            var o = LaunchFeed.SiteCoords(origin)!.Value;
-            (double lat, double lon, string name)? t = null;
-            if (target != null && ThreatGeo.Of(target) is { } tc) t = (tc.lat, tc.lon, target);
-            else if (impacts.Where(i => Math.Abs((i.At - at).TotalMinutes) <= 15)
-                            .OrderBy(i => Math.Abs((i.At - at).TotalMinutes)).FirstOrDefault() is { } imp)
-                t = (imp.Lat, imp.Lon, imp.Place);
-            if (t is { } tt) ballistics.Add(new(origin, o.lat, o.lon, tt.lat, tt.lon, tt.name, at));
-        }
-        // Той самий пуск у кількох каналах — один (місце+ціль у межах 10 хв).
-        ballistics = ballistics.GroupBy(b => (b.Origin, b.Target, Slot: b.At.Ticks / TimeSpan.FromMinutes(10).Ticks))
-                               .Select(g => g.First()).ToList();
+        // Ті самі пуски пишуть кілька каналів → рахуємо з радара; інші — тільки як запасний варіант.
+        var ballistics = ball.Count > 0 ? ball : ballOther;
 
         return new(from, to, points, impacts, waves, maxAir, ballistics);
     }
@@ -256,7 +281,12 @@ public static class NightSummary
                      .OrderByDescending(g => g.Sum(i => i.N)).Take(5).Select(g => $"{g.Key} {g.Sum(i => i.N)}");
         if (d.Launched > 0) sb.AppendLine("🛫 Звідки: " + T(string.Join(", ", sites)));
         if (d.Ballistics.Count > 0)
-            sb.AppendLine("🔴 Балістика: " + T(string.Join(", ", d.Ballistics.GroupBy(b => $"{b.Origin} → {b.Target}").Select(g => g.Key).Take(5))));
+        {
+            var byT = d.Ballistics.GroupBy(b => b.Target).OrderByDescending(g => g.Sum(b => b.N))
+                       .Take(6).Select(g => $"{g.Key} {g.Sum(b => b.N)}");
+            sb.AppendLine($"🔴 Балістика: {d.Ballistics.Sum(b => b.N)} — " + T(string.Join(", ", byT))
+                + (d.Ballistics.Any(b => b.Guessed) ? " (місця пуску орієнтовні)" : ""));
+        }
         if (d.MaxAir > 0) sb.AppendLine($"🛸 Максимум одночасно в повітрі: ~{d.MaxAir}");
         var top = d.TopOblasts(5);
         if (top.Count > 0) sb.AppendLine("📍 Куди летіло найбільше: " + T(string.Join(", ", top.Select(t => t.oblast))));
@@ -281,6 +311,6 @@ public static class NightSummary
         var boomAt = string.Join(", ", d.Impacts.GroupBy(i => i.Place).OrderByDescending(g => g.Count()).Take(5).Select(g => g.Key));
         return $"{{\"ts\":{ts},\"period\":\"{J(Period(d))}\",\"launched\":{d.Launched},\"waves\":{d.Waves.Count},"
              + $"\"maxAir\":{d.MaxAir},\"top\":\"{J(top)}\",\"impacts\":{d.Impacts.Count},\"impactAt\":\"{J(boomAt)}\","
-             + $"\"ballistic\":{d.Ballistics.Count}}}";
+             + $"\"ballistic\":{d.Ballistics.Sum(b => b.N)}}}";
     }
 }

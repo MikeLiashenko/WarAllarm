@@ -261,13 +261,27 @@ public static class MapImage
         }
 
         // Балістика: червоні дуги від місця пуску до цілі.
-        foreach (var b in d.Ballistics)
+        // Кожна ракета — своя лінія; кілька на одну ціль розходяться віялом (різний вигин).
+        using var bStroke = new SKPaint { Color = CBallistic.WithAlpha(0xD0), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2.2f };
+        foreach (var g in d.Ballistics.GroupBy(b => (b.Origin, b.Target)))
         {
-            var a = P(b.OLat, b.OLon); var z = P(b.TLat, b.TLon);
-            using var path = new SKPath(); path.MoveTo(a); Arc(path, a, z, 0.14f);
-            using var stroke = new SKPaint { Color = CBallistic.WithAlpha(0xE6), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2.6f };
-            canvas.DrawPath(path, stroke);
+            var b0 = g.First();
+            var a = P(b0.OLat, b0.OLon); var z = P(b0.TLat, b0.TLon);
+            int total = g.Sum(b => b.N);
+            for (int i = 0; i < total; i++)
+            {
+                float bend = total == 1 ? 0.12f : -0.20f + 0.40f * i / (total - 1);
+                using var path = new SKPath(); path.MoveTo(a); Arc(path, a, z, bend);
+                canvas.DrawPath(path, bStroke);
+            }
             Arrow(z, new SKPoint((a.X + z.X) / 2, (a.Y + z.Y) / 2), CBallistic, 15);
+            if (total > 1)
+            {
+                using var nb = new SKPaint { Color = SKColors.White, IsAntialias = true, TextSize = 17, FakeBoldText = true };
+                using var nh = new SKPaint { Color = new SKColor(0x15, 0x16, 0x19), IsAntialias = true, TextSize = 17, FakeBoldText = true, Style = SKPaintStyle.Stroke, StrokeWidth = 4 };
+                canvas.DrawText($"×{total}", z.X + 10, z.Y + 20, nh);
+                canvas.DrawText($"×{total}", z.X + 10, z.Y + 20, nb);
+            }
         }
 
         // Вибухи — спалах (зірка) з червоним ядром.
@@ -321,7 +335,7 @@ public static class MapImage
         var parts = new List<string>();
         if (d.Launched > 0) parts.Add($"запущено ~{d.Launched}");
         if (d.MaxAir > 0) parts.Add($"макс. у повітрі ~{d.MaxAir}");
-        if (d.Ballistics.Count > 0) parts.Add($"балістика {d.Ballistics.Count}");
+        if (d.Ballistics.Count > 0) parts.Add($"балістика {d.Ballistics.Sum(b => b.N)}");
         if (d.Impacts.Count > 0) parts.Add($"вибухи {d.Impacts.Count}");
         canvas.DrawText(parts.Count > 0 ? string.Join(" · ", parts) : "Ніч була відносно спокійною", x0, yb + 120, stat);
 

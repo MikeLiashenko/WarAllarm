@@ -543,7 +543,9 @@ async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNi
         try { if ((await client.Contacts_ResolveUsername(n)).chats.Values.OfType<Channel>().FirstOrDefault() is { } c) launch.Add(c); }
         catch (Exception ex) { Console.Error.WriteLine($"⚠ night: @{n} — {ex.Message}"); }
     if (launch.Count == 0) Console.Error.WriteLine("⚠ night: канал пусків не знайдено в діалогах — підпишись на @" + string.Join(", @", launchChannels));
+    lock (NightSummary.BallLog) NightSummary.BallLog.Clear();
     var d = await NightSummary.Collect(client, radars, kyiv, launch, from, to);
+    try { lock (NightSummary.BallLog) File.WriteAllLines("night_ball.log", NightSummary.BallLog); } catch { }
     // Діагностика: які канали знайшлись і що з них зібрано (night.log поруч із night.png).
     try
     {
