@@ -168,14 +168,32 @@ class MapDataController extends ChangeNotifier {
 
   int get activeCount => _targets.length;
 
-  /// Скільки бортів у повітрі ВСЬОГО — сума ×N по всіх цілях («скільки летить»).
+  /// Скільки бортів у повітрі ВСЬОГО: сума ×N по цілях на карті або свіжа (≤45 хв)
+  /// оцінка моніторів («На зараз у повітрі +- 60») — що більше.
   int get airborne {
     var n = 0;
     for (final t in _targets) {
       n += t.amount;
     }
-    return n;
+    final fresh = _airTs > 0 &&
+        DateTime.now().millisecondsSinceEpoch - _airTs < 45 * 60 * 1000;
+    return fresh && _airReported > n ? _airReported : n;
   }
+
+  // 🚀 Пуски / оцінка «у повітрі» від моніторів (@ukraine_pyxx через бота).
+  int _airReported = 0;
+  int _airTs = 0;
+  int _launched = 0;
+  int _launchedTs = 0;
+  String _launchedAt = '';
+  String _launchOrigins = '';
+  /// Остання хвиля пусків (показуємо 2 год).
+  bool get hasRecentLaunch =>
+      _launched > 0 &&
+      DateTime.now().millisecondsSinceEpoch - _launchedTs < 2 * 3600 * 1000;
+  int get launched => _launched;
+  String get launchedAt => _launchedAt;
+  String get launchOrigins => _launchOrigins;
 
   // --- RTDB ingest ------------------------------------------------------------
 
@@ -222,6 +240,16 @@ class MapDataController extends ChangeNotifier {
     } else {
       _nuclear = false;
       _nuclearMsg = '';
+    }
+
+    final air = data['air'];
+    if (air is Map) {
+      _airReported = (air['reported'] as num?)?.toInt() ?? 0;
+      _airTs = (air['ts'] as num?)?.toInt() ?? 0;
+      _launched = (air['launched'] as num?)?.toInt() ?? 0;
+      _launchedTs = (air['launchedTs'] as num?)?.toInt() ?? 0;
+      _launchedAt = (air['launchedAt'] ?? '').toString();
+      _launchOrigins = (air['origins'] ?? '').toString();
     }
 
     final pw = data['power'];

@@ -32,6 +32,8 @@ public static class MapWriter
     public static string NuclearJson = "";
     // 🔌 Світло: {"status":"off|on","area":"…","msg":"…","ts":ms} — з каналу @esvitlo_kyiv_ua.
     public static string PowerJson = "";
+    // 🚀 Пуски і «скільки в повітрі» з @ukraine_pyxx: {"reported":N,"ts":ms,"launched":N,"launchedAt":"18:35","origins":"…"}
+    public static string AirJson = "";
 
     static string N(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
 
@@ -160,6 +162,8 @@ public static class MapWriter
         sb.Append(",\"nuclear\":").Append(NuclearJson.Length > 0 ? NuclearJson : "{\"active\":false}");
         // 🔌 Світло (відключення/відновлення) — застосунок показує індикатор.
         sb.Append(",\"power\":").Append(PowerJson.Length > 0 ? PowerJson : "{}");
+        // 🚀 Пуски / оцінка «у повітрі» від моніторів.
+        sb.Append(",\"air\":").Append(AirJson.Length > 0 ? AirJson : "{}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.
         sb.Append(",\"aiText\":\"").Append(Esc(AiText)).Append('"');
         sb.Append(",\"aiAt\":").Append(AiAt is { } aa ? ((DateTimeOffset)aa.ToUniversalTime()).ToUnixTimeMilliseconds().ToString() : "null");

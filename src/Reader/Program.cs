@@ -92,6 +92,30 @@ var privateUaIds = new HashSet<long>(
        .Select(s => long.TryParse(s, out var id) ? id : 0)
        .Where(id => id != 0));
 
+// 🚀 Канали пусків і «скільки в повітрі» → LaunchFeed. За замовч. @ukraine_pyxx
+// («Повітряний простір | Напрямок ракет» — чітко пише хвилі пусків по аеродромах).
+// Налаштовується: launch_channels=ukraine_pyxx,...
+var launchChannels = new HashSet<string>(
+    cfg.GetValueOrDefault("launch_channels", "ukraine_pyxx")
+       .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+       .Select(s => s.TrimStart('@')),
+    StringComparer.OrdinalIgnoreCase);
+int airReported = 0;                         // 🚀 «у повітрі» за оцінкою моніторів (@ukraine_pyxx)
+DateTime airReportedAt = DateTime.MinValue;
+LaunchBatch? lastBatch = null;               // остання хвиля пусків
+DateTime lastBatchAt = DateTime.MinValue;
+// Скільки «у повітрі» показувати: свіжа оцінка моніторів (≤45 хв) або сума цілей на карті — що більше.
+int AirborneNow(int onMap) =>
+    DateTime.Now - airReportedAt < TimeSpan.FromMinutes(45) ? Math.Max(airReported, onMap) : onMap;
+void PublishAir()
+{
+    static string J(string x) => x.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    long Ms(DateTime d) => d == DateTime.MinValue ? 0 : ((DateTimeOffset)d.ToUniversalTime()).ToUnixTimeMilliseconds();
+    var origins = lastBatch is null ? "" : string.Join(", ", lastBatch.Items.Select(i => $"{i.Origin} {i.N}{(i.Reactive ? " реакт." : "")}"));
+    MapWriter.AirJson = $"{{\"reported\":{airReported},\"ts\":{Ms(airReportedAt)},\"launched\":{lastBatch?.Total ?? 0},"
+        + $"\"launchedTs\":{Ms(lastBatchAt)},\"launchedAt\":\"{J(lastBatch?.When ?? "")}\",\"origins\":\"{J(origins)}\"}}";
+}
+
 // Внутренние логи WTelegram уводим в файл, чтобы консоль оставалась чистой.
 WTelegram.Helpers.Log = (level, message) =>
 {
@@ -166,6 +190,20 @@ if (args.Length >= 1 && (args[0].Equals("parse", StringComparison.OrdinalIgnoreC
                       || args[0].Equals("parsefile", StringComparison.OrdinalIgnoreCase)))
 {
     RunParseDemo(args.Length >= 2 ? args[1] : "samples.txt");
+    return;
+}
+
+// ── Тест парсера пусків (оффлайн):  dotnet run -- launchtest <файл>  (пости через порожній рядок)
+if (args.Length >= 2 && args[0].Equals("launchtest", StringComparison.OrdinalIgnoreCase))
+{
+    foreach (var post in File.ReadAllText(args[1]).Replace("\r", "").Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+    {
+        var head = post.Replace("\n", " ⏎ "); Console.WriteLine("\n▶ " + (head.Length > 90 ? head[..90] : head));
+        if (LaunchFeed.ParseLaunch(post) is { } b)
+            Console.WriteLine($"   🚀 пуск ~{b.Total} о {b.When ?? "?"}: " + string.Join(", ", b.Items.Select(i => $"{i.Origin} {i.N}{(i.Reactive ? "р" : "")}")));
+        else if (LaunchFeed.ParseAirborne(post) is int a) Console.WriteLine($"   🛸 у повітрі ~{a}");
+        else Console.WriteLine("   · не пуск/оцінка");
+    }
     return;
 }
 
@@ -485,7 +523,7 @@ async Task RunMapLoop(ChannelPoster channel)
         try
         {
             var snap = await OfficialAlerts.FetchFull();
-            int liveN = tracker.Active.Where(t => t.Pos is not null).Sum(t => t.Amount); // сумарно бортів у повітрі
+            int liveN = AirborneNow(tracker.Active.Where(t => t.Pos is not null).Sum(t => t.Amount)); // бортів у повітрі (карта або оцінка моніторів)
             if (liveN == 0 && snap.RedUa.Count == 0 && snap.YellowUa.Count == 0) continue;
             await channel.Post(MapCaption(snap, liveN), await BuildBotMapPng(channel: true));
         }
@@ -762,7 +800,7 @@ async Task RunThreatNews(ChannelPoster channel)
                 ppoSeen.Where(kv => DateTime.Now - kv.Value < TimeSpan.FromMinutes(3)).Select(kv => kv.Key));
             var post = raidCities.Count > 0
                 ? BuildCityRaidPost(active, raidCities!, ppoNow)
-                : BuildOblastPost(active);
+                : BuildOblastPost(active, AirborneNow(active.Sum(t => t.Amount)));
             await channel.Post(post, null); // текст; карта — окремо (10 хв)
         }
         catch (Exception ex) { Console.Error.WriteLine("⚠ threatnews: " + ex.Message); }
@@ -797,14 +835,14 @@ static string? NearBigCity(Threat t)
 }
 
 // Звичайний формат (вся Україна): згруповано по областях —  «🛩 БпЛА на Луцьк».
-static string BuildOblastPost(List<Threat> active)
+static string BuildOblastPost(List<Threat> active, int airborne = -1)
 {
     var sb = new StringBuilder();
     var byRegion = active.Where(t => t.Pos is not null)
         .GroupBy(t => OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon))
         .OrderByDescending(g => g.Sum(t => t.Amount))
         .Take(12).ToList();
-    int total = active.Where(t => t.Pos is not null).Sum(t => t.Amount);
+    int total = airborne >= 0 ? airborne : active.Where(t => t.Pos is not null).Sum(t => t.Amount);
     sb.Append("🛸 <b>У повітрі зараз: ~").Append(total).AppendLine("</b>");
     sb.AppendLine("(рух по областях)");
     sb.AppendLine();
@@ -899,7 +937,7 @@ async Task<byte[]?> BuildBotMapPng(bool channel = false)
     var snap = await OfficialAlerts.FetchFull();
     if (channel)
     {
-        var subtitle = $"Тривога: {snap.RedUa.Count} обл · часткова: {snap.YellowUa.Count} · у повітрі: ~{live.Sum(t => t.Amount)}";
+        var subtitle = $"Тривога: {snap.RedUa.Count} обл · часткова: {snap.YellowUa.Count} · у повітрі: ~{AirborneNow(live.Sum(t => t.Amount))}";
         return MapImage.Render((HomeLat, HomeLon), live, "WarAlarm · Карта тривог", subtitle, snap.ByPolygon,
             showHome: false, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
     }
@@ -1234,6 +1272,7 @@ try
     if (WatchKyiv) needed.AddRange(kyChannels);
     needed.AddRange(uaChannels);
     needed.AddRange(powerChannels);
+    needed.AddRange(launchChannels);
     var missing = needed.Where(u => !subscribed.Contains(u)).ToList();
     if (missing.Count > 0)
         Ui.Line(ConsoleColor.Yellow, "⚠ НЕ підписаний на: " + string.Join(", ", missing.Select(u => "@" + u)) + " — по ним live не прийде! Вступи в них.");
@@ -1354,7 +1393,8 @@ async Task OnUpdate(Update update)
 
     // ── ☢️ РАДІАЦІЙНА/ЯДЕРНА НЕБЕЗПЕКА — найвищий пріоритет над усім ──────────────
     // Тільки з наших моніторених каналів і лише за явним сигналом (NuclearMention).
-    bool fromOurChannel = isUaPrivate || (uname != null &&
+    bool isLaunchCh = uname != null && launchChannels.Contains(uname);
+    bool fromOurChannel = isUaPrivate || isLaunchCh || (uname != null &&
         (khChannels.Contains(uname) || kyChannels.Contains(uname) || uaChannels.Contains(uname)));
     if (fromOurChannel && NuclearMention(m.message))
     {
@@ -1373,6 +1413,39 @@ async Task OnUpdate(Update update)
                 oneLine, ThreatKind.Unknown, true, Silent: false), clear: false);
         }
         return;
+    }
+
+    // ── 🚀 Канал пусків (@ukraine_pyxx): хвилі пусків шахедів + «скільки в повітрі» ─
+    if (isLaunchCh)
+    {
+        if (LaunchFeed.ParseLaunch(m.message) is { } lb)
+        {
+            lastBatch = lb; lastBatchAt = DateTime.Now; PublishAir();
+            MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+            var at = lb.When is { } w ? $" о {w}" : "";
+            var rows = lb.Items.Select(i => $"• {i.Origin} — {i.N}{(i.Reactive ? " (реакт.)" : "")}").ToList();
+            int react = lb.Items.Where(i => i.Reactive).Sum(i => i.N);
+            var head = $"🚀 Пуск ~{lb.Total} шахедів{at}" + (react > 0 ? $" (з них реактивних {react})" : "");
+            Ui.Line(ConsoleColor.Red, $"🚀 [{time}] {src} · {head}");
+            await Alert(new AlarmInfo(time, src, head, string.Join("\n", rows) + "\nЛетять на Україну — стежте за картою.",
+                                      ThreatKind.Drone, Urgent: false, Info: true));
+            if (channelPoster is not null)
+                await channelPoster.Post($"🚀 <b>{H(head)}</b>\n{H(string.Join("\n", rows))}\n\n⚠️ Летять на Україну — стежте за картою.\n🤖 WarAlarm", null);
+            return;
+        }
+        if (LaunchFeed.ParseAirborne(m.message) is int air)
+        {
+            airReported = air; airReportedAt = DateTime.Now; PublishAir();
+            MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // число одразу в застосунок
+            Ui.Line(ConsoleColor.Yellow, $"🛸 [{time}] {src} · у повітрі зараз ~{air} (оцінка моніторів)");
+            return;
+        }
+        if (!LaunchMention(m.message) && !NuclearMention(m.message))
+        {
+            Ui.Line(ConsoleColor.DarkGray, $"·  [{time}] {src} — коментар/рух, пропуск");
+            return;
+        }
+        // ракети/балістика — далі звичайним детектором пусків
     }
 
     // ── 🚀 ПУСКИ (ракети/КАБ/ШАХЕДИ) / ракетна небезпека — попередження ──────────
@@ -1677,6 +1750,27 @@ async Task WarmStart()
         }
         catch { /* приватні недоступні — старт не роняем */ }
     }
+
+    // 🚀 Канали пусків: відновити останню хвилю й оцінку «у повітрі» (без пушів).
+    foreach (var lu in launchChannels)
+    {
+        try
+        {
+            var res = await client.Contacts_ResolveUsername(lu);
+            if (res.chats.Values.OfType<Channel>().FirstOrDefault() is not { } lch) continue;
+            var hist = (await client.Messages_GetHistory(lch, limit: 25)).Messages.OfType<Message>().Reverse();
+            foreach (var msg in hist)
+            {
+                if (string.IsNullOrWhiteSpace(msg.message)) continue;
+                var when = msg.date.ToLocalTime();
+                if (DateTime.Now - when > TimeSpan.FromHours(3)) continue; // старе — не цікаво
+                if (LaunchFeed.ParseLaunch(msg.message) is { } b) { lastBatch = b; lastBatchAt = when; }
+                else if (LaunchFeed.ParseAirborne(msg.message) is int a) { airReported = a; airReportedAt = when; }
+            }
+        }
+        catch { /* канал недоступний — старт не роняем */ }
+    }
+    PublishAir();
 
     tracker.Tick(DateTime.Now);                                  // погасить устаревшее по реальному времени
     MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // нарисовать актуальную картину

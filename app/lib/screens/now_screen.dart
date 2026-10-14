@@ -259,6 +259,26 @@ class NowScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
+          // 🚀 Остання хвиля пусків (з каналу моніторів через бота).
+          if (data.hasRecentLaunch) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF7A3C).withValues(alpha: 0.13),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: const Color(0xFFFF7A3C).withValues(alpha: 0.45)),
+              ),
+              child: Text(
+                '🚀 Пуск ~${data.launched} шахедів'
+                '${data.launchedAt.isNotEmpty ? ' о ${data.launchedAt}' : ''}'
+                '${data.launchOrigins.isNotEmpty ? '\n${data.launchOrigins}' : ''}',
+                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)
+                    .copyWith(color: AppColors.textPrimary),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           ..._targetList(data, sel).map((t) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _TargetRow(t: t, stateTs: data.stateTs),
