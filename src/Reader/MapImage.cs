@@ -118,18 +118,27 @@ public static class MapImage
         // ── Цілі: детальні силуети (як у застосунку), повернуті за курсом ──────
         using var xnFill = new SKPaint { Color = SKColors.White, IsAntialias = true, TextSize = 20, FakeBoldText = true };
         using var xnHalo = new SKPaint { Color = new SKColor(0x0A, 0x0E, 0x17), IsAntialias = true, TextSize = 20, FakeBoldText = true, Style = SKPaintStyle.Stroke, StrokeWidth = 3 };
+        // Кластер як у застосунку: цілі одного типу в межах ~16 км → одна фігура з сумою ×N
+        // (інакше накладались одна на одну і «×N» перекривали один одного).
+        var drawn = new List<(Threat t, int n)>();
         foreach (var t in threats)
         {
-            if (t.Pos is not { } p) continue;
+            if (t.Pos is not { } tp) continue;
+            int i = drawn.FindIndex(d => CatOf(d.t.Kind) == CatOf(t.Kind) && ThreatGeo.Km(d.t.Pos!.Value, tp) < 16);
+            if (i >= 0) drawn[i] = (drawn[i].t, drawn[i].n + t.Amount); else drawn.Add((t, t.Amount));
+        }
+        foreach (var (t, n) in drawn)
+        {
+            var p = t.Pos!.Value;
             var pt = P(p.lon, p.lat);
             var c = KindColor(t.Kind);
             using (var glow = new SKPaint { Color = c.WithAlpha(0x44), IsAntialias = true, MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 8) })
                 canvas.DrawCircle(pt, 15, glow);
             DrawFig(canvas, pt, t.Heading ?? 0, CatOf(t.Kind), c, 2.4f);
-            if (t.Amount > 1)
+            if (n > 1)
             {
-                canvas.DrawText($"×{t.Amount}", pt.X + 15, pt.Y - 10, xnHalo);
-                canvas.DrawText($"×{t.Amount}", pt.X + 15, pt.Y - 10, xnFill);
+                canvas.DrawText($"×{n}", pt.X + 15, pt.Y - 10, xnHalo);
+                canvas.DrawText($"×{n}", pt.X + 15, pt.Y - 10, xnFill);
             }
         }
 

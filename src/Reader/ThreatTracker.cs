@@ -161,7 +161,10 @@ public sealed class ThreatTracker
         var place = approx ? gp.name + " (обл.)" : gp.name;
         lock (_gate)
         {
-            var key = approx ? $"UA:обл:{gp.name}:{ev.Kind}" : $"UA:{gp.name}:{ev.Kind}";
+            // Приблизні (місто не знайдено → центр області): ключ із НАЗВОЮ міста, щоб
+            // «Літин» і «Гнівань» не злипались в одну ціль із останнім ×N (губились дрони).
+            // На карті вони все одно в одній точці — кластер МapWriter підсумує ×N.
+            var key = approx ? $"UA:обл:{gp.name}:{(ev.City ?? "").ToLowerInvariant()}:{ev.Kind}" : $"UA:{gp.name}:{ev.Kind}";
             bool isNew = !_active.TryGetValue(key, out var t);
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
             t!.Ammo ??= ev.Extra;

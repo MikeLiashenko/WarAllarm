@@ -899,7 +899,7 @@ async Task<byte[]?> BuildBotMapPng(bool channel = false)
     var snap = await OfficialAlerts.FetchFull();
     if (channel)
     {
-        var subtitle = $"Тривога: {snap.RedUa.Count} обл · часткова: {snap.YellowUa.Count} · цілей: {live.Count}";
+        var subtitle = $"Тривога: {snap.RedUa.Count} обл · часткова: {snap.YellowUa.Count} · у повітрі: ~{live.Sum(t => t.Amount)}";
         return MapImage.Render((HomeLat, HomeLon), live, "WarAlarm · Карта тривог", subtitle, snap.ByPolygon,
             showHome: false, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
     }
