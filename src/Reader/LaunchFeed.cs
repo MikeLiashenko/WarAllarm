@@ -43,7 +43,7 @@ public static class LaunchFeed
         // «N штук [реактивних|звичайних] [з] Місто»
         var items = new List<LaunchItem>();
         foreach (Match mt in Regex.Matches(post,
-            @"(\d{1,3})\s*шт\w*\.?\s*(реактивн\w*|звичайн\w*)?\s*(з|із|зі)?\s*([А-ЯІЇЄҐA-Z][^\s\d,;:]*(?:[\s\-.]+[А-ЯІЇЄҐ][^\s\d,;:]*)?)(\s+реактивн\w*)?",
+            @"(\d{1,3})\s*(?:шт\w*\.?\s*)?(реактивн\w*|звичайн\w*)?\s*(з|із|зі)?\s*([А-ЯІЇЄҐA-Z][^\s\d,;:]*(?:[\s\-.]+[А-ЯІЇЄҐ][^\s\d,;:]*)?)(\s+реактивн\w*)?",
             RegexOptions.IgnoreCase))
         {
             if (!int.TryParse(mt.Groups[1].Value, out var n) || n is <= 0 or > 300) continue;
