@@ -80,6 +80,9 @@ var powerChannels = new HashSet<string>(
        .Select(s => s.TrimStart('@')),
     StringComparer.OrdinalIgnoreCase);
 
+// 🔋 Твоя черга відключень (група 1..57 у графіках ДТЕК). 0 = не задана → алертів по групах нема.
+int PowerGroup = int.TryParse(cfg.GetValueOrDefault("power_group", "0"), out var _pg) ? _pg : 0;
+
 // ПРИВАТНЫЕ каналы-радары (у них нет @username) → парсер UA, матчим по числовому ID.
 // Розвідка неба пішла в закритий канал (ID 1913069725); публічний @rozvidkaneba помер.
 // Настраивается: private_ua_channels=1913069725,...
@@ -1399,19 +1402,44 @@ async Task OnUpdate(Update update)
     // ── 🔌 Світло (відключення/відновлення) → окреме оповіщення (без сирени) ─────
     if (uname != null && powerChannels.Contains(uname))
     {
-        var pe = PowerMonitor.Analyze(m.message);
+        var pe = PowerMonitor.Analyze(m.message, MyDistrict);
+        var msg = oneLine.Length > 180 ? oneLine[..180] : oneLine;
+        static string J(string x) => x.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        void SetPower(bool off, string area)
+        {
+            var ms = ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeMilliseconds();
+            MapWriter.PowerJson = $"{{\"status\":\"{(off ? "off" : "on")}\",\"area\":\"{J(area)}\",\"msg\":\"{J(msg)}\",\"ts\":{ms}}}";
+            MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // одразу у Firebase → застосунок
+        }
+
+        if (pe.Kind == PowerKind.Groups)
+        {
+            // Перемикання черг: персонально — лише якщо зачепило ТВОЮ групу.
+            bool myOff = PowerGroup > 0 && pe.GroupsOff.Contains(PowerGroup);
+            bool myOn  = PowerGroup > 0 && pe.GroupsOn.Contains(PowerGroup);
+            var at = pe.When is { } w ? $" о {w}" : "";
+            if (myOff || myOn)
+            {
+                var head = myOff ? $"🪫 Твоя група {PowerGroup} — вимикають світло{at}"
+                                 : $"🔋 Твоя група {PowerGroup} — вмикають світло{at}";
+                SetPower(myOff, $"твоя група {PowerGroup}");
+                await Alert(new AlarmInfo(time, src, head, oneLine, ThreatKind.Unknown, Urgent: false, Power: true));
+            }
+            else
+                Ui.Line(ConsoleColor.DarkGray, $"💡 [{time}] {src} · черги{at}: вмик {string.Join(",", pe.GroupsOn)} · вимик {string.Join(",", pe.GroupsOff)}"
+                    + (PowerGroup > 0 ? $" (твоя {PowerGroup} — без змін)" : " (задай power_group у settings)"));
+            return;
+        }
+
         if (pe.Kind is PowerKind.Off or PowerKind.On)
         {
-            var icon = pe.Kind == PowerKind.Off ? "🔌" : "💡";
-            var word = pe.Kind == PowerKind.Off ? "Відключення світла" : "Світло відновлюють";
-            var head = $"{icon} {word} — {pe.Area}";
-            var msg = oneLine.Length > 180 ? oneLine[..180] : oneLine;
-            var ms = ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeMilliseconds();
-            static string J(string x) => x.Replace("\\", "\\\\").Replace("\"", "\\\"");
-            MapWriter.PowerJson = $"{{\"status\":\"{(pe.Kind == PowerKind.Off ? "off" : "on")}\",\"area\":\"{J(pe.Area)}\",\"msg\":\"{J(msg)}\",\"ts\":{ms}}}";
-            MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // одразу у Firebase → застосунок
-            await Alert(new AlarmInfo(time, src, head, oneLine, ThreatKind.Unknown, Urgent: false, Power: true)); // пуш + консоль
-            if (channelPoster is not null) // і в канал
+            var off = pe.Kind == PowerKind.Off;
+            var icon = off ? "🔌" : "💡";
+            var word = off ? "Відключення світла" : "Світло відновлюють";
+            var area = pe.MyArea ? $"{pe.Area} (твій район)" : pe.Area;
+            SetPower(off, area);
+            await Alert(new AlarmInfo(time, src, $"{icon} {word} — {area}", oneLine, ThreatKind.Unknown, Urgent: false, Power: true)); // пуш + консоль
+            if (channelPoster is not null) // і в канал (район без «твій»)
                 await channelPoster.Post($"{icon} <b>{H(word)} — {H(pe.Area)}</b>\n{H(msg)}\n🤖 WarAlarm", null);
         }
         else
