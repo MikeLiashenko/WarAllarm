@@ -462,6 +462,8 @@ var daySeen = new HashSet<string>();
 var ppoSeen = new Dictionary<string, DateTime>(); // зона → коли востаннє згадали роботу ППО
 DateTime? nuclearUntil = null; // ☢️ доки активна радіаційна/ядерна небезпека (30 хв від згадки)
 DateTime? lastLaunch = null;   // 🚀 коли востаннє попереджали про пуски (щоб не спамити)
+var kyivOff = new SortedSet<int>(); // 🔌 черги Києва, які ЗАРАЗ без світла (з постів єСвітло)
+string? kyivOffAt = null;           // час останнього перемикання черг («11:30»)
 
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
@@ -1408,26 +1410,38 @@ async Task OnUpdate(Update update)
         void SetPower(bool off, string area)
         {
             var ms = ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeMilliseconds();
-            MapWriter.PowerJson = $"{{\"status\":\"{(off ? "off" : "on")}\",\"area\":\"{J(area)}\",\"msg\":\"{J(msg)}\",\"ts\":{ms}}}";
+            // groupsOff — черги всього Києва, що зараз без світла (застосунок показує список).
+            MapWriter.PowerJson = $"{{\"status\":\"{(off ? "off" : "on")}\",\"area\":\"{J(area)}\",\"msg\":\"{J(msg)}\",\"ts\":{ms}"
+                + $",\"groupsOff\":[{string.Join(",", kyivOff)}],\"at\":\"{J(kyivOffAt ?? "")}\"}}";
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // одразу у Firebase → застосунок
         }
+        static string L(IEnumerable<int> g) => string.Join(", ", g);
 
         if (pe.Kind == PowerKind.Groups)
         {
-            // Перемикання черг: персонально — лише якщо зачепило ТВОЮ групу.
+            // ── Світло по ВСЬОМУ Києву: оновлюємо, які черги зараз без світла ──────
+            if (pe.GroupsStillOff is { Length: > 0 } still)
+            {   // повний знімок «залишаються відключеними» + щойно вимкнені
+                kyivOff.Clear(); kyivOff.UnionWith(still); kyivOff.UnionWith(pe.GroupsOff); kyivOff.ExceptWith(pe.GroupsOn);
+            }
+            else { kyivOff.ExceptWith(pe.GroupsOn); kyivOff.UnionWith(pe.GroupsOff); }
+            kyivOffAt = pe.When ?? DateTime.Now.ToString("HH:mm");
+            var at = pe.When is { } w ? $" о {w}" : "";
+
             bool myOff = PowerGroup > 0 && pe.GroupsOff.Contains(PowerGroup);
             bool myOn  = PowerGroup > 0 && pe.GroupsOn.Contains(PowerGroup);
-            var at = pe.When is { } w ? $" о {w}" : "";
-            if (myOff || myOn)
-            {
-                var head = myOff ? $"🪫 Твоя група {PowerGroup} — вимикають світло{at}"
-                                 : $"🔋 Твоя група {PowerGroup} — вмикають світло{at}";
-                SetPower(myOff, $"твоя група {PowerGroup}");
-                await Alert(new AlarmInfo(time, src, head, oneLine, ThreatKind.Unknown, Urgent: false, Power: true));
-            }
-            else
-                Ui.Line(ConsoleColor.DarkGray, $"💡 [{time}] {src} · черги{at}: вмик {string.Join(",", pe.GroupsOn)} · вимик {string.Join(",", pe.GroupsOff)}"
-                    + (PowerGroup > 0 ? $" (твоя {PowerGroup} — без змін)" : " (задай power_group у settings)"));
+            var lines = new List<string>();
+            if (pe.GroupsOn.Length > 0)  lines.Add($"🔋 Вмикають: {L(pe.GroupsOn)}");
+            if (pe.GroupsOff.Length > 0) lines.Add($"🪫 Вимикають: {L(pe.GroupsOff)}");
+            lines.Add(kyivOff.Count > 0 ? $"⚫ Зараз без світла черги: {L(kyivOff)}" : "✅ Усі черги зі світлом");
+
+            var head = myOff ? $"🪫 Твоя група {PowerGroup} — вимикають світло{at}"
+                     : myOn  ? $"🔋 Твоя група {PowerGroup} — вмикають світло{at}"
+                     : $"💡 Світло в Києві{at}";
+            SetPower(kyivOff.Count > 0, "Київ");
+            await Alert(new AlarmInfo(time, src, head, string.Join("\n", lines), ThreatKind.Unknown, Urgent: false, Power: true));
+            if (channelPoster is not null)
+                await channelPoster.Post($"💡 <b>Світло в Києві{H(at)}</b>\n{H(string.Join("\n", lines))}\n🤖 WarAlarm", null);
             return;
         }
 

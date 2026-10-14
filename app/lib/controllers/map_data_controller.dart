@@ -62,6 +62,11 @@ class MapDataController extends ChangeNotifier {
   int _powerTs = 0;
   String get powerArea => _powerArea;
   String get powerMsg => _powerMsg;
+  List<int> _powerGroupsOff = const [];
+  String _powerAt = '';
+  /// Черги Києва, які зараз без світла (з постів «єСвітло»).
+  List<int> get powerGroupsOff => powerStatus.isEmpty ? const [] : _powerGroupsOff;
+  String get powerAt => _powerAt;
   /// 'off' | 'on' | '' — показуємо, лише поки подія свіжа (≤12 год).
   String get powerStatus =>
       (_powerTs > 0 &&
@@ -225,6 +230,9 @@ class MapDataController extends ChangeNotifier {
       _powerArea = (pw['area'] ?? '').toString();
       _powerMsg = (pw['msg'] ?? '').toString();
       _powerTs = (pw['ts'] as num?)?.toInt() ?? 0;
+      final g = pw['groupsOff'];
+      _powerGroupsOff = g is List ? g.whereType<num>().map((e) => e.toInt()).toList() : const [];
+      _powerAt = (pw['at'] ?? '').toString();
     }
 
     notifyListeners();

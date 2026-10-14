@@ -12,7 +12,8 @@ using System.Text.RegularExpressions;
 public enum PowerKind { None, Off, On, Groups, Schedule }
 
 public record PowerEvent(PowerKind Kind, string Area, string Raw,
-                         int[] GroupsOn, int[] GroupsOff, bool MyArea, string? When);
+                         int[] GroupsOn, int[] GroupsOff, bool MyArea, string? When,
+                         int[]? GroupsStillOff = null); // «Залишаються відключеними…» — повний список «без світла»
 
 public static class PowerMonitor
 {
@@ -47,18 +48,20 @@ public static class PowerMonitor
             return new(PowerKind.None, "Київ", raw, [], [], false, null);
 
         // ── Перемикання черг: «🔋 Вмикаємо групи: 2, 6», «🪫 Вимикаємо групу 11» ──
-        // «Залишаються відключеними…» — це статус, а не перемикання → не рахуємо.
-        var on = new List<int>(); var off = new List<int>();
+        // «Залишаються відключеними групи: …» — це повний список черг БЕЗ світла зараз.
+        var on = new List<int>(); var off = new List<int>(); var still = new List<int>();
         foreach (var line in cleaned.Replace("\r", "").Split('\n'))
         {
             var ll = line.ToLowerInvariant();
-            if (!ll.Contains("груп") || ll.Contains("залиша")) continue;
-            if (Regex.IsMatch(ll, @"вмика|увімкн|вмикн")) on.AddRange(Nums(line));
+            if (!ll.Contains("груп")) continue;
+            if (ll.Contains("залиша")) { if (Regex.IsMatch(ll, @"відключ|вимкн|без світл")) still.AddRange(Nums(line)); }
+            else if (Regex.IsMatch(ll, @"вмика|увімкн|вмикн")) on.AddRange(Nums(line));
             else if (Regex.IsMatch(ll, @"вимика|вимкн|відключа")) off.AddRange(Nums(line));
         }
         var when = Regex.Match(l, @"\bо\s*(\d{1,2}:\d{2})") is { Success: true } wm ? wm.Groups[1].Value : null;
-        if (on.Count > 0 || off.Count > 0)
-            return new(PowerKind.Groups, "Київ", raw, on.Distinct().ToArray(), off.Distinct().ToArray(), false, when);
+        if (on.Count > 0 || off.Count > 0 || still.Count > 0)
+            return new(PowerKind.Groups, "Київ", raw, on.Distinct().ToArray(), off.Distinct().ToArray(), false, when,
+                       still.Count > 0 ? still.Distinct().ToArray() : null);
 
         PowerKind kind;
         if (Regex.IsMatch(l, @"графік\w*\s+(відключ|погодинн)"))

@@ -105,13 +105,28 @@ class NowScreen extends StatelessWidget {
                         style: const TextStyle(fontSize: 20)),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        off
-                            ? 'Світло: відключення — ${data.powerArea}'
-                            : 'Світло відновлюють — ${data.powerArea}',
-                        style: const TextStyle(
-                                fontSize: 14.5, fontWeight: FontWeight.w700)
-                            .copyWith(color: AppColors.textPrimary),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            off
+                                ? 'Світло: відключення — ${data.powerArea}'
+                                : 'Світло відновлюють — ${data.powerArea}',
+                            style: const TextStyle(
+                                    fontSize: 14.5, fontWeight: FontWeight.w700)
+                                .copyWith(color: AppColors.textPrimary),
+                          ),
+                          // Світло по всьому Києву: які черги зараз без світла.
+                          if (data.powerGroupsOff.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              '⚫ Без світла черги: ${data.powerGroupsOff.join(', ')}'
+                              '${data.powerAt.isNotEmpty ? ' (з ${data.powerAt})' : ''}',
+                              style: const TextStyle(fontSize: 13)
+                                  .copyWith(color: AppColors.textPrimary),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ],
