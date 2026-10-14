@@ -62,9 +62,13 @@ public static class ThreatParser
             if (Noise.Any(n => low.Contains(n))) continue;
 
             // Отбой
-            if (low.Contains("відбій") || low == "чисто" || low.StartsWith("чисто"))
+            if (low.Contains("відбій") || low == "чисто" || low.StartsWith("чисто") || Regex.IsMatch(low, @"^\S+щин\w*\s*[:\-—–]\s*чисто"))
             {
-                events.Add(new(ThreatKind.AllClear, null, null, 0, low.Contains("балісти") ? "балістика" : null, line));
+                // Відбій по конкретній області («Відбій по Київщині», «Сумщина — чисто») → лише її.
+                // Без області — загальний відбій по країні (oblast = null).
+                var clr = Geo.Oblasts.FirstOrDefault(kv => low.Contains(kv.Key[..^1])).Value ?? oblast;
+                if (low.Contains("відбій") && !Regex.IsMatch(low, @"щин|област")) clr = null; // «відбій» без області — загальний
+                events.Add(new(ThreatKind.AllClear, clr, null, 0, low.Contains("балісти") ? "балістика" : null, line));
                 continue;
             }
             // Балистическая угроза (по направлению, без города)

@@ -23,6 +23,7 @@ public sealed class Threat
     public ThreatKind Kind;
     public string? Ammo;
     public bool Recon;                    // «розвідка/дорозвідка» — низький пріоритет: не виє, не будить
+    public string? Oblast;                // область із заголовка поста радара (для заміни «кусками»)
     public (double lat, double lon)? Pos; // последняя геопривязка
     public string LastPlace = "";
     public double? DistKm;                // до дома
@@ -164,6 +165,7 @@ public sealed class ThreatTracker
             bool isNew = !_active.TryGetValue(key, out var t);
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
             t!.Ammo ??= ev.Extra;
+            t.Oblast = ev.Oblast ?? t.Oblast;
             t.Recon = ((ev.Extra ?? "") + " " + ev.Raw).ToLowerInvariant().Contains("розвід");
             t.LastUpdate = now;
             t.Hits.Add(ev.City ?? gp.name);
@@ -256,6 +258,28 @@ public sealed class ThreatTracker
             foreach (var t in gone) _active.Remove(t.Id);
             return gone;
         }
+    }
+
+    // Радар постит «кусками» (1–3 області за пост): новий пост — актуальна картина ЛИШЕ
+    // для своїх областей. Тож гасимо старі дрони тільки цих областей, решту не чіпаємо
+    // (раніше гасили все по країні → на карті лишався останній шматок, 2 цілі замість 150).
+    public int SweepUaOblasts(IEnumerable<ThreatEvent> events)
+    {
+        var obl = events.Where(e => e.Oblast != null && e.Kind is ThreatKind.Drone or ThreatKind.Target)
+                        .Select(e => e.Oblast!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (obl.Count == 0) return 0;
+        return SweepWhere(t => t.Zone == "UA" && t.Kind is ThreatKind.Drone or ThreatKind.Target
+                               && t.Oblast != null && obl.Contains(t.Oblast)).Count;
+    }
+
+    // Відбій із поста радара: з областю — гасимо лише цю область; без області — усю країну.
+    public int SweepUaClear(IEnumerable<ThreatEvent> events)
+    {
+        var clears = events.Where(e => e.Kind == ThreatKind.AllClear).ToList();
+        if (clears.Count == 0) return 0;
+        if (clears.Any(e => e.Oblast == null)) return Sweep("UA").Count;
+        var obl = clears.Select(e => e.Oblast!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return SweepWhere(t => t.Zone == "UA" && t.Oblast != null && obl.Contains(t.Oblast)).Count;
     }
 
     // Погасить цели по произвольному условию (например, все цели в области, где офиц. отбой).

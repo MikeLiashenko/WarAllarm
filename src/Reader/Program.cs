@@ -1189,8 +1189,8 @@ if (args.Length >= 1 && args[0].Equals("check", StringComparison.OrdinalIgnoreCa
                 var events = ThreatParser.Parse(msg.message);
                 bool hasAllClear = events.Any(e => e.Kind == ThreatKind.AllClear);
                 bool hasDrones = events.Any(e => e.Kind is ThreatKind.Drone or ThreatKind.Target);
-                if (hasAllClear) tracker.Sweep("UA");
-                else if (hasDrones) tracker.SweepKind("UA", ThreatKind.Drone, ThreatKind.Target);
+                if (hasAllClear) tracker.SweepUaClear(events);
+                tracker.SweepUaOblasts(events); // і відбій, і нові дрони в одному «шматку» — обидва
 
                 foreach (var ev in events)
                 {
@@ -1486,16 +1486,16 @@ async Task OnUpdate(Update update)
         bool hasAllClear = events.Any(e => e.Kind == ThreatKind.AllClear);
         bool hasDrones = events.Any(e => e.Kind is ThreatKind.Drone or ThreatKind.Target);
 
-        // Если в посте отбой — сбрасываем цели по стране
+        // Отбой в посте: с областью — гасим её, без области — всю страну
         if (hasAllClear)
         {
-            tracker.Sweep("UA");
+            tracker.SweepUaClear(events);
         }
-        // С каждым новым сообщением от всеукраинского радара — сбрасываем старые UA-цели
-        // и наносим актуальный срез заново (чтобы не копились старые стрелки)
-        else if (hasDrones)
+        // Радар шлёт «кусками» — новый пост обновляет ТОЛЬКО свои области:
+        // старые дроны этих областей гасим, остальные по стране остаются.
+        if (hasDrones)
         {
-            tracker.SweepKind("UA", ThreatKind.Drone, ThreatKind.Target);
+            tracker.SweepUaOblasts(events);
         }
 
         bool drew = false;
@@ -1627,7 +1627,7 @@ async Task WarmStart()
         if (channel is null) continue;
 
         Message[] msgs;
-        try { msgs = (await client.Messages_GetHistory(channel, limit: 12)).Messages.OfType<Message>().Reverse().ToArray(); }
+        try { msgs = (await client.Messages_GetHistory(channel, limit: 30)).Messages.OfType<Message>().Reverse().ToArray(); }
         catch { continue; }
 
         foreach (var msg in msgs) // хронологический порядок (старые → новые)
@@ -1646,8 +1646,8 @@ async Task WarmStart()
             else
             {
                 var events = ThreatParser.Parse(msg.message);
-                if (events.Any(x => x.Kind == ThreatKind.AllClear)) tracker.Sweep("UA");
-                else if (events.Any(x => x.Kind is ThreatKind.Drone or ThreatKind.Target)) tracker.SweepKind("UA", ThreatKind.Drone, ThreatKind.Target);
+                if (events.Any(x => x.Kind == ThreatKind.AllClear)) tracker.SweepUaClear(events);
+                tracker.SweepUaOblasts(events);
                 foreach (var ev in events) tracker.IngestUa(ev, when);
             }
         }
@@ -1662,15 +1662,15 @@ async Task WarmStart()
             foreach (var channel in dialogs.chats.Values.OfType<Channel>().Where(c => privateUaIds.Contains(c.ID)))
             {
                 Message[] msgs;
-                try { msgs = (await client.Messages_GetHistory(channel, limit: 12)).Messages.OfType<Message>().Reverse().ToArray(); }
+                try { msgs = (await client.Messages_GetHistory(channel, limit: 30)).Messages.OfType<Message>().Reverse().ToArray(); }
                 catch { continue; }
                 foreach (var msg in msgs)
                 {
                     if (string.IsNullOrWhiteSpace(msg.message)) continue;
                     var when = msg.date.ToLocalTime();
                     var events = ThreatParser.Parse(msg.message);
-                    if (events.Any(x => x.Kind == ThreatKind.AllClear)) tracker.Sweep("UA");
-                    else if (events.Any(x => x.Kind is ThreatKind.Drone or ThreatKind.Target)) tracker.SweepKind("UA", ThreatKind.Drone, ThreatKind.Target);
+                    if (events.Any(x => x.Kind == ThreatKind.AllClear)) tracker.SweepUaClear(events);
+                    tracker.SweepUaOblasts(events);
                     foreach (var ev in events) tracker.IngestUa(ev, when);
                 }
             }
