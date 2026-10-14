@@ -15,7 +15,8 @@ public sealed record BotFeatures(
     Func<Task<byte[]?>> MapPng,
     Func<Task<string>> Ai,
     Func<string> Stats,
-    Func<Task<string>> Alerts);
+    Func<Task<string>> Alerts,
+    Func<Task<(byte[] png, string caption)>>? Night = null); // 🌙 підсумок ночі
 
 public sealed class TelegramBot
 {
@@ -151,6 +152,17 @@ public sealed class TelegramBot
             await Send(chat, "🗺 Малюю карту…");
             var png = await _f.MapPng();
             if (png != null) await SendPhoto(chat, png, "🗺 Карта тривог"); else await Send(chat, "Не вдалося.");
+            return;
+        }
+        if (_f.Night is { } night && Match(text, cmd, "/night", "🌙", "ніч", "ночь", "підсумок"))
+        {
+            await Send(chat, "🌙 Збираю підсумок ночі з каналів… (до хвилини)");
+            try
+            {
+                var (png, caption) = await night();
+                await SendPhoto(chat, png, caption.Length > 1000 ? caption[..1000] : caption);
+            }
+            catch (Exception ex) { await Send(chat, "Не вдалося: " + ex.Message); }
             return;
         }
         if (Match(text, cmd, "/stats", "📈", "аналітика")) { await Send(chat, _f.Stats()); return; }

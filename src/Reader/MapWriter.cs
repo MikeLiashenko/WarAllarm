@@ -34,6 +34,8 @@ public static class MapWriter
     public static string PowerJson = "";
     // 🚀 Пуски і «скільки в повітрі» з @ukraine_pyxx: {"reported":N,"ts":ms,"launched":N,"launchedAt":"18:35","origins":"…"}
     public static string AirJson = "";
+    // 🌙 Підсумок ночі (останній згенерований) для застосунку.
+    public static string NightJson = "";
 
     static string N(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
 
@@ -164,6 +166,7 @@ public static class MapWriter
         sb.Append(",\"power\":").Append(PowerJson.Length > 0 ? PowerJson : "{}");
         // 🚀 Пуски / оцінка «у повітрі» від моніторів.
         sb.Append(",\"air\":").Append(AirJson.Length > 0 ? AirJson : "{}");
+        sb.Append(",\"night\":").Append(NightJson.Length > 0 ? NightJson : "{}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.
         sb.Append(",\"aiText\":\"").Append(Esc(AiText)).Append('"');
         sb.Append(",\"aiAt\":").Append(AiAt is { } aa ? ((DateTimeOffset)aa.ToUniversalTime()).ToUnixTimeMilliseconds().ToString() : "null");

@@ -475,7 +475,8 @@ if (!string.IsNullOrWhiteSpace(botToken))
         MapPng: () => BuildBotMapPng(),
         Ai: BuildBotAi,
         Stats: BuildBotStats,
-        Alerts: BuildBotAlerts);
+        Alerts: BuildBotAlerts,
+        Night: async () => { var (from, to) = NightSummary.Window(DateTime.Now); var r = await BuildNight(from, to); return (r.png, r.plain); });
     var bot = new TelegramBot(botToken, features);
     _ = bot.RunAsync();                 // команди + персональні тривоги по місту
     Console.WriteLine($"🤖 Telegram-бот ВКЛ (підписників: {bot.SubscriberCount}). Напиши боту /start у Telegram.\n");
@@ -505,12 +506,73 @@ string? kyivOffAt = null;           // час останнього переми�
 
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
+_ = RunNightLoop(channelPoster); // 🌙 ранковий підсумок ночі + на запит (night.request)
 // Живі новини каналу: короткі тексти цілей + карта окремо (раз на 10 хв) + денне зведення.
 if (channelPoster is not null)
 {
     _ = RunThreatNews(channelPoster);
     _ = RunMapLoop(channelPoster);
     _ = RunDailyDigest(channelPoster);
+}
+
+// ── 🌙 Підсумок ночі: зібрати з історії каналів → карта + текст + state ────────
+async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNight(DateTime from, DateTime to)
+{
+    async Task<List<Channel>> ByNames(IEnumerable<string> names)
+    {
+        var list = new List<Channel>();
+        foreach (var n in names)
+            try { if ((await client.Contacts_ResolveUsername(n)).chats.Values.OfType<Channel>().FirstOrDefault() is { } c) list.Add(c); }
+            catch { /* недоступний — пропуск */ }
+        return list;
+    }
+    var radars = await ByNames(uaChannels);
+    if (privateUaIds.Count > 0)
+        try { radars.AddRange((await client.Messages_GetAllDialogs()).chats.Values.OfType<Channel>().Where(c => privateUaIds.Contains(c.ID))); }
+        catch { }
+    var kyiv = WatchKyiv ? await ByNames(kyChannels) : new List<Channel>();
+    var launch = await ByNames(launchChannels);
+    var d = await NightSummary.Collect(client, radars, kyiv, launch, from, to);
+    MapWriter.NightJson = NightSummary.StateJson(d);
+    MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // підсумок одразу в застосунок
+    return (MapImage.RenderNight(d), NightSummary.Caption(d, html: true), NightSummary.Caption(d, html: false), d);
+}
+
+// Ранковий підсумок о 08:30 (у канал + пуш) і генерація на запит файлом night.request
+// (вміст «post» — ще й опублікувати в канал). Результат: night.png + night.txt.
+async Task RunNightLoop(ChannelPoster? channel)
+{
+    var lastMorning = DateTime.Now.Hour >= 9 ? DateTime.Now.Date : DateTime.MinValue; // запуск пізніше — чекаємо завтра
+    while (true)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(10)); } catch { }
+        try
+        {
+            var now = DateTime.Now;
+            bool morning = now.Hour == 8 && now.Minute >= 30 && lastMorning != now.Date;
+            bool request = File.Exists("night.request");
+            if (!morning && !request) continue;
+            bool post = morning;
+            if (request)
+            {
+                try { post |= File.ReadAllText("night.request").Contains("post", StringComparison.OrdinalIgnoreCase); } catch { }
+                try { File.Delete("night.request"); } catch { }
+            }
+            if (morning) lastMorning = now.Date;
+            var (from, to) = morning ? (now.Date.AddDays(-1).AddHours(16), now) : NightSummary.Window(now);
+            Ui.Line(ConsoleColor.Magenta, $"🌙 Збираю підсумок ночі {from:dd.MM HH:mm} → {to:dd.MM HH:mm}…");
+            var (png, html, plain, d) = await BuildNight(from, to);
+            File.WriteAllBytes("night.png", png);
+            File.WriteAllText("night.txt", plain);
+            Ui.Line(ConsoleColor.Magenta, "🌙 Готово: night.png · цілей-точок " + d.Points.Count + " · вибухів " + d.Impacts.Count + " · пусків ~" + d.Launched);
+            if (post)
+            {
+                if (channel is not null) await channel.Post(html, png);
+                await Alert(new AlarmInfo(now.ToString("HH:mm:ss"), "WarAlarm", "🌙 Підсумок ночі", plain, ThreatKind.Unknown, Urgent: false, Info: true));
+            }
+        }
+        catch (Exception ex) { Console.Error.WriteLine("⚠ night: " + ex.Message); }
+    }
 }
 
 // Карта в канал раз на 10 хв — але лише коли є що показати (цілі або тривоги),

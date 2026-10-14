@@ -86,6 +86,35 @@ class NowScreen extends StatelessWidget {
             const SizedBox(height: 14),
           ],
 
+          // 🌙 Підсумок ночі (останній, що зібрав бот).
+          if (data.hasNight) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF8B5CF6).withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.5)),
+              ),
+              child: Text(
+                [
+                  '🌙 Підсумок ночі · ${data.nightPeriod}',
+                  if (data.nightLaunched > 0)
+                    '🚀 Запущено ~${data.nightLaunched} (хвиль: ${data.nightWaves})',
+                  if (data.nightMaxAir > 0)
+                    '🛸 Максимум у повітрі ~${data.nightMaxAir}',
+                  if (data.nightTop.isNotEmpty)
+                    '📍 Найбільше: ${data.nightTop}',
+                  if (data.nightImpacts > 0)
+                    '💥 Вибухи: ${data.nightImpacts} — ${data.nightImpactAt}',
+                ].join('\n'),
+                style: const TextStyle(fontSize: 13.5, height: 1.4)
+                    .copyWith(color: AppColors.textPrimary),
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+
           // 🔌 Світло (відключення/відновлення) — окремий банер.
           if (data.powerStatus.isNotEmpty) ...[
             Builder(builder: (_) {

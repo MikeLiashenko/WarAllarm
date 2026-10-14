@@ -192,6 +192,20 @@ class MapDataController extends ChangeNotifier {
       _launched > 0 &&
       DateTime.now().millisecondsSinceEpoch - _launchedTs < 2 * 3600 * 1000;
   int get launched => _launched;
+
+  // 🌙 Підсумок ночі (бот збирає з історії каналів).
+  Map<String, dynamic> _night = const {};
+  bool get hasNight {
+    final ts = (_night['ts'] as num?)?.toInt() ?? 0;
+    return ts > 0 && DateTime.now().millisecondsSinceEpoch - ts < 14 * 3600 * 1000;
+  }
+  String get nightPeriod => (_night['period'] ?? '').toString();
+  int get nightLaunched => (_night['launched'] as num?)?.toInt() ?? 0;
+  int get nightWaves => (_night['waves'] as num?)?.toInt() ?? 0;
+  int get nightMaxAir => (_night['maxAir'] as num?)?.toInt() ?? 0;
+  String get nightTop => (_night['top'] ?? '').toString();
+  int get nightImpacts => (_night['impacts'] as num?)?.toInt() ?? 0;
+  String get nightImpactAt => (_night['impactAt'] ?? '').toString();
   String get launchedAt => _launchedAt;
   String get launchOrigins => _launchOrigins;
 
@@ -241,6 +255,9 @@ class MapDataController extends ChangeNotifier {
       _nuclear = false;
       _nuclearMsg = '';
     }
+
+    final night = data['night'];
+    if (night is Map) _night = Map<String, dynamic>.from(night);
 
     final air = data['air'];
     if (air is Map) {

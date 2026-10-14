@@ -176,6 +176,115 @@ public static class MapImage
         return data.ToArray();
     }
 
+    // ── 🌙 Карта «Підсумок ночі»: теплова заливка областей + сліди цілей + вибухи ──
+    public static byte[] RenderNight(NightSummary.Data d)
+    {
+        const int W = 1000, padTop = 128, pad = 16;
+        double midLat = (Lat1 + (Lat1 - LatSpan)) / 2;
+        double aspect = (LonSpan / LatSpan) * Math.Cos(midLat * Math.PI / 180);
+        int pw = W - 2 * pad, ph = (int)(pw / aspect), H = ph + padTop + pad + 36;
+
+        using var bmp = new SKBitmap(W, H);
+        using var canvas = new SKCanvas(bmp);
+        canvas.Clear(new SKColor(0x0A, 0x0E, 0x17));
+        SKPoint P(double lon, double lat) => new(
+            (float)(pad + (lon - Lon0) / LonSpan * pw),
+            (float)(padTop + (Lat1 - lat) / LatSpan * ph));
+
+        // Інтенсивність по областях (сума ×N згадок) → тепла заливка.
+        var heat = new Dictionary<string, int>();
+        foreach (var p in d.Points)
+            if (OblastGeo.PolyName(p.Lat, p.Lon) is { } pn) heat[pn] = heat.GetValueOrDefault(pn) + p.N;
+        int hmax = heat.Count > 0 ? heat.Values.Max() : 1;
+
+        using var land = new SKPaint { Color = new SKColor(0x14, 0x1E, 0x33), IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var border = new SKPaint { Color = new SKColor(0x5A, 0xA9, 0xFF, 0x55), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.1f };
+        foreach (var (name, rings) in ParseOblasts())
+        {
+            using var path = new SKPath();
+            foreach (var ring in rings)
+            {
+                if (ring.Count < 3) continue;
+                path.MoveTo(P(ring[0][0], ring[0][1]));
+                for (int i = 1; i < ring.Count; i++) path.LineTo(P(ring[i][0], ring[i][1]));
+                path.Close();
+            }
+            canvas.DrawPath(path, land);
+            if (heat.TryGetValue(name, out var h) && h > 0)
+            {
+                double k = Math.Sqrt((double)h / hmax);                       // √ — щоб «малі» області теж було видно
+                using var fill = new SKPaint { Color = new SKColor(0x8B, 0x5C, 0xF6, (byte)(40 + 150 * k)), IsAntialias = true };
+                canvas.DrawPath(path, fill);
+            }
+            canvas.DrawPath(path, border);
+        }
+
+        // Міста.
+        using var cityDot = new SKPaint { Color = new SKColor(0xAF, 0xBD, 0xD4), IsAntialias = true };
+        using var cityText = new SKPaint { Color = new SKColor(0xC7, 0xD2, 0xE3), IsAntialias = true, TextSize = 14 };
+        using var cityHalo = new SKPaint { Color = new SKColor(0x0A, 0x0E, 0x17), IsAntialias = true, TextSize = 14, Style = SKPaintStyle.Stroke, StrokeWidth = 3 };
+        foreach (var (nm, lon, lat) in Cities)
+        {
+            var cp = P(lon, lat);
+            canvas.DrawCircle(cp, 2.4f, cityDot);
+            canvas.DrawText(nm, cp.X + 5, cp.Y - 4, cityHalo);
+            canvas.DrawText(nm, cp.X + 5, cp.Y - 4, cityText);
+        }
+
+        // Сліди цілей: одна точка на місце+тип, розмір ~ скільки разів/скільки бортів туди летіло.
+        foreach (var g in d.Points.GroupBy(p => (Math.Round(p.Lat, 2), Math.Round(p.Lon, 2), CatOf(p.Kind))))
+        {
+            var p0 = g.First();
+            int n = g.Sum(p => p.N);
+            var pt = P(p0.Lon, p0.Lat);
+            var c = KindColor(p0.Kind);
+            float r = (float)Math.Min(16, 3 + Math.Sqrt(n) * 1.8);
+            using (var glow = new SKPaint { Color = c.WithAlpha(0x33), IsAntialias = true, MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 6) })
+                canvas.DrawCircle(pt, r + 4, glow);
+            using var dot = new SKPaint { Color = c.WithAlpha(0xC0), IsAntialias = true };
+            canvas.DrawCircle(pt, r, dot);
+        }
+
+        // Вибухи: червоне кільце + спалах.
+        using var boomFill = new SKPaint { Color = new SKColor(0xFF, 0x2D, 0x2D), IsAntialias = true };
+        using var boomRing = new SKPaint { Color = new SKColor(0xFF, 0xD1, 0x4D), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2.2f };
+        foreach (var g in d.Impacts.GroupBy(i => (Math.Round(i.Lat, 2), Math.Round(i.Lon, 2))))
+        {
+            var pt = P(g.First().Lon, g.First().Lat);
+            canvas.DrawCircle(pt, 6 + Math.Min(6, g.Count()), boomFill);
+            canvas.DrawCircle(pt, 10 + Math.Min(8, g.Count() * 1.5f), boomRing);
+        }
+
+        // Заголовок + цифри.
+        using var title = new SKPaint { Color = SKColors.White, IsAntialias = true, TextSize = 30, FakeBoldText = true };
+        using var sub = new SKPaint { Color = new SKColor(0xC4, 0xB5, 0xFD), IsAntialias = true, TextSize = 20, FakeBoldText = true };
+        using var muted = new SKPaint { Color = new SKColor(0x9A, 0xA6, 0xB8), IsAntialias = true, TextSize = 16 };
+        canvas.DrawText("WarAlarm · Підсумок ночі", pad + 2, 36, title);
+        canvas.DrawText(NightSummary.Period(d), W - 260, 36, muted);
+        var stats = new List<string>();
+        if (d.Launched > 0) stats.Add($"🚀 запущено ~{d.Launched}");
+        if (d.MaxAir > 0) stats.Add($"макс. у повітрі ~{d.MaxAir}");
+        if (d.Impacts.Count > 0) stats.Add($"вибухів (Київ) {d.Impacts.Count}");
+        canvas.DrawText(stats.Count > 0 ? string.Join("  ·  ", stats).Replace("🚀 ", "") : "Ніч була відносно спокійною", pad + 2, 68, sub);
+        var top = d.TopOblasts(5);
+        if (top.Count > 0)
+            canvas.DrawText("Найбільше цілей: " + string.Join(", ", top.Select(t => t.oblast)), pad + 2, 96, muted);
+
+        // Легенда.
+        float ly = H - 18;
+        using var lg1 = new SKPaint { Color = new SKColor(0x8B, 0x5C, 0xF6, 0xB0), IsAntialias = true };
+        canvas.DrawRect(pad + 2, ly - 12, 14, 14, lg1); canvas.DrawText("інтенсивність", pad + 22, ly, muted);
+        using var lg2 = new SKPaint { Color = KindColor(ThreatKind.Drone), IsAntialias = true };
+        canvas.DrawCircle(pad + 150, ly - 5, 6, lg2); canvas.DrawText("шахеди", pad + 162, ly, muted);
+        using var lg3 = new SKPaint { Color = KindColor(ThreatKind.Missile), IsAntialias = true };
+        canvas.DrawCircle(pad + 250, ly - 5, 6, lg3); canvas.DrawText("ракети", pad + 262, ly, muted);
+        canvas.DrawCircle(pad + 345, ly - 5, 6, boomFill); canvas.DrawText("вибухи", pad + 357, ly, muted);
+
+        using var img = SKImage.FromBitmap(bmp);
+        using var data = img.Encode(SKEncodedImageFormat.Png, 90);
+        return data.ToArray();
+    }
+
     static SKColor KindColor(ThreatKind k) => k switch
     {
         ThreatKind.Ballistic => new SKColor(0xFF, 0x3B, 0x30),
