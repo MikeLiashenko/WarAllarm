@@ -18,33 +18,40 @@ public static class LaunchFeed
         ("міллеров", "Міллерово"), ("брянськ", "Брянськ"), ("орл", "Орел"), ("орел", "Орел"),
         ("крим", "Крим"), ("шаталов", "Шаталово"), ("навл", "Навля"), ("гвардійськ", "Гвардійське"),
         ("донецьк", "Донецьк"), ("бєлгород", "Бєлгород"), ("білгород", "Бєлгород"), ("чауд", "Чауда"),
+        ("саки", "Саки"), ("єйськ", "Єйськ"), ("ростов", "Ростов"), ("воронеж", "Воронеж"), ("тамбов", "Тамбов"),
+        ("ліпецьк", "Ліпецьк"), ("калуг", "Калуга"), ("шайков", "Шайковка"), ("халін", "Халіно"),
+        ("морозовськ", "Морозовськ"), ("енгельс", "Енгельс"), ("каспі", "Каспій"), ("азов", "Азовське море"),
+        ("макіїв", "Макіївка"), ("горлівк", "Горлівка"), ("луганськ", "Луганськ"), ("таганрог", "Таганрог"),
     };
 
-    static string Canon(string raw)
+    // Відоме місце → канон; невідоме → null (крім явного «з Місто» з великої літери).
+    static string? Canon(string raw, bool afterZ)
     {
         var l = raw.ToLowerInvariant();
         foreach (var (stem, name) in Origins) if (l.Contains(stem)) return name;
-        return raw.Trim(' ', '.', ',', ';', ':');
+        var t = raw.Trim(' ', '.', ',', ';', ':');
+        return afterZ && t.Length >= 3 && char.IsUpper(t[0]) && !t.Contains('?') ? t : null;
     }
 
     /// Пост про пуск шахедів → хвиля з розбивкою. null, якщо це не пуск.
     public static LaunchBatch? ParseLaunch(string post)
     {
         var low = post.ToLowerInvariant();
-        if (!Regex.IsMatch(low, @"пуск|запуск|запустил")) return null;
-        if (!Regex.IsMatch(low, @"шахед|шахід|дрон|бпла|герань")) return null;
+        // Саме «пуск(и/ах) шахедів/дронів» — а не будь-яке «запускаємо» в поясненнях.
+        if (!Regex.IsMatch(low, @"пуск\w*\s+(шахед|шахід|дрон|бпла|герань|ударн)")) return null;
 
         // «N штук [реактивних|звичайних] [з] Місто»
         var items = new List<LaunchItem>();
         foreach (Match mt in Regex.Matches(post,
-            @"(\d{1,3})\s*шт\w*\.?\s*(реактивн\w*|звичайн\w*)?\s*(?:з|із|зі)?\s*([А-ЯІЇЄҐA-Z][^\s\d,;:]*(?:[\s\-.]+[А-ЯІЇЄҐ][^\s\d,;:]*)?)(\s+реактивн\w*)?",
+            @"(\d{1,3})\s*шт\w*\.?\s*(реактивн\w*|звичайн\w*)?\s*(з|із|зі)?\s*([А-ЯІЇЄҐA-Z][^\s\d,;:]*(?:[\s\-.]+[А-ЯІЇЄҐ][^\s\d,;:]*)?)(\s+реактивн\w*)?",
             RegexOptions.IgnoreCase))
         {
             if (!int.TryParse(mt.Groups[1].Value, out var n) || n is <= 0 or > 300) continue;
+            if (Canon(mt.Groups[4].Value, afterZ: mt.Groups[3].Success) is not { } origin) continue; // не аеродром
             bool reactive = mt.Groups[2].Value.StartsWith("реакт", StringComparison.OrdinalIgnoreCase)
-                            || mt.Groups[4].Success // «4 штуки з Криму реактивні» — тип ПІСЛЯ міста
-                            || mt.Groups[3].Value.Contains("реактивн", StringComparison.OrdinalIgnoreCase);
-            items.Add(new(n, reactive, Canon(mt.Groups[3].Value)));
+                            || mt.Groups[5].Success // «4 штуки з Криму реактивні» — тип ПІСЛЯ міста
+                            || mt.Groups[4].Value.Contains("реактивн", StringComparison.OrdinalIgnoreCase);
+            items.Add(new(n, reactive, origin));
         }
         if (items.Count == 0) return null;
 
