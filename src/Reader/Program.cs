@@ -544,7 +544,14 @@ async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNi
         catch (Exception ex) { Console.Error.WriteLine($"⚠ night: @{n} — {ex.Message}"); }
     if (launch.Count == 0) Console.Error.WriteLine("⚠ night: канал пусків не знайдено в діалогах — підпишись на @" + string.Join(", @", launchChannels));
     lock (NightSummary.BallLog) NightSummary.BallLog.Clear();
-    var d = await NightSummary.Collect(client, radars, kyiv, launch, from, to);
+    // Офіційні звіти ПС ЗСУ (райони пуску ракет, напрямки БпЛА). official_channels=kpszsu
+    var offNames = cfg.GetValueOrDefault("official_channels", "kpszsu")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(s => s.TrimStart('@')).ToList();
+    var official = ByNames(offNames);
+    foreach (var n in offNames.Where(n => !official.Any(c => string.Equals(c.username, n, StringComparison.OrdinalIgnoreCase))))
+        try { if ((await client.Contacts_ResolveUsername(n)).chats.Values.OfType<Channel>().FirstOrDefault() is { } c) official.Add(c); }
+        catch (Exception ex) { Console.Error.WriteLine($"⚠ night: @{n} — {ex.Message}"); }
+    var d = await NightSummary.Collect(client, radars, kyiv, launch, official, from, to);
     try { lock (NightSummary.BallLog) File.WriteAllLines("night_ball.log", NightSummary.BallLog); } catch { }
     // Діагностика: які канали знайшлись і що з них зібрано (night.log поруч із night.png).
     try
@@ -553,7 +560,10 @@ async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNi
         File.WriteAllText("night.log",
             $"{DateTime.Now:dd.MM HH:mm:ss} вікно {from:dd.MM HH:mm}→{to:dd.MM HH:mm}\n"
             + $"діалогів-каналів: {mine.Count}\nрадари: {Names(radars)}\nКиїв: {Names(kyiv)}\nпуски: {Names(launch)}\n"
-            + $"точок {d.Points.Count} · вибухів {d.Impacts.Count} · хвиль {d.Waves.Count} · maxAir {d.MaxAir} · балістика {d.Ballistics.Count}\n");
+            + $"точок {d.Points.Count} · вибухів {d.Impacts.Count} · хвиль {d.Waves.Count} · maxAir {d.MaxAir} · балістика {d.Ballistics.Count}\n"
+            + "звіт ПС ЗСУ: " + (d.Official is { } o
+                ? $"ракет {o.Missiles} з [{string.Join(", ", o.MissileSites)}], БпЛА {o.Drones}/{o.Reactive} з [{string.Join(", ", o.DroneSites)}], збито {o.Down}, влучання {o.Hits}"
+                : "не знайдено") + $" · канали: {Names(official)}\n");
     }
     catch { }
     MapWriter.NightJson = NightSummary.StateJson(d);

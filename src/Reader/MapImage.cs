@@ -333,10 +333,20 @@ public static class MapImage
         canvas.DrawText("Рух повітряних цілей", x0, yb + 44, big);
         canvas.DrawText("над територією України", x0, yb + 86, big);
         var parts = new List<string>();
-        if (d.Launched > 0) parts.Add($"запущено ~{d.Launched}");
-        if (d.MaxAir > 0) parts.Add($"макс. у повітрі ~{d.MaxAir}");
-        if (d.Ballistics.Count > 0) parts.Add($"балістика {d.Ballistics.Sum(b => b.N)}");
-        if (d.Impacts.Count > 0) parts.Add($"вибухи {d.Impacts.Count}");
+        if (d.Official is { } o)
+        {   // офіційні цифри ПС ЗСУ
+            if (o.Missiles > 0) parts.Add($"ракет {o.Missiles}");
+            if (o.Drones > 0) parts.Add($"БпЛА {o.Drones}" + (o.Reactive > 0 ? $" ({o.Reactive} реакт.)" : ""));
+            if (o.Down > 0) parts.Add($"збито {o.Down}");
+            if (o.Hits > 0) parts.Add($"влучання {o.Hits}");
+        }
+        else
+        {
+            if (d.Launched > 0) parts.Add($"запущено ~{d.Launched}");
+            if (d.MaxAir > 0) parts.Add($"макс. у повітрі ~{d.MaxAir}");
+            if (d.Ballistics.Count > 0) parts.Add($"балістика {d.Ballistics.Sum(b => b.N)}");
+            if (d.Impacts.Count > 0) parts.Add($"вибухи {d.Impacts.Count}");
+        }
         canvas.DrawText(parts.Count > 0 ? string.Join(" · ", parts) : "Ніч була відносно спокійною", x0, yb + 120, stat);
 
         // Легенда.

@@ -25,7 +25,8 @@ public static class NightSummary
     public record Track(ThreatKind Kind, List<(double lat, double lon)> Pts, string? Site);
 
     public record Data(DateTime From, DateTime To, List<Point> Points, List<Impact> Impacts,
-                       List<LaunchBatch> Waves, int MaxAir, List<Ballistic> Ballistics)
+                       List<LaunchBatch> Waves, int MaxAir, List<Ballistic> Ballistics,
+                       OfficialReport? Official = null) // ранковий звіт ПС ЗСУ, якщо знайшовся
     {
         public int Launched => Waves.Sum(w => w.Total);
         /// Області за кількістю згадок цілей (сума ×N по постах) — «куди летіло найбільше».
@@ -40,6 +41,8 @@ public static class NightSummary
         {
             var s = Waves.SelectMany(w => w.Items.Select(i => i.Origin))
                          .Where(o => LaunchFeed.SiteCoords(o) is not null).Distinct().ToList();
+            // Офіційні напрямки запуску БпЛА зі звіту ПС ЗСУ — головне джерело.
+            if (Official is { DroneSites.Count: > 0 } o) return o.DroneSites.Union(s).ToList();
             return s.Count > 0 ? s : LaunchFeed.AllSites.ToList();
         }
     }
@@ -189,7 +192,7 @@ public static class NightSummary
     }
 
     public static async Task<Data> Collect(WTelegram.Client client,
-        IEnumerable<Channel> radars, IEnumerable<Channel> kyivLocal, IEnumerable<Channel> launch,
+        IEnumerable<Channel> radars, IEnumerable<Channel> kyivLocal, IEnumerable<Channel> launch, IEnumerable<Channel> officialChs,
         DateTime from, DateTime to)
     {
         var points = new List<Point>();
@@ -255,7 +258,23 @@ public static class NightSummary
         // Ті самі пуски пишуть кілька каналів → рахуємо з радара; інші — тільки як запасний варіант.
         var ballistics = ball.Count > 0 ? ball : ballOther;
 
-        return new(from, to, points, impacts, waves, maxAir, ballistics);
+        // Ранковий звіт ПС ЗСУ виходить ~09:00 — шукаємо до +6 год після кінця вікна.
+        OfficialReport? official = null;
+        foreach (var ch in officialChs.DistinctBy(c => c.ID))
+            foreach (var m in await Safe(() => History(client, ch, to.AddHours(-3), to.AddHours(6))))
+                if (OfficialReports.Parse(m.message) is { } rep) { official = rep; break; }
+        // Офіційний звіт ПС ЗСУ знайдено → райони пуску ракет переназначаємо на найближчий
+        // з НАЗВАНИХ у звіті (а не з загального списку).
+        if (official is { MissileSites.Count: > 0 })
+            ballistics = ballistics.Select(b =>
+            {
+                if (!b.Guessed) return b;
+                var site = official.MissileSites.OrderBy(s => ThreatGeo.Km(LaunchFeed.SiteCoords(s)!.Value, (b.TLat, b.TLon))).First();
+                var sc = LaunchFeed.SiteCoords(site)!.Value;
+                return b with { Origin = site, OLat = sc.lat, OLon = sc.lon };
+            }).ToList();
+
+        return new(from, to, points, impacts, waves, maxAir, ballistics, official);
     }
 
     static async Task<List<Message>> Safe(Func<Task<List<Message>>> f)
@@ -274,6 +293,19 @@ public static class NightSummary
         string T(string s) => html ? H(s) : s;
         var sb = new StringBuilder();
         sb.AppendLine("🌙 " + B("Підсумок ночі") + " · " + T(Period(d)));
+        if (d.Official is { } o)
+        {
+            sb.AppendLine("🛡 " + B("За даними Повітряних Сил:"));
+            if (o.Missiles > 0)
+                sb.AppendLine($"🔴 Ракет: {o.Missiles}" + (o.MissileTypes.Length > 0 ? $" ({T(o.MissileTypes)})" : "")
+                    + (o.MissileSites.Count > 0 ? " — з: " + T(string.Join(", ", o.MissileSites)) : ""));
+            if (o.Drones > 0)
+                sb.AppendLine($"🟡 БпЛА: {o.Drones}" + (o.Reactive > 0 ? $" (з них реактивних {o.Reactive})" : "")
+                    + (o.DroneSites.Count > 0 ? " — з: " + T(string.Join(", ", o.DroneSites)) : ""));
+            if (o.Down > 0) sb.AppendLine($"✅ Збито/подавлено: {o.Down}");
+            if (o.Hits > 0) sb.AppendLine($"💥 Влучання: {o.Hits} локацій");
+            sb.AppendLine();
+        }
         if (d.Launched > 0)
             sb.AppendLine($"🚀 Запущено шахедів: ~{d.Launched} (хвиль: {d.Waves.Count}"
                 + (d.Waves.Sum(w => w.Items.Where(i => i.Reactive).Sum(i => i.N)) is > 0 and var r ? $", реактивних ~{r}" : "") + ")");
@@ -285,7 +317,9 @@ public static class NightSummary
             var byT = d.Ballistics.GroupBy(b => b.Target).OrderByDescending(g => g.Sum(b => b.N))
                        .Take(6).Select(g => $"{g.Key} {g.Sum(b => b.N)}");
             sb.AppendLine($"🔴 Балістика: {d.Ballistics.Sum(b => b.N)} — " + T(string.Join(", ", byT))
-                + (d.Ballistics.Any(b => b.Guessed) ? " (місця пуску орієнтовні)" : ""));
+                + (!d.Ballistics.Any(b => b.Guessed) ? ""
+                   : d.Official is { MissileSites.Count: > 0 } ? " (райони пуску — за звітом ПС ЗСУ)"
+                   : " (місця пуску орієнтовні)"));
         }
         if (d.MaxAir > 0) sb.AppendLine($"🛸 Максимум одночасно в повітрі: ~{d.MaxAir}");
         var top = d.TopOblasts(5);
