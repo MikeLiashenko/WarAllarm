@@ -1082,6 +1082,33 @@ if (args.Length >= 2 && args[0].Equals("dump", StringComparison.OrdinalIgnoreCas
     return;
 }
 
+// ── Вступить в ЗАКРЫТЫЙ канал по инвайту + показать приватные каналы (ID + посты) ─
+//   dotnet run -- joininvite <hash|ссылка t.me/+hash>
+if (args.Length >= 2 && args[0].Equals("joininvite", StringComparison.OrdinalIgnoreCase))
+{
+    var hash = Regex.Match(args[1], @"([A-Za-z0-9_-]{12,})\s*$").Groups[1].Value;
+    try { await client.Messages_ImportChatInvite(hash); Console.WriteLine($"✅ Вступив за інвайтом ({hash})."); }
+    catch (Exception ex) { Console.WriteLine("ℹ import: " + ex.Message + " (можливо, вже учасник)"); }
+    var dialogs = await client.Messages_GetAllDialogs();
+    Console.WriteLine("\n📜 Приватні канали (без @username) — ID · назва · приклади постів:");
+    foreach (var ch in dialogs.chats.Values.OfType<Channel>().Where(c => string.IsNullOrEmpty(c.username)))
+    {
+        Console.WriteLine($"\n  ID={ch.ID}  «{ch.title}»");
+        try
+        {
+            var hist = await client.Messages_GetHistory(ch, limit: 5);
+            foreach (var msg in hist.Messages.OfType<Message>().Reverse())
+            {
+                if (string.IsNullOrWhiteSpace(msg.message)) continue;
+                var t = msg.message.Replace("\r", "").Replace("\n", " ⏎ ").Trim();
+                Console.WriteLine("     · " + (t.Length > 160 ? t[..160] : t));
+            }
+        }
+        catch (Exception ex) { Console.WriteLine("     (історія недоступна: " + ex.Message + ")"); }
+    }
+    return;
+}
+
 // ── Режим CHANNELS: список каналов, на которые ты подписан (с @username) ──────
 //   dotnet run -- channels [фильтр]
 if (args.Length >= 1 && args[0].Equals("channels", StringComparison.OrdinalIgnoreCase))
