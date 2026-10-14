@@ -96,10 +96,15 @@ var privateUaIds = new HashSet<long>(
 // («Повітряний простір | Напрямок ракет» — чітко пише хвилі пусків по аеродромах).
 // Налаштовується: launch_channels=ukraine_pyxx,...
 var launchChannels = new HashSet<string>(
-    cfg.GetValueOrDefault("launch_channels", "ukraine_pyxx")
+    cfg.GetValueOrDefault("launch_channels", "vinny_banut,ukraine_pyxx")
        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
        .Select(s => s.TrimStart('@')),
     StringComparer.OrdinalIgnoreCase);
+// Ті самі канали пусків — ще й за НАЗВОЮ (якщо пішли в приват / змінили @username,
+// як @ukraine_pyxx 14.10). Налаштовується: launch_titles=Напрямок ракет,...
+var launchTitles = cfg.GetValueOrDefault("launch_titles", "Напрямок ракет")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+bool IsLaunchTitle(string? t) => t is { Length: > 0 } && launchTitles.Any(x => t.Contains(x, StringComparison.OrdinalIgnoreCase));
 int airReported = 0;                         // 🚀 «у повітрі» за оцінкою моніторів (@ukraine_pyxx)
 DateTime airReportedAt = DateTime.MinValue;
 LaunchBatch? lastBatch = null;               // остання хвиля пусків
@@ -518,21 +523,37 @@ if (channelPoster is not null)
 // ── 🌙 Підсумок ночі: зібрати з історії каналів → карта + текст + state ────────
 async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNight(DateTime from, DateTime to)
 {
-    async Task<List<Channel>> ByNames(IEnumerable<string> names)
+    // Канали беремо зі списку діалогів (один запит) — а не ResolveUsername на кожен:
+    // його Telegram жорстко лімітує (FLOOD_WAIT), і пуски/«у повітрі» тихо зникали.
+    var mine = new List<Channel>();
+    try { mine = (await client.Messages_GetAllDialogs()).chats.Values.OfType<Channel>().ToList(); }
+    catch (Exception ex) { Console.Error.WriteLine("⚠ night dialogs: " + ex.Message); }
+    List<Channel> ByNames(IEnumerable<string> names)
     {
-        var list = new List<Channel>();
-        foreach (var n in names)
-            try { if ((await client.Contacts_ResolveUsername(n)).chats.Values.OfType<Channel>().FirstOrDefault() is { } c) list.Add(c); }
-            catch { /* недоступний — пропуск */ }
-        return list;
+        var set = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+        return mine.Where(c => c.username is { Length: > 0 } u && set.Contains(u)).ToList();
     }
-    var radars = await ByNames(uaChannels);
-    if (privateUaIds.Count > 0)
-        try { radars.AddRange((await client.Messages_GetAllDialogs()).chats.Values.OfType<Channel>().Where(c => privateUaIds.Contains(c.ID))); }
-        catch { }
-    var kyiv = WatchKyiv ? await ByNames(kyChannels) : new List<Channel>();
-    var launch = await ByNames(launchChannels);
+    var radars = ByNames(uaChannels);
+    radars.AddRange(mine.Where(c => privateUaIds.Contains(c.ID)));
+    var kyiv = WatchKyiv ? ByNames(kyChannels) : new List<Channel>();
+    var launch = ByNames(launchChannels);
+    launch.AddRange(mine.Where(c => IsLaunchTitle(c.title) && !launch.Contains(c)));
+    // Не підписаний (немає в діалогах) — пробуємо разово через ResolveUsername.
+    foreach (var n in launchChannels.Where(n => !launch.Any(c => string.Equals(c.username, n, StringComparison.OrdinalIgnoreCase))))
+        try { if ((await client.Contacts_ResolveUsername(n)).chats.Values.OfType<Channel>().FirstOrDefault() is { } c) launch.Add(c); }
+        catch (Exception ex) { Console.Error.WriteLine($"⚠ night: @{n} — {ex.Message}"); }
+    if (launch.Count == 0) Console.Error.WriteLine("⚠ night: канал пусків не знайдено в діалогах — підпишись на @" + string.Join(", @", launchChannels));
     var d = await NightSummary.Collect(client, radars, kyiv, launch, from, to);
+    // Діагностика: які канали знайшлись і що з них зібрано (night.log поруч із night.png).
+    try
+    {
+        string Names(List<Channel> l) => l.Count == 0 ? "—" : string.Join(", ", l.Select(c => c.username is { Length: > 0 } u ? "@" + u : $"«{c.title}»#{c.ID}"));
+        File.WriteAllText("night.log",
+            $"{DateTime.Now:dd.MM HH:mm:ss} вікно {from:dd.MM HH:mm}→{to:dd.MM HH:mm}\n"
+            + $"діалогів-каналів: {mine.Count}\nрадари: {Names(radars)}\nКиїв: {Names(kyiv)}\nпуски: {Names(launch)}\n"
+            + $"точок {d.Points.Count} · вибухів {d.Impacts.Count} · хвиль {d.Waves.Count} · maxAir {d.MaxAir} · балістика {d.Ballistics.Count}\n");
+    }
+    catch { }
     MapWriter.NightJson = NightSummary.StateJson(d);
     MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now); // підсумок одразу в застосунок
     return (MapImage.RenderNight(d), NightSummary.Caption(d, html: true), NightSummary.Caption(d, html: false), d);
@@ -559,7 +580,7 @@ async Task RunNightLoop(ChannelPoster? channel)
                 try { File.Delete("night.request"); } catch { }
             }
             if (morning) lastMorning = now.Date;
-            var (from, to) = morning ? (now.Date.AddDays(-1).AddHours(16), now) : NightSummary.Window(now);
+            var (from, to) = NightSummary.Window(now); // 18:00 → 08:00
             Ui.Line(ConsoleColor.Magenta, $"🌙 Збираю підсумок ночі {from:dd.MM HH:mm} → {to:dd.MM HH:mm}…");
             var (png, html, plain, d) = await BuildNight(from, to);
             File.WriteAllBytes("night.png", png);
@@ -1455,7 +1476,7 @@ async Task OnUpdate(Update update)
 
     // ── ☢️ РАДІАЦІЙНА/ЯДЕРНА НЕБЕЗПЕКА — найвищий пріоритет над усім ──────────────
     // Тільки з наших моніторених каналів і лише за явним сигналом (NuclearMention).
-    bool isLaunchCh = uname != null && launchChannels.Contains(uname);
+    bool isLaunchCh = (uname != null && launchChannels.Contains(uname)) || IsLaunchTitle(title);
     bool fromOurChannel = isUaPrivate || isLaunchCh || (uname != null &&
         (khChannels.Contains(uname) || kyChannels.Contains(uname) || uaChannels.Contains(uname)));
     if (fromOurChannel && NuclearMention(m.message))
