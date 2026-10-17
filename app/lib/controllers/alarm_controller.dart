@@ -232,7 +232,7 @@ class AlarmController extends ChangeNotifier {
   /// Приліт/над районом (стадія Impact/Overhead) за ≤7 км від обраного місця.
   bool _impactNearHome() {
     for (final pl in _map.selectedPlaces) {
-      for (final t in placeThreats(pl, _map.targets)) {
+      for (final t in placeThreats(pl, _map.alarmTargets)) {
         final d = t.pdist ?? double.infinity;
         if (d <= 7 && (t.stage == 'Impact' || t.stage == 'Overhead')) return true;
       }
@@ -243,7 +243,7 @@ class AlarmController extends ChangeNotifier {
   /// Рядок опису для сильного сигналу «приліт поруч».
   String _impactDetail() {
     for (final pl in _map.selectedPlaces) {
-      for (final t in placeThreats(pl, _map.targets)) {
+      for (final t in placeThreats(pl, _map.alarmTargets)) {
         final d = t.pdist ?? double.infinity;
         if (d <= 7 && (t.stage == 'Impact' || t.stage == 'Overhead')) {
           final where = t.place.isNotEmpty ? ' · ${t.place}' : '';
@@ -258,7 +258,7 @@ class AlarmController extends ChangeNotifier {
   double _nearestKm() {
     var best = double.infinity;
     for (final pl in _map.selectedPlaces) {
-      for (final t in placeThreats(pl, _map.targets)) {
+      for (final t in placeThreats(pl, _map.alarmTargets)) {
         final d = t.pdist ?? double.infinity;
         if (d < best) best = d;
       }
@@ -270,7 +270,7 @@ class AlarmController extends ChangeNotifier {
   RiskResult? _worstRisk() {
     RiskResult? worst;
     for (final pl in _map.selectedPlaces) {
-      final r = riskOf(pl, _map.targets);
+      final r = riskOf(pl, _map.alarmTargets);
       if (worst == null || r.score > worst.score) worst = r;
     }
     return (worst == null || worst.score <= 0) ? null : worst;

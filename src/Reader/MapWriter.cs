@@ -132,7 +132,7 @@ public static class MapWriter
         sb.Append(",\"rows\":"); AppendRows(sb, now);
         // Ймовірність удару (дім + місця) — той самий рушій, що в застосунку.
         // Публікується у Firebase і віддається публічним API (state.risk).
-        sb.Append(",\"risk\":"); RiskModel.AppendJson(sb, home, merged, Config?.Places);
+        sb.Append(",\"risk\":"); RiskModel.AppendJson(sb, home, merged.Where(m => !m.t.Approx).ToList(), Config?.Places); // центр області ≠ ризик
         if (Config is { } cf)
         {
             sb.Append(",\"cfg\":{");

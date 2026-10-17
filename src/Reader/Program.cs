@@ -1006,7 +1006,7 @@ string StatusAt(double lat, double lon)
 {
     var pt = (lat, lon);
     var list = tracker.Active.Where(t => t.Pos is not null).ToList();
-    var a = RiskModel.For(pt, list.Select(t => (t, t.Amount)).ToList());
+    var a = RiskModel.For(pt, list.Where(t => !t.Approx).Select(t => (t, t.Amount)).ToList());
     var sb = new StringBuilder();
     sb.AppendLine($"🎯 Ймовірність удару: {a.Percent}% — {a.Verdict}");
     var near = list.Select(t => (t, km: ThreatGeo.Km(t.Pos!.Value, pt)))
@@ -1036,7 +1036,7 @@ async Task<byte[]?> BuildBotMapPng(bool channel = false)
         return MapImage.Render((HomeLat, HomeLon), live, "WarAlarm · Карта тривог", subtitle, snap.ByPolygon,
             showHome: false, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
     }
-    var a = RiskModel.For((HomeLat, HomeLon), live.Select(t => (t, t.Amount)).ToList());
+    var a = RiskModel.For((HomeLat, HomeLon), live.Where(t => !t.Approx).Select(t => (t, t.Amount)).ToList());
     return MapImage.Render((HomeLat, HomeLon), live, $"WarAlarm · {MyCity}",
         $"Ймовірність удару: {a.Percent}% — {a.Verdict}", snap.ByPolygon,
         showHome: true, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
@@ -1051,7 +1051,7 @@ static string KindName(string cat) => cat switch
 // Детальна ймовірність по ТОЧЦІ: відсоток + типи + головні чинники.
 string RiskAt(double lat, double lon)
 {
-    var list = tracker.Active.Where(t => t.Pos is not null).Select(t => (t, t.Amount)).ToList();
+    var list = tracker.Active.Where(t => t.Pos is not null && !t.Approx).Select(t => (t, t.Amount)).ToList();
     var a = RiskModel.For((lat, lon), list);
     var sb = new StringBuilder();
     sb.AppendLine($"🎯 Ймовірність удару: {a.Percent}% — {a.Verdict}");
@@ -1075,7 +1075,7 @@ string RiskAt(double lat, double lon)
 (bool alarm, string text) AlarmAt(double lat, double lon)
 {
     var pt = (lat, lon);
-    var list = tracker.Active.Where(t => t.Pos is not null).ToList();
+    var list = tracker.Active.Where(t => t.Pos is not null && !t.Approx).ToList(); // приблизні (центр області) — не тривога
     if (list.Count == 0) return (false, "");
     Threat? top = null; double nearest = double.MaxValue;
     foreach (var t in list)

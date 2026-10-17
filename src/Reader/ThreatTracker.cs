@@ -23,6 +23,9 @@ public sealed class Threat
     public ThreatKind Kind;
     public string? Ammo;
     public bool Recon;                    // «розвідка/дорозвідка» — низький пріоритет: не виє, не будить
+    // Приблизна точка: місто не знайдено → центр ОБЛАСТІ (для Київщини це сам Київ!).
+    // На карті показуємо, але тривогу/підліт/пікання від неї НЕ рахуємо.
+    public bool Approx => LastPlace.EndsWith("(обл.)");
     public string? Oblast;                // область із заголовка поста радара (для заміни «кусками»)
     public (double lat, double lon)? Pos; // последняя геопривязка
     public string LastPlace = "";
@@ -234,7 +237,7 @@ public sealed class ThreatTracker
                 // Пикаем только по близким целям (≤55 км). Далёкие по стране — только на карте.
                 // Разведку НЕ пикаем совсем — иначе «орёт постоянно» без реальной угрозы удара.
                 double every = PingEverySec(EtaNow(t, now), t.DistKm);
-                if (!t.Recon && t.DistKm is { } dd && dd <= 55 && (now - t.LastPing).TotalSeconds >= every)
+                if (!t.Recon && !t.Approx && t.DistKm is { } dd && dd <= 55 && (now - t.LastPing).TotalSeconds >= every)
                 {
                     t.LastPing = now;
                     outp.Add(new TrackUpdate(t, false, TrackSound.Ping, Note(t)));
@@ -314,6 +317,7 @@ public sealed class ThreatTracker
     {
         if (t.Stage is TrackStage.Impact or TrackStage.Passed) return t.Stage; // терминальные держим
         if (t.Recon) return TrackStage.Approaching;                            // разведка НЕ воет и не «над районом»
+        if (t.Approx) return TrackStage.Approaching;                           // центр області ≠ реальна позиція
         if (t.Kind == ThreatKind.Ballistic) return TrackStage.Imminent;        // всегда секунды
         double? eta = t.EtaMin;
         double dist = t.DistKm ?? 999;

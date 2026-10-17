@@ -158,13 +158,17 @@ class MapDataController extends ChangeNotifier {
   /// currently selected place → drives the threat indicator.
   bool get threatActive {
     for (final p in selectedPlaces) {
-      for (final t in _targets) {
+      for (final t in alarmTargets) {
         final relevant = _km(t, p) <= 40 || (p.zone != null && t.zone == p.zone);
         if (relevant && (_rank[t.stage] ?? 0) >= 3) return true;
       }
     }
     return false;
   }
+
+  /// Цілі для ТРИВОГИ: без приблизних «центр області» (інакше будь-який дрон на
+  /// Київщині ставав «над Києвом» і тривога заїдала).
+  List<MapTarget> get alarmTargets => _targets.where((t) => !t.approx).toList();
 
   int get activeCount => _targets.length;
 

@@ -19,6 +19,9 @@ class MapTarget {
   final double? etaMin;
   final int seenMs; // last time this position was observed
   final List<List<double>> trail; // [[lat,lon], ...]
+  /// Приблизна точка: місто не знайдено → центр області (для Київщини це сам Київ).
+  /// Показуємо на карті, але НЕ рахуємо для тривоги.
+  final bool approx;
 
   /// Per-place distance, filled in by the situation logic.
   final double? pdist;
@@ -40,6 +43,7 @@ class MapTarget {
     this.etaMin,
     this.seenMs = 0,
     this.trail = const [],
+    this.approx = false,
     this.pdist,
   });
 
@@ -47,7 +51,7 @@ class MapTarget {
         label: label, cat: cat, lat: lat, lon: lon, zone: zone, stage: stage,
         heading: heading, amount: amount, place: place, dir: dir,
         stageLabel: stageLabel, icon: icon, distKm: distKm, etaMin: etaMin,
-        seenMs: seenMs, trail: trail, pdist: d,
+        seenMs: seenMs, trail: trail, pdist: d, approx: approx,
       );
 
   factory MapTarget.fromMap(Map<dynamic, dynamic> m) {
@@ -68,6 +72,7 @@ class MapTarget {
       distKm: d(m['dist']),
       etaMin: d(m['eta']),
       seenMs: (m['seen'] as num?)?.toInt() ?? 0,
+      approx: m['approx'] == true,
       trail: (m['trail'] as List<dynamic>? ?? [])
           .map((e) => [
                 ((e as List)[0] as num).toDouble(),
