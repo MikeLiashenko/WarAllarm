@@ -31,6 +31,7 @@ void main() {
       MapTarget(label: 'Ракета (Х-101)', cat: 'missile', lat: 48.9, lon: 32.0, heading: 290, kmh: 750, seenMs: now),
     ];
     final key = GlobalKey();
+    final mapKey = GlobalKey<Map3DState>();
     await tester.binding.setSurfaceSize(const Size(1100, 760));
     await tester.pumpWidget(MaterialApp(
       home: RepaintBoundary(
@@ -38,11 +39,12 @@ void main() {
         child: ColoredBox(
           color: AppColors.mapSea,
           child: Map3D(
+            key: mapKey,
             targets: targets,
             home: (lat: 50.362, lon: 30.446),
             homeName: 'Київ',
             oblastWhole: const {'Kharkiv': 'red', 'Sumy': 'yellow', 'Donets\'k': 'red'},
-            oblastLevels: const {'Dnipropetrovs\'k': 'red', 'Zaporizhzhya': 'yellow'},
+            raionLevels: const {'Павлоградський район': 'red', 'Запорізький район': 'yellow', 'Броварський район': 'yellow'},
           ),
         ),
       ),
@@ -53,6 +55,15 @@ void main() {
       final img = await bnd.toImage(pixelRatio: 1);
       final png = await img.toByteData(format: ui.ImageByteFormat.png);
       File('build/map3d_preview.png').writeAsBytesSync(png!.buffer.asUint8List());
+    });
+    // Close-up: camera over Kyiv at ×14 — raion borders, small places, labels.
+    mapKey.currentState!.focusOn(50.45, 30.52, zoom: 14);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.runAsync(() async {
+      final bnd = key.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      final img = await bnd.toImage(pixelRatio: 1);
+      final png = await img.toByteData(format: ui.ImageByteFormat.png);
+      File('build/map3d_zoom.png').writeAsBytesSync(png!.buffer.asUint8List());
     });
   });
 }

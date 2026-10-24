@@ -4,9 +4,11 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/ukraine_geo.dart';
 import '../data/ukraine_oblasts.dart';
+import '../data/ukraine_raions.dart';
 import '../domain/motion.dart';
 import '../models/map_target.dart';
 import '../theme/app_colors.dart';
@@ -14,14 +16,18 @@ import 'glass.dart';
 
 /// 3D threat map: our vector Ukraine on a tiltable, rotatable ground plane.
 ///
-/// * oblasts under an official alarm rise as slabs (red high, partial low);
-/// * every target flies at its own height with a shadow and a drop line —
-///   drones low, cruise missiles a bit lower, КАБ glide down from altitude,
-///   ballistic missiles follow an arc with an apogee between launch and target;
-/// * launches without a known target grow a reach ring on the ground.
+/// * the same alarm picture as the 2D map — whole oblasts under alarm rise as
+///   slabs, partial alarms raise only the affected raions;
+/// * targets fly at their own height with a ground shadow and a drop line —
+///   drones low, cruise missiles lower, КАБ gliding down, ballistic on an arc;
+/// * launches without a known target grow a reach ring on the ground;
+/// * zooms down to village level (×40): raion borders and smaller places
+///   appear as you get closer.
 ///
-/// Drag ↔ rotates, drag ↕ tilts, pinch / wheel zooms, two-finger twist
-/// rotates, double-tap resets. Motion comes from [motionOf] (same as 2D).
+/// Controls (like a maps app): drag — move the map; wheel / pinch — zoom to
+/// the cursor / fingers; right-drag or Ctrl-drag — rotate & tilt; two-finger
+/// twist — rotate; double-tap / double-click — zoom in there; buttons for
+/// rotate / tilt / north. Motion comes from [motionOf] (same as 2D).
 class Map3D extends StatefulWidget {
   const Map3D({
     super.key,
@@ -29,7 +35,7 @@ class Map3D extends StatefulWidget {
     required this.home,
     required this.homeName,
     this.oblastWhole = const {},
-    this.oblastLevels = const {},
+    this.raionLevels = const {},
     this.dimTargets = false,
     this.insets = EdgeInsets.zero,
   });
@@ -41,8 +47,8 @@ class Map3D extends StatefulWidget {
   /// Oblasts alarmed as a whole: polygon name → 'red' | 'yellow'.
   final Map<String, String> oblastWhole;
 
-  /// Any official alarm in the oblast (partial too): polygon name → level.
-  final Map<String, String> oblastLevels;
+  /// Raions under alarm (like the official map): «X район» → level.
+  final Map<String, String> raionLevels;
   final bool dimTargets;
   final EdgeInsets insets;
 
@@ -50,62 +56,120 @@ class Map3D extends StatefulWidget {
   State<Map3D> createState() => Map3DState();
 }
 
-class _Oblast3D {
-  _Oblast3D(this.name, this.rings, this.centroid);
+class _Poly {
+  _Poly(this.name, this.rings) {
+    var minLat = 90.0, maxLat = -90.0, minLon = 180.0, maxLon = -180.0, cx = 0.0, cy = 0.0;
+    for (final p in rings.first) {
+      minLat = math.min(minLat, p.dy);
+      maxLat = math.max(maxLat, p.dy);
+      minLon = math.min(minLon, p.dx);
+      maxLon = math.max(maxLon, p.dx);
+      cx += p.dx;
+      cy += p.dy;
+    }
+    bbox = (minLat: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon);
+    centroid = Offset(cx / rings.first.length, cy / rings.first.length);
+  }
   final String name;
   final List<List<Offset>> rings; // (lon, lat)
-  final Offset centroid;
+  late final ({double minLat, double maxLat, double minLon, double maxLon}) bbox;
+  late final Offset centroid;
+}
+
+List<_Poly> _parsePolys(String json) {
+  final data = jsonDecode(json) as List;
+  return [
+    for (final o in data)
+      _Poly((o['n'] ?? '').toString(), [
+        for (final ring in (o['r'] as List))
+          [for (final p in (ring as List)) Offset((p[0] as num).toDouble(), (p[1] as num).toDouble())],
+      ]),
+  ];
+}
+
+String _napo(String s) => s.replaceAll('’', "'").replaceAll('ʼ', "'").replaceAll('`', "'");
+
+/// The camera: focus point on the ground, rotation, tilt, zoom → projection
+/// of (lat, lon, height) to the screen and back (screen → ground).
+class _Cam {
+  _Cam({
+    required this.focusLat,
+    required this.focusLon,
+    required this.yaw,
+    required this.tilt,
+    required this.zoom,
+    required Size size,
+    required EdgeInsets insets,
+  }) {
+    final yr = yaw * math.pi / 180, tr = tilt * math.pi / 180;
+    cy = math.cos(yr);
+    sy = math.sin(yr);
+    ct = math.cos(tr);
+    st = math.sin(tr);
+    final w = size.width - insets.horizontal, h = size.height - insets.vertical;
+    f = 0.82 * math.min(w, h * 1.6) * d / 1300 * zoom * (1 + 0.25 * st);
+    cx0 = insets.left + w / 2;
+    cy0 = insets.top + h * (0.5 + 0.06 * st);
+  }
+
+  final double focusLat, focusLon, yaw, tilt, zoom;
+  static const double d = 1800; // camera distance, km
+  static final double cosLat = math.cos(48.6 * math.pi / 180);
+  late final double cy, sy, ct, st, f, cx0, cy0;
+
+  /// Heights shrink as you zoom in, so slabs and badges don't tower over a town.
+  double get hScale => 1 / math.pow(math.max(1, zoom), 0.55);
+
+  ({Offset o, double depth}) proj(double lat, double lon, [double z = 0]) {
+    final x = (lon - focusLon) * 111.32 * cosLat;
+    final y = (lat - focusLat) * 110.57;
+    final x1 = x * cy - y * sy;
+    final y1 = x * sy + y * cy;
+    final yc = y1 * ct + z * st;
+    final depth = math.max(30.0, d + y1 * st - z * ct);
+    return (o: Offset(cx0 + f * x1 / depth, cy0 - f * yc / depth), depth: depth);
+  }
+
+  /// Screen point → ground (lat, lon), or null when it points above the horizon.
+  ({double lat, double lon})? ground(Offset s) {
+    final v = cy0 - s.dy; // = f * y1 * ct / depth, depth = d + y1 * st
+    final den = f * ct - v * st;
+    if (den <= 1e-6) return null;
+    final y1 = v * d / den;
+    final depth = d + y1 * st;
+    if (depth <= 30) return null;
+    final x1 = (s.dx - cx0) * depth / f;
+    final x = x1 * cy + y1 * sy; // inverse rotation
+    final y = -x1 * sy + y1 * cy;
+    return (lat: focusLat + y / 110.57, lon: focusLon + x / (111.32 * cosLat));
+  }
 }
 
 class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
-  static List<_Oblast3D>? _oblasts;
+  static List<_Poly>? _oblasts;
+  static List<_Poly>? _raions;
   late final AnimationController _anim =
       AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
 
-  double _yaw = -12; // degrees, 0 = north up
-  double _tilt = 52; // degrees, 0 = straight down
+  static const double _homeLat = 48.6, _homeLon = 31.4;
+  double _focusLat = _homeLat, _focusLon = _homeLon;
+  double _yaw = -8; // degrees, 0 = north up
+  double _tilt = 50; // degrees, 0 = straight down
   double _zoom = 1;
+  static const double _minZoom = 0.7, _maxZoom = 40;
 
-  double _startYaw = 0, _startTilt = 0, _startZoom = 1;
-  Offset _startFocal = Offset.zero;
+  Size _size = Size.zero;
+  bool _rotateMode = false; // right mouse / Ctrl held
+  Offset _lastFocal = Offset.zero, _lastPan = Offset.zero;
+  double _lastScale = 1, _lastRotation = 0;
+  Offset _lastTap = Offset.zero;
 
   @override
   void initState() {
     super.initState();
-    _oblasts ??= _parse();
+    _oblasts ??= _parsePolys(kOblastsJson);
+    _raions ??= _parsePolys(kRaionsJson);
   }
-
-  static List<_Oblast3D> _parse() {
-    final data = jsonDecode(kOblastsJson) as List;
-    return [
-      for (final o in data)
-        () {
-          final rings = <List<Offset>>[
-            for (final ring in (o['r'] as List))
-              [
-                for (final p in (ring as List))
-                  Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()),
-              ],
-          ];
-          final outer = rings.first;
-          var cx = 0.0, cy = 0.0;
-          for (final p in outer) {
-            cx += p.dx;
-            cy += p.dy;
-          }
-          return _Oblast3D((o['n'] ?? '').toString(), rings,
-              Offset(cx / outer.length, cy / outer.length));
-        }(),
-    ];
-  }
-
-  void zoomIn() => setState(() => _zoom = (_zoom * 1.3).clamp(0.6, 6.0));
-  void zoomOut() => setState(() => _zoom = (_zoom / 1.3).clamp(0.6, 6.0));
-  void resetView() => setState(() {
-        _yaw = -12;
-        _tilt = 52;
-        _zoom = 1;
-      });
 
   @override
   void dispose() {
@@ -113,152 +177,317 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
     super.dispose();
   }
 
+  _Cam _cam() => _Cam(
+        focusLat: _focusLat,
+        focusLon: _focusLon,
+        yaw: _yaw,
+        tilt: _tilt,
+        zoom: _zoom,
+        size: _size,
+        insets: widget.insets,
+      );
+
+  /// Zoom by [factor] keeping the ground point under [at] fixed on screen.
+  void _zoomAt(Offset at, double factor) {
+    final before = _cam().ground(at);
+    _zoom = (_zoom * factor).clamp(_minZoom, _maxZoom);
+    final after = _cam().ground(at);
+    if (before != null && after != null) {
+      _focusLat += before.lat - after.lat;
+      _focusLon += before.lon - after.lon;
+    }
+    _clampFocus();
+  }
+
+  /// Move the map so the ground under [from] ends up under [to].
+  void _panScreen(Offset from, Offset to) {
+    final cam = _cam();
+    final a = cam.ground(from), b = cam.ground(to);
+    if (a == null || b == null) return;
+    _focusLat += a.lat - b.lat;
+    _focusLon += a.lon - b.lon;
+    _clampFocus();
+  }
+
+  void _clampFocus() {
+    _focusLat = _focusLat.clamp(43.5, 53.5);
+    _focusLon = _focusLon.clamp(21.0, 41.5);
+  }
+
+  Offset get _center => Offset(
+      widget.insets.left + (_size.width - widget.insets.horizontal) / 2,
+      widget.insets.top + (_size.height - widget.insets.vertical) / 2);
+
+  // ── public controls (map screen buttons) ──
+  void zoomIn() => setState(() => _zoomAt(_center, 1.6));
+  void zoomOut() => setState(() => _zoomAt(_center, 1 / 1.6));
+  void resetView() => setState(() {
+        _focusLat = _homeLat;
+        _focusLon = _homeLon;
+        _yaw = -8;
+        _tilt = 50;
+        _zoom = 1;
+      });
+  void rotate(double deg) => setState(() => _yaw = (_yaw + deg) % 360);
+  void tiltBy(double deg) => setState(() => _tilt = (_tilt + deg).clamp(0.0, 75.0));
+  void northUp() => setState(() => _yaw = 0);
+
+  /// Fly the camera to a place (e.g. tapping the place card).
+  void focusOn(double lat, double lon, {double zoom = 6}) => setState(() {
+        _focusLat = lat;
+        _focusLon = lon;
+        _zoom = zoom.clamp(_minZoom, _maxZoom);
+        _clampFocus();
+      });
+
+  bool get _ctrl => HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isShiftPressed;
+
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      onPointerSignal: (s) {
-        if (s is PointerScrollEvent) {
-          setState(() => _zoom =
-              (_zoom * (s.scrollDelta.dy < 0 ? 1.12 : 1 / 1.12)).clamp(0.6, 6.0));
-        }
-      },
-      child: GestureDetector(
-        onDoubleTap: resetView,
-        onScaleStart: (d) {
-          _startYaw = _yaw;
-          _startTilt = _tilt;
-          _startZoom = _zoom;
-          _startFocal = d.localFocalPoint;
-        },
-        onScaleUpdate: (d) {
-          setState(() {
-            final delta = d.localFocalPoint - _startFocal;
-            if (d.pointerCount >= 2) {
-              _zoom = (_startZoom * d.scale).clamp(0.6, 6.0);
-              _yaw = _startYaw - d.rotation * 180 / math.pi;
-            } else {
-              _yaw = _startYaw - delta.dx * 0.35;
-              _tilt = (_startTilt - delta.dy * 0.25).clamp(0.0, 72.0);
-            }
-          });
-        },
-        child: AnimatedBuilder(
-          animation: _anim,
-          builder: (context, _) => CustomPaint(
-            size: Size.infinite,
-            painter: _Map3DPainter(
-              oblasts: _oblasts!,
-              targets: widget.targets,
-              home: widget.home,
-              homeName: widget.homeName,
-              oblastWhole: widget.oblastWhole,
-              oblastLevels: widget.oblastLevels,
-              yaw: _yaw,
-              tilt: _tilt,
-              zoom: _zoom,
-              pulse: _anim.value,
-              nowMs: DateTime.now().millisecondsSinceEpoch,
-              dim: widget.dimTargets,
-              insets: widget.insets,
+    return LayoutBuilder(builder: (context, c) {
+      _size = Size(c.maxWidth, c.maxHeight);
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: Listener(
+              onPointerDown: (e) => _rotateMode = (e.buttons & kSecondaryMouseButton) != 0 || _ctrl,
+              onPointerSignal: (s) {
+                if (s is PointerScrollEvent) {
+                  // Wheel: zoom to the cursor (bigger steps for a real wheel notch).
+                  final dy = s.scrollDelta.dy;
+                  if (dy == 0) return;
+                  final f = math.pow(1.0035, -dy.clamp(-240.0, 240.0)).toDouble();
+                  setState(() => _zoomAt(s.localPosition, f));
+                } else if (s is PointerScaleEvent) {
+                  setState(() => _zoomAt(s.localPosition, s.scale));
+                }
+              },
+              // Trackpad: two fingers move the map, pinch zooms at the fingers.
+              onPointerPanZoomStart: (e) {
+                _lastPan = Offset.zero;
+                _lastScale = 1;
+              },
+              onPointerPanZoomUpdate: (e) => setState(() {
+                final pos = e.localPosition;
+                _panScreen(pos, pos + (e.localPan - _lastPan));
+                _zoomAt(pos, e.scale / _lastScale);
+                _yaw = (_yaw - (e.rotation - _lastRotation) * 180 / math.pi) % 360;
+                _lastPan = e.localPan;
+                _lastScale = e.scale;
+                _lastRotation = e.rotation;
+              }),
+              onPointerPanZoomEnd: (_) => _lastRotation = 0,
+              child: GestureDetector(
+                // Touch & mouse only — trackpad gestures are handled above, otherwise a
+                // two-finger scroll was read as a drag and the map drifted away.
+                supportedDevices: const {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.stylus,
+                  PointerDeviceKind.invertedStylus,
+                },
+                trackpadScrollCausesScale: false,
+                // Count the drag from the touch-down point, not after the slop — the
+                // first pixels of a pan used to be lost.
+                dragStartBehavior: DragStartBehavior.down,
+                onDoubleTapDown: (d) => _lastTap = d.localPosition,
+                onDoubleTap: () => setState(() => _zoomAt(_lastTap, 2)),
+                onScaleStart: (d) {
+                  _lastFocal = d.localFocalPoint;
+                  _lastScale = 1;
+                  _lastRotation = 0;
+                },
+                onScaleUpdate: (d) {
+                  setState(() {
+                    final delta = d.localFocalPoint - _lastFocal;
+                    if (d.pointerCount >= 2) {
+                      // Pinch zoom at the fingers, twist rotates, both move pans.
+                      _zoomAt(d.localFocalPoint, d.scale / _lastScale);
+                      _yaw = (_yaw - (d.rotation - _lastRotation) * 180 / math.pi) % 360;
+                      _panScreen(_lastFocal, d.localFocalPoint);
+                    } else if (_rotateMode) {
+                      _yaw = (_yaw - delta.dx * 0.35) % 360;
+                      _tilt = (_tilt - delta.dy * 0.3).clamp(0.0, 75.0);
+                    } else {
+                      _panScreen(_lastFocal, d.localFocalPoint);
+                    }
+                    _lastFocal = d.localFocalPoint;
+                    _lastScale = d.scale;
+                    _lastRotation = d.rotation;
+                  });
+                },
+                onScaleEnd: (_) => _rotateMode = false,
+                child: AnimatedBuilder(
+                  animation: _anim,
+                  builder: (context, _) => CustomPaint(
+                    size: Size.infinite,
+                    painter: _Map3DPainter(
+                      cam: _cam(),
+                      oblasts: _oblasts!,
+                      raions: _raions!,
+                      targets: widget.targets,
+                      home: widget.home,
+                      oblastWhole: widget.oblastWhole,
+                      raionLevels: {for (final e in widget.raionLevels.entries) _napo(e.key): e.value},
+                      pulse: _anim.value,
+                      nowMs: DateTime.now().millisecondsSinceEpoch,
+                      dim: widget.dimTargets,
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
+          // Rotate / tilt / north — bottom-right, above the place card.
+          Positioned(
+            right: widget.insets.right + 12,
+            bottom: widget.insets.bottom + 8,
+            child: _Controls3D(
+              yaw: _yaw,
+              onRotate: rotate,
+              onTilt: tiltBy,
+              onNorth: northUp,
+            ),
+          ),
+        ],
+      );
+    });
+  }
+}
+
+class _Controls3D extends StatelessWidget {
+  const _Controls3D({
+    required this.yaw,
+    required this.onRotate,
+    required this.onTilt,
+    required this.onNorth,
+  });
+  final double yaw;
+  final ValueChanged<double> onRotate, onTilt;
+  final VoidCallback onNorth;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget b(IconData i, String tip, VoidCallback f) => Tooltip(
+          message: tip,
+          child: InkResponse(
+            onTap: f,
+            radius: 20,
+            child: SizedBox(width: 38, height: 38, child: Icon(i, size: 20, color: AppColors.textPrimary)),
+          ),
+        );
+    return Glass(
+      radius: 20,
+      padding: const EdgeInsets.all(4),
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Compass: tap → north up.
+          Tooltip(
+            message: 'Північ угорі',
+            child: InkResponse(
+              onTap: onNorth,
+              radius: 20,
+              child: SizedBox(
+                width: 38,
+                height: 38,
+                child: Transform.rotate(
+                  angle: -yaw * math.pi / 180,
+                  child: CustomPaint(painter: _NeedlePainter()),
+                ),
+              ),
+            ),
+          ),
+          b(Icons.rotate_left_rounded, 'Повернути ліворуч', () => onRotate(-20)),
+          b(Icons.rotate_right_rounded, 'Повернути праворуч', () => onRotate(20)),
+          b(Icons.keyboard_double_arrow_up_rounded, 'Нахилити (більше 3D)', () => onTilt(10)),
+          b(Icons.keyboard_double_arrow_down_rounded, 'Вирівняти (згори)', () => onTilt(-10)),
+        ],
         ),
       ),
     );
   }
 }
 
-// ── Painter ─────────────────────────────────────────────────────────────────
+class _NeedlePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final n = Path()
+      ..moveTo(c.dx, c.dy - 13)
+      ..lineTo(c.dx + 5, c.dy)
+      ..lineTo(c.dx - 5, c.dy)
+      ..close();
+    final s = Path()
+      ..moveTo(c.dx, c.dy + 13)
+      ..lineTo(c.dx + 5, c.dy)
+      ..lineTo(c.dx - 5, c.dy)
+      ..close();
+    canvas.drawPath(n, Paint()..color = AppColors.threat);
+    canvas.drawPath(s, Paint()..color = AppColors.textMuted);
+  }
 
-const double _lat0 = 48.6, _lon0 = 31.4; // camera focus: centre of Ukraine
-final double _cosLat0 = math.cos(_lat0 * math.pi / 180);
-
-class _P {
-  const _P(this.o, this.depth);
-  final Offset o;
-  final double depth;
+  @override
+  bool shouldRepaint(_NeedlePainter old) => false;
 }
+
+// ── Painter ─────────────────────────────────────────────────────────────────
 
 class _Map3DPainter extends CustomPainter {
   _Map3DPainter({
+    required this.cam,
     required this.oblasts,
+    required this.raions,
     required this.targets,
     required this.home,
-    required this.homeName,
     required this.oblastWhole,
-    required this.oblastLevels,
-    required this.yaw,
-    required this.tilt,
-    required this.zoom,
+    required this.raionLevels,
     required this.pulse,
     required this.nowMs,
     required this.dim,
-    required this.insets,
   });
 
-  final List<_Oblast3D> oblasts;
+  final _Cam cam;
+  final List<_Poly> oblasts, raions;
   final List<MapTarget> targets;
   final ({double lat, double lon}) home;
-  final String homeName;
   final Map<String, String> oblastWhole;
-  final Map<String, String> oblastLevels;
-  final double yaw, tilt, zoom, pulse;
+  final Map<String, String> raionLevels; // apostrophes normalised
+  final double pulse;
   final int nowMs;
   final bool dim;
-  final EdgeInsets insets;
 
-  late double _cy, _sy, _ct, _st, _d, _f, _cx0, _cy0;
-
-  static const _bigCities = {
-    'Київ', 'Харків', 'Одеса', 'Дніпро', 'Львів', 'Запоріжжя', 'Кривий Ріг', 'Миколаїв',
-    'Вінниця', 'Херсон', 'Полтава', 'Чернігів', 'Черкаси', 'Суми', 'Житомир',
-    'Хмельницький', 'Рівне', 'Луцьк', 'Тернопіль', 'Ужгород', 'Івано-Франківськ',
-    'Чернівці', 'Кропивницький', 'Кропивницкий', 'Донецьк', 'Донецк', 'Луганськ', 'Луганск',
-    'Сімферополь', 'Маріуполь',
-  };
   static const _red = Color(0xFFC0303F);
   static const _yellow = Color(0xFFD9B21F);
+  late Rect _view;
 
-  void _setup(Size size) {
-    final yr = yaw * math.pi / 180, tr = tilt * math.pi / 180;
-    _cy = math.cos(yr);
-    _sy = math.sin(yr);
-    _ct = math.cos(tr);
-    _st = math.sin(tr);
-    _d = 1800; // camera distance, km
-    final w = size.width - insets.horizontal, h = size.height - insets.vertical;
-    // Ukraine (~1300 km wide) fills ~92% of the narrower usable side at zoom 1.
-    // Tilted view foreshortens the country — scale up so it still fills the view.
-    _f = 0.82 * math.min(w, h * 1.6) * _d / 1300 * zoom * (1 + 0.25 * _st);
-    _cx0 = insets.left + w / 2;
-    _cy0 = insets.top + h * (0.5 + 0.06 * _st);
-  }
-
-  /// (lat, lon, height km) → screen point + depth (for painter's ordering).
-  _P _proj(double lat, double lon, [double z = 0]) {
-    final x = (lon - _lon0) * 111.32 * _cosLat0;
-    final y = (lat - _lat0) * 110.57;
-    final x1 = x * _cy - y * _sy;
-    final y1 = x * _sy + y * _cy;
-    final yc = y1 * _ct + z * _st;
-    final depth = math.max(50.0, _d + y1 * _st - z * _ct);
-    return _P(Offset(_cx0 + _f * x1 / depth, _cy0 - _f * yc / depth), depth);
+  /// Roughly on screen (bbox corners projected) — skips far-away polygons when zoomed.
+  bool _visible(_Poly p) {
+    if (cam.zoom < 2) return true;
+    final b = p.bbox;
+    final a1 = cam.proj(b.minLat, b.minLon).o, a2 = cam.proj(b.minLat, b.maxLon).o;
+    final a3 = cam.proj(b.maxLat, b.minLon).o, a4 = cam.proj(b.maxLat, b.maxLon).o;
+    final r = Rect.fromPoints(a1, a2).expandToInclude(Rect.fromPoints(a3, a4));
+    return r.overlaps(_view);
   }
 
   Path _ring(List<Offset> ring, double z) {
     final p = Path();
     for (var i = 0; i < ring.length; i++) {
-      final s = _proj(ring[i].dy, ring[i].dx, z).o;
+      final s = cam.proj(ring[i].dy, ring[i].dx, z).o;
       i == 0 ? p.moveTo(s.dx, s.dy) : p.lineTo(s.dx, s.dy);
     }
     return p..close();
   }
 
+  double _depthOf(_Poly p) => cam.proj(p.centroid.dy, p.centroid.dx).depth;
+
   @override
   void paint(Canvas canvas, Size size) {
-    _setup(size);
+    _view = (Offset.zero & size).inflate(80);
 
-    // Sky → horizon haze, so the tilted plane reads as 3D.
     canvas.drawRect(
         Offset.zero & size,
         Paint()
@@ -270,72 +499,99 @@ class _Map3DPainter extends CustomPainter {
               AppColors.mapSea,
             ],
           ).createShader(Offset.zero & size));
-
     _grid(canvas);
 
     // Ground: every oblast, far first.
-    final sorted = [...oblasts]
-      ..sort((a, b) => _proj(b.centroid.dy, b.centroid.dx).depth
-          .compareTo(_proj(a.centroid.dy, a.centroid.dx).depth));
+    final obs = oblasts.where(_visible).toList()..sort((a, b) => _depthOf(b).compareTo(_depthOf(a)));
     final land = Paint()..color = AppColors.mapLand;
     final edge = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.9
+      ..strokeWidth = 1.0
       ..strokeJoin = StrokeJoin.round
-      ..color = AppColors.primary.withValues(alpha: 0.45);
-    for (final ob in sorted) {
+      ..color = AppColors.primary.withValues(alpha: 0.5);
+    for (final ob in obs) {
       for (final r in ob.rings) {
-        final p = _ring(r, 0);
-        canvas.drawPath(p, land);
-        canvas.drawPath(p, edge);
+        canvas.drawPath(_ring(r, 0), land);
+      }
+    }
+    // Raion borders once you're close enough to care.
+    if (cam.zoom >= 2.2) {
+      final rb = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.6
+        ..color = AppColors.textMuted.withValues(alpha: 0.25);
+      for (final r in raions) {
+        if (!_visible(r)) continue;
+        for (final ring in r.rings) {
+          canvas.drawPath(_ring(ring, 0), rb);
+        }
+      }
+    }
+    for (final ob in obs) {
+      for (final r in ob.rings) {
+        canvas.drawPath(_ring(r, 0), edge);
       }
     }
 
-    // Alarmed oblasts rise as slabs (far first; sides, then the lid).
-    for (final ob in sorted) {
+    // Alarm slabs — same picture as the 2D map: whole oblasts, else the raions.
+    final hs = cam.hScale;
+    final slabs = <(double, List<Offset>, double, Color)>[];
+    for (final ob in obs) {
       final whole = oblastWhole[ob.name];
-      final any = whole ?? oblastLevels[ob.name];
-      if (any == null) continue;
-      final red = any == 'red';
-      final h = whole != null ? (red ? 26.0 : 14.0) : 7.0;
-      final base = red ? _red : _yellow;
+      if (whole == null) continue;
       for (final r in ob.rings) {
-        _slab(canvas, r, h, base);
+        slabs.add((_depthOf(ob), r, (whole == 'red' ? 24.0 : 14.0) * hs, whole == 'red' ? _red : _yellow));
       }
     }
+    for (final r in raions) {
+      final lvl = raionLevels[_napo(r.name)];
+      if (lvl == null || !_visible(r)) continue;
+      for (final ring in r.rings) {
+        slabs.add((_depthOf(r), ring, (lvl == 'red' ? 12.0 : 8.0) * hs, lvl == 'red' ? _red : _yellow));
+      }
+    }
+    slabs.sort((a, b) => b.$1.compareTo(a.$1));
+    for (final s in slabs) {
+      _slab(canvas, s.$2, s.$3, s.$4);
+    }
 
-    _cities(canvas);
+    _cities(canvas, size);
     _home(canvas);
 
     if (dim) {
       canvas.saveLayer(Offset.zero & size, Paint()..color = Colors.white.withValues(alpha: 0.4));
     }
-    // Targets far → near so the closest badge is on top.
     final motions = [
       for (final t in targets) (t: t, m: motionOf(t, nowMs, frozen: dim)),
-    ]..sort((a, b) => _proj(b.m.lat, b.m.lon).depth.compareTo(_proj(a.m.lat, a.m.lon).depth));
+    ]..sort((a, b) => cam.proj(b.m.lat, b.m.lon).depth.compareTo(cam.proj(a.m.lat, a.m.lon).depth));
     for (final e in motions) {
       _target(canvas, e.t, e.m);
     }
     if (dim) canvas.restore();
-
-    _compass(canvas, size);
   }
 
   void _grid(Canvas canvas) {
     final g = Paint()
       ..strokeWidth = 0.6
-      ..color = AppColors.textMuted.withValues(alpha: 0.14);
-    for (var lon = 20.0; lon <= 42; lon += 2) {
-      final pts = [for (var lat = 43.0; lat <= 54; lat += 0.5) _proj(lat, lon).o];
-      for (var i = 1; i < pts.length; i++) {
-        canvas.drawLine(pts[i - 1], pts[i], g);
+      ..color = AppColors.textMuted.withValues(alpha: 0.12);
+    // Finer grid when zoomed in; only around the focus.
+    final step = cam.zoom >= 8 ? 0.25 : cam.zoom >= 3 ? 0.5 : 1.0;
+    final latA = (cam.focusLat - 30 / cam.zoom).clamp(42.0, 55.0), latB = (cam.focusLat + 30 / cam.zoom).clamp(42.0, 55.0);
+    final lonA = (cam.focusLon - 40 / cam.zoom).clamp(19.0, 43.0), lonB = (cam.focusLon + 40 / cam.zoom).clamp(19.0, 43.0);
+    for (var lon = (lonA / step).floor() * step; lon <= lonB; lon += step) {
+      Offset? prev;
+      for (var lat = latA; lat <= latB; lat += step / 4) {
+        final p = cam.proj(lat, lon).o;
+        if (prev != null) canvas.drawLine(prev, p, g);
+        prev = p;
       }
     }
-    for (var lat = 43.0; lat <= 54; lat += 1) {
-      final pts = [for (var lon = 20.0; lon <= 42; lon += 1) _proj(lat, lon).o];
-      for (var i = 1; i < pts.length; i++) {
-        canvas.drawLine(pts[i - 1], pts[i], g);
+    for (var lat = (latA / step).floor() * step; lat <= latB; lat += step) {
+      Offset? prev;
+      for (var lon = lonA; lon <= lonB; lon += step / 4) {
+        final p = cam.proj(lat, lon).o;
+        if (prev != null) canvas.drawLine(prev, p, g);
+        prev = p;
       }
     }
   }
@@ -346,12 +602,10 @@ class _Map3DPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.5
       ..color = base.withValues(alpha: 0.5);
-    // Side walls whose outer face looks at the camera.
-    final n = ring.length;
     final faces = <(double, Path)>[];
-    for (var i = 0; i < n - 1; i++) {
-      final a = _proj(ring[i].dy, ring[i].dx), b = _proj(ring[i + 1].dy, ring[i + 1].dx);
-      final at = _proj(ring[i].dy, ring[i].dx, h), bt = _proj(ring[i + 1].dy, ring[i + 1].dx, h);
+    for (var i = 0; i < ring.length - 1; i++) {
+      final a = cam.proj(ring[i].dy, ring[i].dx), b = cam.proj(ring[i + 1].dy, ring[i + 1].dx);
+      final at = cam.proj(ring[i].dy, ring[i].dx, h), bt = cam.proj(ring[i + 1].dy, ring[i + 1].dx, h);
       final cross = (b.o.dx - a.o.dx) * (at.o.dy - a.o.dy) - (b.o.dy - a.o.dy) * (at.o.dx - a.o.dx);
       if (cross > 0) continue; // back face
       faces.add(((a.depth + b.depth) / 2,
@@ -367,52 +621,72 @@ class _Map3DPainter extends CustomPainter {
       canvas.drawPath(f.$2, side);
       canvas.drawPath(f.$2, sideEdge);
     }
-    // Lid with a soft glow.
     final top = _ring(ring, h);
-    canvas.drawPath(top, Paint()..color = base.withValues(alpha: 0.62));
+    canvas.drawPath(top, Paint()..color = base.withValues(alpha: 0.6));
     canvas.drawPath(
         top,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.3
+          ..strokeWidth = 1.2
           ..color = Color.lerp(base, Colors.white, 0.35)!);
   }
 
-  void _cities(Canvas canvas) {
+  static final Set<MapCity> _big = kBigCities.toSet();
+
+  void _cities(Canvas canvas, Size size) {
+    final z = cam.zoom;
+    final placed = <Rect>[];
+    final screen = Offset.zero & size;
     for (final c in kCities) {
-      // Oblast centres and big cities only (kCities tier 0 also holds city districts).
-      final show = _bigCities.contains(c.name) || (zoom >= 2.2 && c.tier <= 1 && !c.name.contains('район'));
+      final big = _big.contains(c);
+      final show = big ||
+          (c.tier <= 1 && z >= 2.5 && !isCityDistrict(c.name)) ||
+          (c.tier == 0 && z >= 4) ||
+          (c.tier == 2 && z >= 6) ||
+          (c.tier == 3 && z >= 12);
       if (!show) continue;
-      final p = _proj(c.lat, c.lon).o;
-      canvas.drawCircle(p, c.tier == 0 ? 2.4 : 1.7, Paint()..color = AppColors.textSecondary);
-      _text(canvas, c.name, p + const Offset(0, -9), c.tier == 0 ? 10.5 : 9,
-          AppColors.textPrimary.withValues(alpha: 0.85));
+      final p = cam.proj(c.lat, c.lon).o;
+      if (!screen.contains(p)) continue;
+      final fs = big ? 11.0 : c.tier <= 1 ? 10.0 : 9.0;
+      final label = cityLabel(c.name);
+      final box = Rect.fromCenter(center: p + Offset(0, -fs), width: label.length * fs * 0.6 + 6, height: fs * 1.3);
+      if (!big && placed.any((r) => r.overlaps(box))) continue;
+      placed.add(box);
+      canvas.drawCircle(p, big ? 2.6 : c.tier <= 1 ? 2 : 1.4,
+          Paint()..color = big ? AppColors.textPrimary.withValues(alpha: 0.8) : AppColors.textSecondary);
+      _text(canvas, label, p + Offset(0, -fs), fs,
+          (big ? AppColors.textPrimary : AppColors.textSecondary).withValues(alpha: big ? 0.92 : 0.8),
+          bold: big);
     }
   }
 
   void _home(Canvas canvas) {
-    final g = _proj(home.lat, home.lon);
-    final top = _proj(home.lat, home.lon, 18);
+    final g = cam.proj(home.lat, home.lon);
+    final top = cam.proj(home.lat, home.lon, 18 * cam.hScale);
     final c = AppColors.primary;
     canvas.drawCircle(g.o, 6 + 10 * pulse,
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.6
           ..color = c.withValues(alpha: 1 - pulse));
-    canvas.drawLine(g.o, top.o, Paint()..color = c..strokeWidth = 2);
+    canvas.drawLine(g.o, top.o, Paint()
+      ..color = c
+      ..strokeWidth = 2);
     canvas.drawCircle(top.o, 4.5, Paint()..color = c);
     canvas.drawCircle(top.o, 2, Paint()..color = Colors.white);
   }
 
-  /// Display height (km, already exaggerated for readability) of a target.
+  double _apogee(double distKm) => math.min(240.0, 40 + distKm * 0.35);
+
   double _height(MapTarget t, TargetMotion m) {
+    final hs = cam.hScale;
     if (m.isFlight) {
       final p = m.progress!;
-      if (t.cat == 'kab') return 55 * (1 - p); // glides down from the bomber
+      if (t.cat == 'kab') return 55 * (1 - p) * hs;
       final d = kmBetween(t.from![0], t.from![1], t.to![0], t.to![1]);
-      return _apogee(d) * 4 * p * (1 - p); // ballistic arc
+      return _apogee(d) * 4 * p * (1 - p) * hs;
     }
-    return switch (t.cat) {
+    final double base = switch (t.cat) {
       'shahed' => 12,
       'missile' => 9,
       'avia' => 30,
@@ -420,23 +694,22 @@ class _Map3DPainter extends CustomPainter {
       'balist' => 20,
       _ => 10,
     };
+    return base * hs;
   }
-
-  double _apogee(double distKm) => math.min(240.0, 40 + distKm * 0.35);
 
   void _target(Canvas canvas, MapTarget t, TargetMotion m) {
     final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
     final z = _height(t, m);
-    final ground = _proj(m.lat, m.lon);
-    final air = _proj(m.lat, m.lon, z);
+    final ground = cam.proj(m.lat, m.lon);
+    final air = cam.proj(m.lat, m.lon, z);
+    if (!_view.contains(air.o) && !m.isFlight && !m.launch) return;
 
     if (m.launch) {
-      // Reach ring on the ground around the launch site.
-      final pts = <Offset>[
+      final pts = [
         for (var a = 0; a <= 64; a++)
           () {
             final q = moveKm(m.lat, m.lon, a * 360 / 64, m.reachKm);
-            return _proj(q.lat, q.lon).o;
+            return cam.proj(q.lat, q.lon).o;
           }(),
       ];
       final ring = Path()..addPolygon(pts, true);
@@ -460,12 +733,11 @@ class _Map3DPainter extends CustomPainter {
         final p = i / steps;
         final lat = from[0] + (to[0] - from[0]) * p;
         final lon = from[1] + (to[1] - from[1]) * p;
-        final h = kab ? 55 * (1 - p) : _apogee(d) * 4 * p * (1 - p);
-        route.add(_proj(lat, lon, h).o);
-        shadow.add(_proj(lat, lon).o);
+        final h = (kab ? 55 * (1 - p) : _apogee(d) * 4 * p * (1 - p)) * cam.hScale;
+        route.add(cam.proj(lat, lon, h).o);
+        shadow.add(cam.proj(lat, lon).o);
       }
       final flownIdx = (m.progress! * steps).round();
-      // Ground track (shadow), the whole arc faint, the flown part bright.
       _polyline(canvas, shadow, Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
@@ -479,38 +751,32 @@ class _Map3DPainter extends CustomPainter {
         ..strokeWidth = 2.4
         ..strokeCap = StrokeCap.round
         ..color = color);
-      // Aim point on the ground; impact flash once it lands.
-      final aim = _proj(to[0], to[1]).o;
+      final aim = cam.proj(to[0], to[1]).o;
       canvas.drawCircle(
           aim,
           m.landed ? 10 + 26 * pulse : 6 + 4 * math.sin(pulse * 2 * math.pi).abs(),
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.6
-            ..color = (m.landed ? const Color(0xFFFF453A) : color)
-                .withValues(alpha: m.landed ? 1 - pulse : 0.9));
+            ..color = (m.landed ? const Color(0xFFFF453A) : color).withValues(alpha: m.landed ? 1 - pulse : 0.9));
       if (!m.landed && m.flightMin != null) {
         final left = (m.flightMin! * (1 - m.progress!)).clamp(0, 99);
-        _text(canvas, left < 1 ? '<1 хв' : '${left.round()} хв', air.o + const Offset(18, -14),
-            11, color, bold: true);
+        _text(canvas, left < 1 ? '<1 хв' : '${left.round()} хв', air.o + const Offset(20, -14), 11, color, bold: true);
       }
     } else if (!m.launch && t.heading != null) {
-      // Course ahead at flight height.
       final lead = math.min(60.0, speedKmPerMin(t) * 10);
       final q = moveKm(m.lat, m.lon, m.heading, lead);
-      final ahead = _proj(q.lat, q.lon, z).o;
-      _dashed(canvas, air.o, ahead, Paint()
+      _dashed(canvas, air.o, cam.proj(q.lat, q.lon, z).o, Paint()
         ..strokeWidth = 1.3
         ..color = color.withValues(alpha: 0.65));
     }
 
-    // Shadow + drop line + badge in the air.
-    canvas.drawOval(Rect.fromCenter(center: ground.o, width: 14, height: 14 * (1 - 0.6 * _st)),
+    canvas.drawOval(Rect.fromCenter(center: ground.o, width: 14, height: 14 * (1 - 0.6 * cam.st)),
         Paint()..color = Colors.black.withValues(alpha: 0.35));
     _dashed(canvas, ground.o, air.o, Paint()
       ..strokeWidth = 1
       ..color = color.withValues(alpha: 0.45));
-    final r = (12.0 * (_d / air.depth)).clamp(8.0, 16.0);
+    final r = (12.0 * (_Cam.d / air.depth)).clamp(9.0, 16.0);
     canvas.drawCircle(air.o, r + 3,
         Paint()
           ..color = color.withValues(alpha: 0.25)
@@ -521,27 +787,13 @@ class _Map3DPainter extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.8
           ..color = color);
-    paintThreatGlyph(canvas, air.o, r * 1.7, t.cat, color, m.heading - yaw);
+    paintThreatGlyph(canvas, air.o, r * 1.7, t.cat, color, m.heading - cam.yaw);
     if (t.amount > 1) {
       _text(canvas, '×${t.amount}', air.o + Offset(0, -r - 9), 12, AppColors.textPrimary, bold: true);
     }
-  }
-
-  void _compass(Canvas canvas, Size size) {
-    final c = Offset(size.width - insets.right - 30, size.height - insets.bottom - 30);
-    canvas.drawCircle(c, 18, Paint()..color = AppColors.glass);
-    canvas.drawCircle(c, 18,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..color = AppColors.glassBorder);
-    final a = -yaw * math.pi / 180 - math.pi / 2;
-    final tip = c + Offset.fromDirection(a, 12);
-    final tail = c + Offset.fromDirection(a + math.pi, 8);
-    canvas.drawLine(tail, tip, Paint()
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round
-      ..color = AppColors.threat);
-    _text(canvas, 'Пн', c + Offset.fromDirection(a, 26), 9.5, AppColors.textPrimary, bold: true);
+    if (cam.zoom >= 3 && t.place.isNotEmpty) {
+      _text(canvas, t.place, air.o + Offset(0, r + 10), 10, color, bold: true);
+    }
   }
 
   void _polyline(Canvas canvas, List<Offset> pts, Paint paint) {
@@ -552,7 +804,7 @@ class _Map3DPainter extends CustomPainter {
   void _dashed(Canvas canvas, Offset a, Offset b, Paint paint) {
     const dash = 4.0, gap = 4.0;
     final total = (b - a).distance;
-    if (total == 0) return;
+    if (total == 0 || total > 4000) return;
     final dir = (b - a) / total;
     for (var d = 0.0; d < total; d += dash + gap) {
       canvas.drawLine(a + dir * d, a + dir * math.min(d + dash, total), paint);
@@ -567,8 +819,8 @@ class _Map3DPainter extends CustomPainter {
         Shadow(color: AppColors.mapSea, blurRadius: 2),
       ]))
       ..addText(s);
-    final p = b.build()..layout(const ui.ParagraphConstraints(width: 220));
-    canvas.drawParagraph(p, at - Offset(110, p.height / 2));
+    final p = b.build()..layout(const ui.ParagraphConstraints(width: 240));
+    canvas.drawParagraph(p, at - Offset(120, p.height / 2));
   }
 
   @override

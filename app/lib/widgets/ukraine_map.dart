@@ -366,6 +366,8 @@ class _MapPainter extends CustomPainter {
   final Map<String, String> raionLevels;
   final Map<String, String> oblastWhole;
 
+  static final Set<MapCity> _bigSet = kBigCities.toSet();
+
   Offset _toScreen(Offset base) => Offset(tx + scale * base.dx, ty + scale * base.dy);
 
   /// Apostrophe normalization (feed uses U+0027, geometry uses U+2019) so raion
@@ -540,8 +542,12 @@ class _MapPainter extends CustomPainter {
     final placed = <Rect>[]; // label boxes already drawn (collision avoidance)
     final dotCell = <int, int>{}; // per-grid-cell village dot cap (even density)
     for (final c in kCities) {
-      final show = c.tier == 0 ||
-          (c.tier == 1 && scale >= 1.7) ||
+      // Country zoom: real big cities only (tier 0 also holds city districts,
+      // and villages share big-city names) — see kBigCities.
+      final big = c.tier <= 1 && _bigSet.contains(c);
+      final show = big ||
+          (c.tier <= 1 && !isCityDistrict(c.name) && scale >= 1.7) ||
+          (c.tier == 0 && scale >= 1.7) ||
           (c.tier == 2 && scale >= 2.8) ||
           (c.tier == 3 && scale >= 4.2);
       if (!show) continue;
@@ -598,7 +604,7 @@ class _MapPainter extends CustomPainter {
       }
       if (clash) continue;
       placed.add(box.inflate(1));
-      _text(canvas, c.name, p + Offset(0, -(r + 3)),
+      _text(canvas, cityLabel(c.name), p + Offset(0, -(r + 3)),
           fs,
           village ? AppColors.textSecondary : AppColors.textPrimary,
           center: true, stroke: true);

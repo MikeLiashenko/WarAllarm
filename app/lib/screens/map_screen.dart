@@ -18,6 +18,7 @@ import '../widgets/glass.dart';
 import '../widgets/responsive.dart';
 import '../services/local_store.dart';
 import '../widgets/map3d.dart';
+import '../widgets/map_legend.dart';
 import '../widgets/ukraine_map.dart';
 import 'now_screen.dart';
 
@@ -37,6 +38,8 @@ class _MapScreenState extends State<MapScreen> {
 
   /// 3D view on/off (remembered between launches).
   late bool _is3d = context.read<LocalStore>().getBool('map_3d', fallback: false);
+
+  bool _legend = false;
 
   void _toggle3d() {
     setState(() => _is3d = !_is3d);
@@ -76,7 +79,7 @@ class _MapScreenState extends State<MapScreen> {
                       home: (lat: s.place.lat, lon: s.place.lon),
                       homeName: s.place.name,
                       oblastWhole: alerts.oblastWhole,
-                      oblastLevels: alerts.levels,
+                      raionLevels: alerts.raions,
                       dimTargets: s.stale,
                       insets: EdgeInsets.fromLTRB(
                           pad.left, pad.top + (phone ? 90 : 60), phone ? 0 : 60,
@@ -115,6 +118,12 @@ class _MapScreenState extends State<MapScreen> {
           top: pad.top + 12,
           child: _controls(context),
         ),
+        if (_legend)
+          Positioned(
+            right: 66,
+            top: pad.top + 12,
+            child: MapLegend(onClose: () => setState(() => _legend = false)),
+          ),
         Positioned(
           left: pad.left + 12,
           right: phone ? 12 : null,
@@ -165,6 +174,11 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
         ),
+        const SizedBox(height: 8),
+        GlassIconButton(
+            icon: _legend ? Icons.info_rounded : Icons.info_outline_rounded,
+            tooltip: 'Легенда',
+            onTap: () => setState(() => _legend = !_legend)),
         const SizedBox(height: 8),
         GlassIconButton(
             icon: Icons.ios_share_rounded,

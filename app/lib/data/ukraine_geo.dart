@@ -5436,3 +5436,38 @@ double speedKmMin(String cat, String label) {
   if (cat == 'kab') return 15;
   return a.contains('реакт') ? 8 : 3; // shahed ~3 km/min
 }
+
+// ── Map labels ──────────────────────────────────────────────────────────────
+
+const Set<String> _kBigNames = {
+  'Київ', 'Харків', 'Одеса', 'Дніпро', 'Львів', 'Запоріжжя', 'Кривий Ріг', 'Миколаїв',
+  'Вінниця', 'Херсон', 'Полтава', 'Чернігів', 'Черкаси', 'Суми', 'Житомир',
+  'Хмельницький', 'Рівне', 'Луцьк', 'Тернопіль', 'Ужгород', 'Івано-Франківськ',
+  'Чернівці', 'Кропивницький', 'Кропивницкий', 'Донецьк', 'Донецк', 'Луганськ', 'Луганск',
+  'Сімферополь', 'Маріуполь', 'Севастопол', 'Севастополь',
+};
+
+/// Cities labelled at country zoom: the FIRST (largest) entry per name — kCities
+/// is sorted big→small, later same-named entries are villages («Рівне» ×4,
+/// «Миколаїв» near Lviv) — and no city districts.
+final List<MapCity> kBigCities = () {
+  final seen = <String>{};
+  return [
+    for (final c in kCities)
+      if (_kBigNames.contains(c.name) && seen.add(cityLabel(c.name))) c,
+  ];
+}();
+
+/// City districts / odd entries that sit in tier 0 of the source list.
+bool isCityDistrict(String name) =>
+    name.contains('район') ||
+    const {'Салтівка', 'Салтівський', 'Desna', 'Правий Берег', 'Дарниця'}.contains(name);
+
+/// Ukrainian spelling for the few Russian / truncated names in kCities.
+String cityLabel(String name) => const {
+      'Донецк': 'Донецьк',
+      'Луганск': 'Луганськ',
+      'Кропивницкий': 'Кропивницький',
+      'Севастопол': 'Севастополь',
+    }[name] ??
+    name;
