@@ -127,6 +127,12 @@ public static class MapWriter
             sb.Append(",\"dir\":\"").Append(Esc(t.Dir)).Append('"');
             sb.Append(",\"n\":").Append(amount);
             sb.Append(",\"heading\":").Append(t.Heading is { } h ? N(h) : "null");
+            // Курс із реального руху (2 точки / «з X на Y») — лише тоді застосунок рухає маркер.
+            if (t.HeadingKnown) sb.Append(",\"hdgReal\":true");
+            // Висота / падіння з тексту каналу.
+            if (t.AltM is { } am) sb.Append(",\"alt\":").Append(N(am));
+            if (t.AltNote is { Length: > 0 } an) sb.Append(",\"altNote\":\"").Append(Esc(an)).Append('"');
+            if (t.Down) sb.Append(",\"down\":true");
             sb.Append(",\"seen\":").Append(((DateTimeOffset)t.LastUpdate).ToUnixTimeMilliseconds()); // час останнього спостереження позиції (для руху/екстраполяції)
             sb.Append(",\"place\":\"").Append(Esc(t.LastPlace)).Append('"');
             // approx = ціль лише на рівні області (без точної точки/курсу). Для таких НЕ малюємо
@@ -138,10 +144,11 @@ public static class MapWriter
             sb.Append(",\"srcs\":[").Append(string.Join(",", srcs.Select(s => "\"" + Esc(s) + "\""))).Append(']');
             sb.Append(",\"trail\":[");
             bool first = true;
-            foreach (var seg in t.Trail)
+            // Реальні точки шляху (Track); старі цілі без нього — через назви місць.
+            var pts = t.Track.Count > 0 ? t.Track.ToList()
+                : t.Trail.Select(s => ThreatGeo.Of(s.place)).Where(c => c is not null).Select(c => (c!.Value.lat, c.Value.lon)).ToList();
+            foreach (var cc in pts)
             {
-                var c = ThreatGeo.Of(seg.place);
-                if (c is not { } cc) continue;
                 if (!first) sb.Append(',');
                 first = false;
                 sb.Append('[').Append(N(cc.lat)).Append(',').Append(N(cc.lon)).Append(']');

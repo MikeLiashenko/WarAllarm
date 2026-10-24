@@ -9,7 +9,10 @@ public enum ThreatKind { Drone, Kab, Ballistic, Missile, Aviation, Target, AllCl
 public enum RelLevel { None, Oblast, City }
 
 /// <param name="From">Звідки летить («з Курська», «з Чернігівщини»), якщо названо.</param>
-public record ThreatEvent(ThreatKind Kind, string? Oblast, string? City, int Count, string? Extra, string Raw, string? From = null);
+public record ThreatEvent(ThreatKind Kind, string? Oblast, string? City, int Count, string? Extra, string Raw, string? From = null)
+{
+    public Altitude.Info? Alt { get; init; } // висота / «падає» з рядка поста (Altitude.Parse)
+}
 
 public static class Geo
 {
@@ -64,11 +67,18 @@ public static class ThreatParser
     {
         var events = new List<ThreatEvent>();
         string? oblast = defaultOblast; // текущий контекст области (из заголовка "Xщина:")
+        int prevMark = 0, mark = 0;
+        Altitude.Info? alt = null;
+        void Stamp() => StampAltitude(events, prevMark, mark, alt);
 
         foreach (var raw in post.Replace("\r", "").Split('\n'))
         {
             var line = raw.Trim();
             if (line.Length == 0) continue;
+            Stamp();
+            if (events.Count > mark) prevMark = mark;
+            mark = events.Count;
+            alt = Altitude.Parse(line);
             var low = line.ToLowerInvariant();
             if (Noise.Any(n => low.Contains(n))) continue;
 
@@ -155,8 +165,19 @@ public static class ThreatParser
             var t = ParseTargetLine(line, oblast);
             if (t != null) events.Add(t);
         }
+        Stamp();
 
         return events;
+    }
+
+    // Висота з рядка («…, висота ~150 м», «знижується») — на всі цілі цього рядка; рядок
+    // лише з висотою («висота 100 м» окремо) — на цілі попереднього рядка.
+    static void StampAltitude(List<ThreatEvent> events, int prevMark, int mark, Altitude.Info? alt)
+    {
+        if (alt is not { } a) return;
+        int from = events.Count > mark ? mark : prevMark;
+        for (int i = from; i < events.Count; i++)
+            if (events[i].Kind != ThreatKind.AllClear) events[i] = events[i] with { Alt = a };
     }
 
     static ThreatEvent? ParseTargetLine(string line, string? oblast)

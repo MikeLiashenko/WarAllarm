@@ -740,7 +740,8 @@ class _MapPainter extends CustomPainter {
       // Where it is now: flight From→To (ballistic/КАБ), launch ring, or
       // dead-reckoning along the heading — all at the weapon's real speed.
       final mo = motionOf(t, nowMs, frozen: dimTargets);
-      final known = t.heading != null && !mo.isFlight && !mo.launch;
+      // Course line only for a REAL course (seen moving), never the «inland» guess.
+      final known = t.headingKnown && t.heading != null && !t.down && !mo.isFlight && !mo.launch;
       final spd = speedKmPerMin(t);
       final double lon = mo.lon, lat = mo.lat;
       final scr = _toScreen(fit.project(lon, lat));
@@ -796,6 +797,20 @@ class _MapPainter extends CustomPainter {
         }
       }
 
+      // Silence: where it may be by now (it doesn't fly straight) — a faint ring.
+      if (mo.uncertKm > 0) {
+        final edge = _toScreen(fit.project(lon, lat + mo.uncertKm / 111));
+        final rPx = (scr - edge).distance;
+        if (rPx > badgeR + 4) {
+          canvas.drawCircle(scr, rPx, Paint()..color = color.withValues(alpha: 0.05));
+          _dashedCircle(canvas, scr, rPx,
+              Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 1
+                ..color = color.withValues(alpha: 0.35));
+        }
+      }
+
       // Trail.
       if (t.trail.length > 1) {
         final path = Path();
@@ -832,7 +847,9 @@ class _MapPainter extends CustomPainter {
         }
       }
 
-      // Badge.
+      // Badge — faded once nothing new was heard for a while.
+      final faded = mo.quietMin >= 6 || t.down;
+      if (faded) canvas.saveLayer(Rect.fromCircle(center: scr, radius: badgeR + 8), Paint()..color = Colors.white.withValues(alpha: 0.5));
       canvas.drawCircle(scr, badgeR + 3,
           Paint()
             ..color = Colors.black.withValues(alpha: 0.35)
@@ -846,6 +863,11 @@ class _MapPainter extends CustomPainter {
             ..strokeWidth = 1.8
             ..color = color);
       _drawFig(canvas, scr, mo.heading, cat, color, badgeR / 12.5);
+      if (faded) canvas.restore();
+      if (t.down) {
+        _text(canvas, t.altNote.isEmpty ? 'падає' : t.altNote, scr + Offset(0, badgeR + 12), 10.5,
+            const Color(0xFFFF6B5E), center: true, stroke: true, bold: true);
+      }
 
       // Picked target: pulsing ring.
       if (selectedId != null && t.id == selectedId) {
@@ -867,7 +889,8 @@ class _MapPainter extends CustomPainter {
       }
       // Place label when zoomed in.
       if (scale >= 2.2 && t.place.isNotEmpty) {
-        _text(canvas, t.place, scr + Offset(badgeR + 4, 0), 10.5,
+        final alt = altitudeShort(t);
+        _text(canvas, alt.isEmpty ? t.place : '${t.place} · $alt', scr + Offset(badgeR + 4, 0), 10.5,
             AppColors.textPrimary, stroke: true, bold: true);
       }
     }

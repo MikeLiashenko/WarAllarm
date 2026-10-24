@@ -96,15 +96,22 @@ class TargetCard extends StatelessWidget {
     }
 
     final rows = <(IconData, String, String)>[
-      (Icons.place_outlined, 'Де зараз', m.launch ? 'пуск: ${t.fromName}' : (t.place.isEmpty ? '—' : t.place)),
+      (Icons.place_outlined, m.quietMin >= 3 ? 'Востаннє бачили' : 'Де зараз',
+          m.launch ? 'пуск: ${t.fromName}' : (t.place.isEmpty ? '—' : t.place)),
+      if (m.uncertKm > 0)
+        (Icons.blur_circular_rounded, 'Тиша', '${m.quietMin.round()} хв без даних — може бути в радіусі ~${m.uncertKm.round()} км'),
       (Icons.straighten_rounded, 'До «${place.name}»', '${km.round()} км'),
       (Icons.timer_outlined, 'Підліт', eta),
       (Icons.speed_rounded, 'Швидкість', '${kmh.round()} км/год'),
       if (!m.launch && (t.heading != null || m.isFlight))
-        (Icons.explore_outlined, 'Курс', '${compassUa(m.heading)} · ${m.heading.round()}°'),
+        (Icons.explore_outlined, 'Курс',
+            t.headingKnown || m.isFlight
+                ? '${compassUa(m.heading)} · ${m.heading.round()}°'
+                : 'невідомий — бачили лише в одній точці'),
       if (t.fromName.isNotEmpty && !m.launch)
         (Icons.call_made_rounded, 'Звідки', '${t.fromName}${t.fromGuess ? ' (оцінка)' : ''}'),
-      (Icons.height_rounded, 'Висота', typicalAltitude(t)),
+      (Icons.height_rounded, 'Висота',
+          altitudeShort(t).isNotEmpty ? '${altitudeShort(t)} (з каналу)' : '${typicalAltitude(t)} (типово)'),
       if (t.sources > 0)
         (Icons.podcasts_rounded, 'Джерела (${t.sources})', t.srcs.map((s) => '@$s').join(', ')),
       (Icons.update_rounded, 'Оновлено',
@@ -149,6 +156,7 @@ class TargetCard extends StatelessWidget {
                         Tag(t.stageLabel, color: threat ? AppColors.threat : AppColors.textSecondary),
                       if (t.sources > 1) Tag('✓ ${t.sources} джерела', color: AppColors.safe),
                       if (following) Tag('👁 стежу', color: AppColors.highlight),
+                      if (t.down) Tag(t.altNote.isEmpty ? 'падає' : t.altNote, color: AppColors.threat),
                     ]),
                   ],
                 ),

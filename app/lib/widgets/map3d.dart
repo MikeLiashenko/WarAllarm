@@ -111,6 +111,9 @@ double targetHeight3d(MapTarget t, TargetMotion m, double hs) {
     final d = kmBetween(t.from![0], t.from![1], t.to![0], t.to![1]);
     return _apogee(d) * 4 * p * (1 - p) * hs;
   }
+  // The channel told us how high it flies (shahed ≈1 km ↔ 12 units) / it's going down.
+  if (t.down) return 2 * hs;
+  if (t.altM case final a?) return (12 * a / 1000).clamp(2.5, 45.0) * hs;
   final double base = switch (t.cat) {
     'shahed' => 12,
     'missile' => 9,
@@ -867,13 +870,34 @@ class _Map3DPainter extends CustomPainter {
         final left = (m.flightMin! * (1 - m.progress!)).clamp(0, 99);
         _text(canvas, left < 1 ? '<1 хв' : '${left.round()} хв', air.o + const Offset(20, -14), 11, color, bold: true);
       }
-    } else if (!m.launch && t.heading != null) {
+    } else if (!m.launch && t.heading != null && t.headingKnown && !t.down) {
       final lead = math.min(60.0, speedKmPerMin(t) * 10);
       final q = moveKm(m.lat, m.lon, m.heading, lead);
       _dashed(canvas, air.o, cam.proj(q.lat, q.lon, z).o, Paint()
         ..strokeWidth = 1.3
         ..color = color.withValues(alpha: 0.65));
     }
+
+    // Silence: where it may be by now (it doesn't fly straight) — a faint ground ring.
+    if (m.uncertKm > 0) {
+      final pts = [
+        for (var a = 0; a <= 48; a++)
+          () {
+            final q = moveKm(m.lat, m.lon, a * 360 / 48, m.uncertKm);
+            return cam.proj(q.lat, q.lon).o;
+          }(),
+      ];
+      final ring = Path()..addPolygon(pts, true);
+      canvas.drawPath(ring, Paint()..color = color.withValues(alpha: 0.05));
+      canvas.drawPath(
+          ring,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..color = color.withValues(alpha: 0.35));
+    }
+    final faded = m.quietMin >= 6 || t.down;
+    if (faded) canvas.saveLayer(null, Paint()..color = Colors.white.withValues(alpha: 0.5));
 
     canvas.drawOval(Rect.fromCenter(center: ground.o, width: 14, height: 14 * (1 - 0.6 * cam.st)),
         Paint()..color = Colors.black.withValues(alpha: 0.35));
@@ -892,6 +916,13 @@ class _Map3DPainter extends CustomPainter {
           ..strokeWidth = 1.8
           ..color = color);
     paintThreatGlyph(canvas, air.o, r * 1.7, t.cat, color, m.heading - cam.yaw);
+    if (faded) canvas.restore();
+    final alt = altitudeShort(t);
+    if (t.down) {
+      _text(canvas, alt.isEmpty ? 'падає' : alt, air.o + Offset(0, r + 12), 10.5, const Color(0xFFFF6B5E), bold: true);
+    } else if (alt.isNotEmpty && cam.zoom >= 2) {
+      _text(canvas, alt, air.o + Offset(r + 5, 6), 10, AppColors.textPrimary, bold: true);
+    }
     if (selectedId != null && t.id == selectedId) {
       canvas.drawCircle(air.o, r + 6 + 7 * pulse,
           Paint()

@@ -247,6 +247,27 @@ if (args.Length >= 1 && args[0].Equals("traj", StringComparison.OrdinalIgnoreCas
     return;
 }
 
+// ── Тест руху (оффлайн): ціль, що летить від міста до міста, має лишатись ОДНІЄЮ
+//    міткою з реальним курсом (а не «примарою» в кожному місті) + висота з тексту.
+//    dotnet run -- move
+if (args.Length >= 1 && args[0].Equals("move", StringComparison.OrdinalIgnoreCase))
+{
+    var tt = new ThreatTracker((HomeLat, HomeLon));
+    var t0 = DateTime.Now;
+    foreach (var (min, post) in new[] {
+        (0.0, "Харківщина:\nШахед на Валки"), (4.0, "Полтавщина:\nШахед на Коломак, висота ~150 м"),
+        (9.0, "Полтавщина:\nШахед на Котельву, знижується"), (9.0, "Дніпропетровщина:\n2 шахеди на Павлоград"),
+        (13.0, "Полтавщина:\nШахед на Опішню, низько"), (16.0, "Полтавщина:\nмінус шахед біля Опішні") })
+    {
+        foreach (var ev in ThreatParser.Parse(post)) tt.IngestUa(ev, t0.AddMinutes(min));
+        Console.WriteLine($"+{min,4:0} хв  {post.Replace("\n", " ⏎ "),-44} → міток: {tt.Active.Count}");
+        foreach (var x in tt.Active)
+            Console.WriteLine($"          · {x.Id,-34} {x.LastPlace,-12} курс {x.Heading:0}°{(x.HeadingKnown ? " (реальний)" : " (здогадка)")}"
+                + $" · шлях {x.Track.Count} т. · висота {(x.AltM is { } a ? $"{a:0} м" : "—")} {x.AltNote}{(x.Down ? " · DOWN" : "")} · {x.Stage}");
+    }
+    return;
+}
+
 // ── Тест хаба джерел (оффлайн, без Telegram і без запису в Firebase):
 //    dotnet run -- sources <файл>   формат: «##### @канал» + пости через «---»
 if (args.Length >= 2 && args[0].Equals("sources", StringComparison.OrdinalIgnoreCase))
@@ -713,8 +734,15 @@ async Task RunAlertsLoop(ChannelPoster? channel)
                 if (nowActive.Count == 0)
                     removed = tracker.SweepWhere(t => t.Pos is not null && Quiet(t)).Count; // ніде тривоги → знімаємо затихлі
                 else
+                {
                     foreach (var obl in prevActive.Where(o => !nowActive.Contains(o)))
                         removed += tracker.SweepWhere(t => t.Pos is { } p && Quiet(t) && OblastGeo.PolyName(p.lat, p.lon) == obl).Count;
+                    // І постійно: ціль, що затихла (>3 хв) в області БЕЗ тривоги, — уже не там
+                    // (збита / пролетіла). Справжній дрон над областю = там тривога.
+                    removed += tracker.SweepWhere(t => t.Pos is { } p && !t.Launch
+                        && DateTime.Now - t.LastUpdate > TimeSpan.FromMinutes(3)
+                        && OblastGeo.PolyName(p.lat, p.lon) is { } o && !nowActive.Contains(o)).Count;
+                }
                 if (removed > 0)
                 {
                     Ui.Line(ConsoleColor.Green, $"✅ Офіційний відбій — прибрано цілей: {removed}");
@@ -1183,7 +1211,10 @@ string TargetText(Threat t, double lat, double lon)
         $"📍 {t.LastPlace} · {ThreatTracker.StageLabel(t.Stage)}",
         $"📏 {km:0} км від тебе · підліт ~{(eta < 1 ? "<1" : eta.ToString("0"))} хв (за {spd:0} км/год)",
     };
-    if (t.Heading is { } h && !t.Launch) lines.Add($"🧭 курс {ThreatGeo.Compass(h)} ({h:0}°)");
+    if (t.Heading is { } h && !t.Launch)
+        lines.Add($"🧭 курс {ThreatGeo.Compass(h)} ({h:0}°){(t.HeadingKnown ? "" : " — оцінка, руху ще не видно")}");
+    if (t.AltM is not null || t.AltNote is not null)
+        lines.Add($"🛬 висота: {string.Join(" · ", new[] { t.AltM is { } am ? (am >= 1000 ? $"~{am / 1000:0.#} км" : $"~{am:0} м") : null, t.AltNote }.Where(s => s is not null))} (з каналу)");
     if (t.FromName is { Length: > 0 } fn)
         lines.Add(t.Launch ? $"🚀 пуск: {fn}, ціль невідома" : $"↗ звідки: {fn}{(t.FromGuess ? " (оцінка)" : "")}");
     if (t.FlightMin is { } fm && !t.Launch)
@@ -1193,7 +1224,8 @@ string TargetText(Threat t, double lat, double lon)
     }
     string[] srcs; lock (t.Srcs) srcs = t.Srcs.ToArray();
     if (srcs.Length > 0) lines.Add($"📡 джерела ({srcs.Length}): {string.Join(", ", srcs.Take(5).Select(s => "@" + s))}");
-    lines.Add($"🕒 оновлено {t.LastUpdate:HH:mm:ss}");
+    var quiet = (DateTime.Now - t.LastUpdate).TotalMinutes;
+    lines.Add($"🕒 оновлено {t.LastUpdate:HH:mm:ss}{(quiet >= 3 ? $" — {quiet:0} хв без нових даних, позиція неточна" : "")}");
     return string.Join("\n", lines);
 }
 

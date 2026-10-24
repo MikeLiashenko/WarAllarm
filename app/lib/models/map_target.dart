@@ -43,6 +43,18 @@ class MapTarget {
   /// Лише пуск, ціль ще невідома (коло досяжності з точки пуску).
   final bool launch;
 
+  /// Курс із реального руху (дві точки / «з X на Y»). Без нього курс — лише здогадка
+  /// Reader «вглиб країни», і маркер НЕ рухаємо (інакше дрони «летіли» в зони відбою).
+  final bool headingKnown;
+
+  /// Висота з тексту каналу, м (null — не писали) і примітка: «низько», «знижується»,
+  /// «набирає висоту», «падає», «збито».
+  final double? altM;
+  final String altNote;
+
+  /// Падає / збита — зараз зникне з карти.
+  final bool down;
+
   /// Per-place distance, filled in by the situation logic.
   final double? pdist;
 
@@ -75,6 +87,10 @@ class MapTarget {
     this.fromGuess = false,
     this.t0 = 0,
     this.launch = false,
+    this.headingKnown = false,
+    this.altM,
+    this.altNote = '',
+    this.down = false,
   });
 
   MapTarget withPdist(double? d) => MapTarget(
@@ -85,6 +101,7 @@ class MapTarget {
         sources: sources, srcs: srcs, kmh: kmh,
         from: from, to: to, fromName: fromName, fromGuess: fromGuess,
         t0: t0, launch: launch,
+        headingKnown: headingKnown, altM: altM, altNote: altNote, down: down,
       );
 
   static List<double>? _pair(dynamic v) =>
@@ -119,6 +136,10 @@ class MapTarget {
       fromGuess: m['fromGuess'] == true,
       t0: (m['t0'] as num?)?.toInt() ?? 0,
       launch: m['launch'] == true,
+      headingKnown: m['hdgReal'] == true,
+      altM: d(m['alt']),
+      altNote: (m['altNote'] ?? '').toString(),
+      down: m['down'] == true,
       trail: (m['trail'] as List<dynamic>? ?? [])
           .map((e) => [
                 ((e as List)[0] as num).toDouble(),

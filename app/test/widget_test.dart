@@ -87,13 +87,27 @@ void main() {
     expect(m.reachKm, closeTo(4000 / 60, 1));
   });
 
-  test('drone dead-reckons along its heading at weapon speed', () {
+  test('drone creeps along a REAL course only briefly, then an uncertainty ring grows', () {
     final seen = DateTime(2026, 10, 24, 12).millisecondsSinceEpoch;
     final t = MapTarget(
         label: 'Шахед', cat: 'shahed', lat: 50.0, lon: 30.0,
-        heading: 0, kmh: 180, seenMs: seen);
-    final m = motionOf(t, seen + 10 * 60 * 1000); // 10 min → 30 km north
-    expect(kmBetween(50.0, 30.0, m.lat, m.lon), closeTo(30, 1));
+        heading: 0, kmh: 180, seenMs: seen, headingKnown: true);
+    // 10 min of silence: moved only 4 min × 3 km/min × 0.7 ≈ 8.4 km north, then stopped.
+    final m = motionOf(t, seen + 10 * 60 * 1000);
+    expect(kmBetween(50.0, 30.0, m.lat, m.lon), closeTo(8.4, 0.5));
     expect(m.lat, greaterThan(50.0));
+    expect(m.uncertKm, closeTo(15, 0.5)); // 3 km/min × 0.5 × 10 min
+  });
+
+  test('a guessed course (seen in one place only) does not move the drone', () {
+    final seen = DateTime(2026, 10, 24, 12).millisecondsSinceEpoch;
+    final t = MapTarget(
+        label: 'Шахед', cat: 'shahed', lat: 50.0, lon: 30.0,
+        heading: 270, kmh: 500, seenMs: seen);
+    final m = motionOf(t, seen + 12 * 60 * 1000);
+    expect(m.lat, 50.0);
+    expect(m.lon, 30.0);
+    expect(m.uncertKm, closeTo(50, 0.5)); // 500 km/h × 0.5 × 12 min
+    expect(motionOf(t, seen + 30 * 60 * 1000).uncertKm, 80); // capped
   });
 }

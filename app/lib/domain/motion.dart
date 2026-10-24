@@ -12,8 +12,12 @@ import '../models/map_target.dart';
 ///   travels From→To since `t0`; [progress] 0..1, [landed] once it arrives.
 /// * **launch** (ballistic launch, target unknown): sits at the launch site;
 ///   [reachKm] — how far it could have got by now (a growing ring).
-/// * **cruise** (drones / cruise missiles): dead-reckoning along the heading
-///   from the last reported place, capped at 60 km between posts.
+/// * **cruise** (drones / cruise missiles): they do NOT fly straight — shaheds
+///   zig-zag and turn. So the marker only creeps along a REAL course (two seen
+///   points / «з X на Y», never the Reader's «inland» guess) for the first few
+///   minutes after a post, then stops; from then on [uncertKm] — a ring of where
+///   it may be now — grows with the silence instead of a fake straight flight
+///   (that carried drones into all-clear oblasts).
 class TargetMotion {
   const TargetMotion({
     required this.lat,
@@ -24,6 +28,8 @@ class TargetMotion {
     this.landed = false,
     this.launch = false,
     this.flightMin,
+    this.uncertKm = 0,
+    this.quietMin = 0,
   });
 
   final double lat;
@@ -38,6 +44,12 @@ class TargetMotion {
 
   /// Total flight time From→To in minutes (flights only).
   final double? flightMin;
+
+  /// Cruise target: radius (km) of where it may be by now — grows with silence.
+  final double uncertKm;
+
+  /// Minutes since the last report of this target.
+  final double quietMin;
 
   bool get isFlight => progress != null;
 }
@@ -69,6 +81,10 @@ double bearingDeg(double lat1, double lon1, double lat2, double lon2) {
 /// Speed in km/min: the weapon's own when the Reader knows it.
 double speedKmPerMin(MapTarget t) => t.kmh > 0 ? t.kmh / 60 : speedKmMin(t.cat, t.label);
 
+/// How long a cruise target keeps moving after a post before it stops and only
+/// the uncertainty ring grows.
+const double kCreepMin = 4;
+
 TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
   final spd = speedKmPerMin(t);
   final from = t.from, to = t.to;
@@ -99,11 +115,28 @@ TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
   }
 
   var lat = t.lat, lon = t.lon;
-  if (t.heading != null && !frozen) {
-    final mins = math.max(0, nowMs - (t.seenMs == 0 ? nowMs : t.seenMs)) / 60000;
-    final m = moveKm(t.lat, t.lon, t.heading!, math.min(60.0, spd * mins));
+  final quiet = math.max(0, nowMs - (t.seenMs == 0 ? nowMs : t.seenMs)) / 60000;
+  if (t.heading != null && t.headingKnown && !t.down && !frozen) {
+    // Real course: creep along it for at most [kCreepMin] minutes, at ~70 % of the
+    // speed (turns and zig-zags make the straight-line progress shorter).
+    final m = moveKm(t.lat, t.lon, t.heading!, math.min(30.0, spd * 0.7 * math.min(quiet, kCreepMin)));
     lat = m.lat;
     lon = m.lon;
   }
-  return TargetMotion(lat: lat, lon: lon, heading: t.heading ?? 0);
+  // After that it could be anywhere within this much — shown as a ring.
+  final uncert = frozen || t.down || quiet < 1.5 ? 0.0 : math.min(80.0, spd * 0.5 * quiet);
+  return TargetMotion(lat: lat, lon: lon, heading: t.heading ?? 0, uncertKm: uncert, quietMin: quiet.toDouble());
+}
+
+/// Short altitude from the channels for map labels: «~150 м ↓», «низько», «падає».
+String altitudeShort(MapTarget t) {
+  final m = t.altM;
+  final num = m == null ? '' : (m >= 1000 ? '~${(m / 1000).toStringAsFixed(1).replaceAll('.0', '')} км' : '~${m.round()} м');
+  final arrow = switch (t.altNote) {
+    'знижується' => ' ↓',
+    'набирає висоту' => ' ↑',
+    _ => '',
+  };
+  if (num.isNotEmpty) return '$num$arrow';
+  return t.altNote;
 }
