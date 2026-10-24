@@ -1,17 +1,10 @@
-import 'dart:io';
-import 'dart:ui' as ui;
-
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../controllers/alarm_controller.dart';
 import '../controllers/alerts_controller.dart';
 import '../controllers/map_data_controller.dart';
+import '../controllers/nav_controller.dart';
 import '../controllers/settings_controller.dart';
 import '../data/ukraine_geo.dart';
 import '../domain/probability.dart';
@@ -26,14 +19,13 @@ import '../widgets/glass.dart';
 import '../widgets/place_selector.dart';
 import '../widgets/probability_gauge.dart';
 import '../widgets/radar_scope.dart';
-import '../widgets/responsive.dart';
 import '../widgets/shelters_sheet.dart';
 import '../widgets/ui_kit.dart';
-import '../widgets/ukraine_map.dart';
+import 'home_shell.dart';
 
-/// Everything the home screen shows, derived once per build.
-class _Situation {
-  _Situation(this.data, this.alarm, AlertsController alerts) {
+/// Everything «Зараз» and the map card show, derived once per build.
+class Situation {
+  Situation(this.data, this.alarm, AlertsController alerts) {
     stale = data.stale;
     scope = NowScreen.scopeOf(data);
     // Place-level danger uses only real positions — a target pinned to an
@@ -130,330 +122,148 @@ class NowScreen extends StatefulWidget {
 }
 
 class _NowScreenState extends State<NowScreen> {
-  final _mapKey = GlobalKey<UkraineMapState>();
-  final _shotKey = GlobalKey();
-  final _sheet = DraggableScrollableController();
-  double _minFrac = 0.2;
-
-  @override
-  void dispose() {
-    _sheet.dispose();
-    super.dispose();
-  }
-
-  /// Tap on the place card: open the details / fold back to the card.
-  void _toggleSheet() {
-    if (!_sheet.isAttached) return;
-    final open = _sheet.size > _minFrac + 0.05;
-    _sheet.animateTo(open ? _minFrac : 0.6,
-        duration: const Duration(milliseconds: 280), curve: Curves.easeOutCubic);
-  }
-
   @override
   Widget build(BuildContext context) {
     final data = context.watch<MapDataController>();
     final alarm = context.watch<AlarmController>();
     final alerts = context.watch<AlertsController>();
     final settings = context.watch<SettingsController>();
-    final s = _Situation(data, alarm, alerts);
-    final pad = MediaQuery.paddingOf(context);
+    final s = Situation(data, alarm, alerts);
+    const gap = SizedBox(height: 22);
 
-    return LayoutBuilder(builder: (context, c) {
-      final wide = c.maxWidth >= 900 && !Responsive.useBottomNav(context);
-      const panelW = 410.0;
+    final events = _eventNotices(s);
+    final radar = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionLabel('Радар'),
+        _Panel(
+          child: Center(
+            child: RadarScope(
+              lat: s.place.lat,
+              lon: s.place.lon,
+              targets: s.stale
+                  ? const []
+                  : (data.isDemo ? data.targets : data.alarmTargets),
+              tone: s.tone,
+              active: s.active,
+              alarmRadiusKm: settings.alarmRadiusKm,
+              size: 260,
+            ),
+          ),
+        ),
+      ],
+    );
+    final prob = s.prob != null && !s.stale
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SectionLabel('Ймовірність удару',
+                  trailing: Tag('через API')),
+              ProbabilityGauge(prob: s.prob!),
+            ],
+          )
+        : null;
+    final places = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionLabel('Мої місця', count: '${s.scope.length}'),
+        for (final p in s.scope)
+          _PlaceRow(
+            place: p,
+            data: data,
+            stale: s.stale,
+            prob: s.probs.where((x) => x.place.id == p.id).firstOrNull,
+          ),
+      ],
+    );
+    final targets = data.selectedId == 'all' ? data.targets : s.sel;
+    final targetList = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionLabel(
+          data.selectedId == 'all' ? 'Цілі · вся Україна' : 'Цілі поруч',
+          // «Вся Україна» → скільки бортів у повітрі всього (сума ×N).
+          count:
+              data.selectedId == 'all' ? '~${data.airborne}' : '${s.sel.length}',
+          trailing: s.stale ? Tag('застарілі', color: AppColors.warn) : null,
+        ),
+        if (targets.isEmpty)
+          _EmptyTargets(live: data.fresh)
+        else
+          _Panel(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                for (var i = 0; i < targets.length; i++) ...[
+                  if (i > 0) Divider(height: 1, color: AppColors.divider),
+                  _TargetRow(
+                      t: targets[i], stateTs: data.stateTs, stale: s.stale),
+                ],
+              ],
+            ),
+          ),
+      ],
+    );
 
-      if (wide) {
-        final panelLeft = pad.left + 8;
-        final mapLeft = panelLeft + panelW + 16;
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: _map(data, alerts, settings, s,
-                  EdgeInsets.fromLTRB(mapLeft, 70, 70, 16)),
-            ),
-            Positioned(
-              left: panelLeft,
-              top: pad.top + 16,
-              bottom: 16,
-              width: panelW,
-              child: Glass(
-                radius: 26,
-                padding: EdgeInsets.zero,
-                // The nav inset is already applied by the panel position — strip
-                // it so inner (horizontal) lists don't indent by it again.
-                child: MediaQuery.removePadding(
-                  context: context,
-                  removeLeft: true,
-                  removeTop: true,
-                  removeRight: true,
-                  removeBottom: true,
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
-                    children: _details(context, s, settings),
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: mapLeft,
-              right: 80,
-              top: pad.top + 16,
-              child: _TopChips(data: data, alerts: alerts),
-            ),
-            Positioned(
-              right: 16,
-              top: pad.top + 16,
-              child: _controls(context),
-            ),
-          ],
-        );
-      }
-
-      // Phone: map full-screen, chips on top, a draggable sheet whose collapsed
-      // state is the place card (like a maps app).
-      const cardH = 140.0;
-      final minPx = cardH + pad.bottom;
-      final minFrac = (minPx / c.maxHeight).clamp(0.15, 0.6);
-      _minFrac = minFrac;
-      return Stack(
+    return PageBody(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Positioned.fill(
-            child: _map(data, alerts, settings, s,
-                EdgeInsets.fromLTRB(0, pad.top + 92, 0, minPx - 8)),
+          _Hero(s: s),
+          const SizedBox(height: 14),
+          // Country-wide picture at a glance; tap → the map.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => context.read<NavController>().select(AppTab.map),
+            child: ThreatCounters(data: data, alerts: alerts, onSurface: true),
           ),
-          Positioned(
-            left: 12,
-            right: 64,
-            top: pad.top + 12,
-            child: _TopChips(data: data, alerts: alerts),
-          ),
-          Positioned(
-            right: 12,
-            top: pad.top + 12,
-            child: _controls(context),
-          ),
-          DraggableScrollableSheet(
-            controller: _sheet,
-            initialChildSize: minFrac,
-            minChildSize: minFrac,
-            maxChildSize: 0.94,
-            snap: true,
-            snapSizes: [minFrac, 0.6],
-            builder: (context, sc) => Glass(
-              radius: 28,
-              padding: EdgeInsets.zero,
-              color: AppColors.isDark
-                  ? const Color(0xE60D1015)
-                  : const Color(0xF2FFFFFF),
-              // Let a mouse drag the sheet too (desktop window at phone width, web).
-              child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(
-                    dragDevices: PointerDeviceKind.values.toSet()),
-                child: ListView(
-                controller: sc,
-                padding: EdgeInsets.fromLTRB(16, 8, 16, pad.bottom + 20),
+          gap,
+          ...events,
+          LayoutBuilder(builder: (context, c) {
+            if (c.maxWidth >= 860) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Center(
-                    child: Container(
-                      width: 38,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: AppColors.textMuted.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+                  Expanded(
+                    flex: 5,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [radar, if (prob != null) ...[gap, prob]],
                     ),
                   ),
-                  ..._details(context, s, settings, onHeaderTap: _toggleSheet),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    flex: 6,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [places, gap, targetList],
+                    ),
+                  ),
                 ],
-              ),
-              ),
-            ),
-          ),
-        ],
-      );
-    });
-  }
-
-  Widget _map(MapDataController data, AlertsController alerts,
-      SettingsController settings, _Situation s, EdgeInsets insets) {
-    return RepaintBoundary(
-      key: _shotKey,
-      child: ColoredBox(
-        color: AppColors.mapSea,
-        child: UkraineMap(
-          key: _mapKey,
-          targets: data.targets,
-          home: (lat: s.place.lat, lon: s.place.lon),
-          homeName: s.place.name,
-          audibilityKm: settings.audibilityKm,
-          showAudibility: settings.showAudibility,
-          oblastLevels: alerts.levels,
-          raionLevels: alerts.raions,
-          oblastWhole: alerts.oblastWhole,
-          showControls: false,
-          showLegend: false,
-          insets: insets,
-          dimTargets: s.stale,
-        ),
-      ),
-    );
-  }
-
-  Widget _controls(BuildContext context) {
-    return Column(
-      children: [
-        GlassIconButton(
-            icon: Icons.add_rounded,
-            tooltip: 'Наблизити',
-            onTap: () => _mapKey.currentState?.zoomIn()),
-        const SizedBox(height: 8),
-        GlassIconButton(
-            icon: Icons.remove_rounded,
-            tooltip: 'Віддалити',
-            onTap: () => _mapKey.currentState?.zoomOut()),
-        const SizedBox(height: 8),
-        GlassIconButton(
-            icon: Icons.center_focus_strong_outlined,
-            tooltip: 'Уся Україна',
-            onTap: () => _mapKey.currentState?.resetView()),
-        const SizedBox(height: 8),
-        GlassIconButton(
-            icon: Icons.ios_share_rounded,
-            tooltip: 'Поділитися картою',
-            onTap: () => _shareMap(context)),
-      ],
-    );
-  }
-
-  Future<void> _shareMap(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final bnd =
-          _shotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (bnd == null) return;
-      final image = await bnd.toImage(pixelRatio: 2.5);
-      final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))
-          ?.buffer
-          .asUint8List();
-      if (bytes == null || kIsWeb) return;
-      final stamp = DateTime.now().millisecondsSinceEpoch;
-      if (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS) {
-        // Phone: open the share sheet (Telegram, save to gallery, …).
-        final dir = await getTemporaryDirectory();
-        final f = File('${dir.path}/waralarm_map_$stamp.png');
-        await f.writeAsBytes(bytes, flush: true);
-        await Share.shareXFiles([XFile(f.path)], text: 'WarAlarm — карта загроз');
-      } else {
-        // Desktop: sharing files isn't supported — save to Downloads instead.
-        Directory? dir;
-        try {
-          dir = await getDownloadsDirectory();
-        } catch (_) {}
-        dir ??= await getApplicationDocumentsDirectory();
-        final f = File('${dir.path}/waralarm_map_$stamp.png');
-        await f.writeAsBytes(bytes, flush: true);
-        messenger.showSnackBar(
-            SnackBar(content: Text('Карту збережено: ${f.path}')));
-      }
-    } catch (e) {
-      messenger.showSnackBar(
-          SnackBar(content: Text('Не вдалося зробити скрін: $e')));
-    }
-  }
-
-  /// The detail stack shared by the phone sheet and the desktop panel.
-  List<Widget> _details(
-      BuildContext context, _Situation s, SettingsController settings,
-      {VoidCallback? onHeaderTap}) {
-    final data = s.data;
-    final targets = data.selectedId == 'all' ? data.targets : s.sel;
-    const gap = SizedBox(height: 20);
-    return [
-      GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onHeaderTap,
-        child: _PlaceHeader(s: s),
-      ),
-      const SizedBox(height: 14),
-      const PlaceSelector(),
-      const SizedBox(height: 16),
-      _Metrics(s: s),
-      const SizedBox(height: 14),
-      SizedBox(
-        width: double.infinity,
-        child: FilledButton.icon(
-          onPressed: () => showSheltersSheet(
-              context, s.place.lat, s.place.lon, s.place.name),
-          style: FilledButton.styleFrom(
-            backgroundColor: s.active ? AppColors.threat : AppColors.primary,
-            padding: const EdgeInsets.symmetric(vertical: 15),
-          ),
-          icon: const Icon(Icons.shield_outlined, size: 19),
-          label: const Text('Найближче укриття'),
-        ),
-      ),
-      gap,
-      ..._eventNotices(s),
-      const SectionLabel('Радар'),
-      _Panel(
-        child: Center(
-          child: RadarScope(
-            lat: s.place.lat,
-            lon: s.place.lon,
-            targets: s.stale
-                ? const []
-                : (data.isDemo ? data.targets : data.alarmTargets),
-            tone: s.tone,
-            active: s.active,
-            alarmRadiusKm: settings.alarmRadiusKm,
-            size: 250,
-          ),
-        ),
-      ),
-      if (s.prob != null && !s.stale) ...[
-        gap,
-        const SectionLabel('Ймовірність удару', trailing: Tag('через API')),
-        ProbabilityGauge(prob: s.prob!),
-      ],
-      gap,
-      SectionLabel('Мої місця', count: '${s.scope.length}'),
-      for (final p in s.scope)
-        _PlaceRow(
-          place: p,
-          data: data,
-          stale: s.stale,
-          prob: s.probs.where((x) => x.place.id == p.id).firstOrNull,
-        ),
-      gap,
-      SectionLabel(
-        data.selectedId == 'all' ? 'Цілі · вся Україна' : 'Цілі поруч',
-        // «Вся Україна» → скільки бортів у повітрі всього (сума ×N).
-        count: data.selectedId == 'all' ? '~${data.airborne}' : '${s.sel.length}',
-        trailing: s.stale ? Tag('застарілі', color: AppColors.warn) : null,
-      ),
-      if (targets.isEmpty)
-        _EmptyTargets(live: data.fresh)
-      else
-        _Panel(
-          padding: EdgeInsets.zero,
-          child: Column(
-            children: [
-              for (var i = 0; i < targets.length; i++) ...[
-                if (i > 0) Divider(height: 1, color: AppColors.divider),
-                _TargetRow(t: targets[i], stateTs: data.stateTs, stale: s.stale),
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                radar,
+                if (prob != null) ...[gap, prob],
+                gap,
+                places,
+                gap,
+                targetList,
               ],
-            ],
-          ),
-        ),
-      gap,
-      AnalyticsDashboard(rows: data.rows, targetsNow: data.targets.length),
-    ];
+            );
+          }),
+          gap,
+          AnalyticsDashboard(rows: data.rows, targetsNow: data.targets.length),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
   }
 
   /// Night summary, power outages and the latest launch wave.
-  List<Widget> _eventNotices(_Situation s) {
+  List<Widget> _eventNotices(Situation s) {
     final data = s.data;
     final list = <Widget>[
       if (data.isDemo)
@@ -512,10 +322,74 @@ class _NowScreenState extends State<NowScreen> {
   }
 }
 
+
+/// The top of «Зараз»: the place card as a hero — tone glow, status, strike
+/// chance, place chips, key numbers and the shelter button.
+class _Hero extends StatelessWidget {
+  const _Hero({required this.s});
+  final Situation s;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.xl + 4),
+        border: Border.all(
+            color: s.active
+                ? AppColors.threat.withValues(alpha: 0.6)
+                : AppColors.glassBorder),
+        gradient: RadialGradient(
+          center: const Alignment(-0.9, -1.0),
+          radius: 1.4,
+          colors: [
+            Color.alphaBlend(
+                s.tone.withValues(alpha: AppColors.isDark ? 0.18 : 0.12),
+                AppColors.surface),
+            AppColors.surface,
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+              color: s.tone.withValues(alpha: 0.12),
+              blurRadius: 40,
+              spreadRadius: -12,
+              offset: const Offset(0, 18)),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PlaceHeader(s: s, big: true),
+          const SizedBox(height: 16),
+          const PlaceSelector(),
+          const SizedBox(height: 14),
+          _Metrics(s: s),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: () => showSheltersSheet(
+                context, s.place.lat, s.place.lon, s.place.name),
+            style: FilledButton.styleFrom(
+              backgroundColor: s.active ? AppColors.threat : AppColors.primary,
+              padding: const EdgeInsets.symmetric(vertical: 15),
+            ),
+            icon: const Icon(Icons.shield_outlined, size: 19),
+            label: const Text('Найближче укриття'),
+          ),
+        ],
+      ),
+    );
+  }
+}
 /// Collapsed-sheet card: place name, status dot + word, strike chance.
-class _PlaceHeader extends StatelessWidget {
-  const _PlaceHeader({required this.s});
-  final _Situation s;
+class PlaceHeader extends StatelessWidget {
+  const PlaceHeader({super.key, required this.s, this.big = false});
+  final Situation s;
+
+  /// Hero size on «Зараз» (bigger name and ring).
+  final bool big;
 
   @override
   Widget build(BuildContext context) {
@@ -531,10 +405,10 @@ class _PlaceHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: 24,
+                      fontSize: big ? 30 : 24,
                       height: 1.1,
                       fontWeight: FontWeight.w800,
-                      letterSpacing: -0.6,
+                      letterSpacing: big ? -0.9 : -0.6,
                       color: AppColors.textPrimary)),
               const SizedBox(height: 6),
               Row(
@@ -570,7 +444,10 @@ class _PlaceHeader extends StatelessWidget {
         ),
         if (pct != null && !s.stale) ...[
           const SizedBox(width: 12),
-          _PercentRing(percent: pct, color: AppColors.forCls(s.prob!.cls)),
+          _PercentRing(
+              percent: pct,
+              color: AppColors.forCls(s.prob!.cls),
+              size: big ? 78 : 64),
         ],
       ],
     );
@@ -579,21 +456,23 @@ class _PlaceHeader extends StatelessWidget {
 
 /// Small ring with the strike chance in the middle.
 class _PercentRing extends StatelessWidget {
-  const _PercentRing({required this.percent, required this.color});
+  const _PercentRing(
+      {required this.percent, required this.color, this.size = 64});
   final int percent;
   final Color color;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 64,
-      height: 64,
+      width: size,
+      height: size,
       child: Stack(
         alignment: Alignment.center,
         children: [
           SizedBox(
-            width: 64,
-            height: 64,
+            width: size,
+            height: size,
             child: CircularProgressIndicator(
               value: percent / 100,
               strokeWidth: 5,
@@ -605,7 +484,7 @@ class _PercentRing extends StatelessWidget {
           Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('$percent%', style: AppText.number(16, color: color)),
+              Text('$percent%', style: AppText.number(size / 4, color: color)),
               const SizedBox(height: 2),
               Text('удар',
                   style: TextStyle(fontSize: 9.5, color: AppColors.textMuted)),
@@ -619,7 +498,7 @@ class _PercentRing extends StatelessWidget {
 
 class _Metrics extends StatelessWidget {
   const _Metrics({required this.s});
-  final _Situation s;
+  final Situation s;
 
   @override
   Widget build(BuildContext context) {
@@ -882,10 +761,15 @@ class _TargetRow extends StatelessWidget {
 
 /// Floating counters over the map: one glass chip per threat kind (with the
 /// map's own silhouette), official alerts, and the snapshot time.
-class _TopChips extends StatelessWidget {
-  const _TopChips({required this.data, required this.alerts});
+class ThreatCounters extends StatelessWidget {
+  const ThreatCounters(
+      {super.key, required this.data, required this.alerts, this.onSurface = false});
   final MapDataController data;
   final AlertsController alerts;
+
+  /// On a plain page (not over the map): skip the timestamp chip — the hero
+  /// card already shows freshness.
+  final bool onSurface;
 
   static const _order = ['shahed', 'missile', 'balist', 'kab', 'avia', 'other'];
 
@@ -975,6 +859,7 @@ class _TopChips extends StatelessWidget {
               ),
           ],
         ),
+        if (!onSurface) ...[
         const SizedBox(height: 8),
         Glass(
           radius: 10,
@@ -1004,6 +889,7 @@ class _TopChips extends StatelessWidget {
             ],
           ),
         ),
+        ],
       ],
     );
   }

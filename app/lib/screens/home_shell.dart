@@ -17,6 +17,7 @@ import '../widgets/responsive.dart';
 import 'ai_screen.dart';
 import 'api_keys_screen.dart';
 import 'chat_screen.dart';
+import 'map_screen.dart';
 import 'my_places_screen.dart';
 import 'now_screen.dart';
 import 'settings_screen.dart';
@@ -91,6 +92,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // and it re-reads the (mutable) AppColors palette. Order = AppTab order.
     final screens = <Widget>[
       NowScreen(),
+      MapScreen(),
       MyPlacesScreen(),
       ChatScreen(),
       AiScreen(),

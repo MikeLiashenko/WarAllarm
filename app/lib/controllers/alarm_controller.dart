@@ -36,11 +36,10 @@ class AlarmController extends ChangeNotifier {
 
   bool _impactRinging = false; // зараз грає сильний сигнал «приліт над домом»
   bool get impactAlarm => _impactRinging;
-  DateTime? _impactAckUntil; // користувач натиснув «Стоп» ПІД ЧАС прильоту — тиша на вікно
 
   bool _nuclearRinging = false; // ☢️ активна радіаційна/ядерна небезпека
   bool get nuclearAlarm => _nuclearRinging;
-  DateTime? _nuclearAckUntil; // «Стоп» під час радіаційної небезпеки — тиша на вікно
+  bool _nuclearAcked = false; // «Стоп» під час радіаційної небезпеки — тиша до її кінця
 
   /// 'calm' | 'warn' | 'alarm'
   String _level = 'calm';
@@ -52,32 +51,22 @@ class AlarmController extends ChangeNotifier {
   String _detail = '';
   String get detail => _detail;
 
-  DateTime? _snoozeUntil;
-  DateTime? _calmSince; // when the level last turned calm (snooze hysteresis)
+  /// «Я в укритті — стоп» silences the whole alarm episode: no auto-repeat.
+  /// It re-arms only once the danger is over (calm for [_calmToClear]), so the
+  /// next, separate attack rings normally.
+  bool _silenced = false;
+  bool get silenced => _silenced;
+  DateTime? _calmSince; // when the level last turned calm (episode end)
   static const _calmToClear = Duration(seconds: 60);
-  bool get snoozed =>
-      _snoozeUntil != null && DateTime.now().isBefore(_snoozeUntil!);
-  int get snoozeLeftSec => _snoozeUntil == null
-      ? 0
-      : _snoozeUntil!.difference(DateTime.now()).inSeconds.clamp(0, 3600);
 
   // --- user actions -----------------------------------------------------------
 
-  /// "Я в укритті / Стоп" — silence the current alarm for 90 s. It re-arms
-  /// automatically afterwards (safety: never silence forever), and immediately
-  /// if the danger gets worse (a strike / overhead).
+  /// "Я в укритті / Стоп" — the siren stops and STAYS off for this episode
+  /// (no repeat). A new attack after the all-clear rings again.
   void hush() {
-    _snoozeUntil =
-        DateTime.now().add(Duration(seconds: _settings.snoozeSeconds));
-    // «Стоп» під час прильоту/радіації — свідоме підтвердження: гасимо на вікно.
-    if (_impactRinging) {
-      _impactAckUntil =
-          DateTime.now().add(Duration(seconds: _settings.snoozeSeconds));
-    }
-    if (_nuclearRinging) {
-      _nuclearAckUntil =
-          DateTime.now().add(Duration(seconds: _settings.snoozeSeconds));
-    }
+    _silenced = true;
+    // Радіація — окреме підтвердження: тиша, доки сигнал не зникне.
+    if (_nuclearRinging) _nuclearAcked = true;
     _svc.stopAll();
     _ringing = false;
     _impactRinging = false;
@@ -87,7 +76,7 @@ class AlarmController extends ChangeNotifier {
   }
 
   void resume() {
-    _snoozeUntil = null;
+    _silenced = false;
     notifyListeners();
     _reevaluate();
   }
@@ -115,8 +104,7 @@ class AlarmController extends ChangeNotifier {
 
     // ☢️ Найвищий пріоритет — радіаційна/ядерна небезпека (окремий екран і звук).
     if (_map.nuclear) {
-      final acked = _nuclearAckUntil != null &&
-          DateTime.now().isBefore(_nuclearAckUntil!);
+      final acked = _nuclearAcked;
       _title = '☢️ РАДІАЦІЙНА НЕБЕЗПЕКА';
       _detail = _map.nuclearMsg.isNotEmpty
           ? _map.nuclearMsg
@@ -140,17 +128,16 @@ class AlarmController extends ChangeNotifier {
     }
     if (_nuclearRinging) {
       _nuclearRinging = false;
-      _nuclearAckUntil = null;
+      _nuclearAcked = false;
       _ringing = false;
       _svc.stopAll();
     }
 
     // Найсильніший випадок: приліт/над районом за ≤7 км від обраного місця.
-    // Перебиває звичайний snooze — прилёт поруч не можна пропустити. Але свідомий
-    // «Стоп» під час прильоту (_impactAckUntil) поважаємо на вікно snooze.
+    // Після «Стоп» не повторюємо — користувач уже в укритті (епізод заглушено).
     if (!demo && _impactNearHome()) {
-      final acked = _impactAckUntil != null &&
-          DateTime.now().isBefore(_impactAckUntil!);
+      final acked = _silenced;
+      _calmSince = null; // a strike nearby is never "calm"
       _title = '💥 ПРИЛІТ ПОРУЧ';
       _detail = _impactDetail();
       _level = 'alarm';
@@ -170,11 +157,6 @@ class AlarmController extends ChangeNotifier {
       return;
     }
     // Прилёт минув → повертаємось до звичайної логіки (нижче вирішить рівень).
-    // «Стоп» під час прильоту НЕ скидаємо одразу: стадія Overhead/Imminent
-    // може мигати між оновленнями, і сирена знову вмикалась би через секунди.
-    if (_impactAckUntil != null && DateTime.now().isAfter(_impactAckUntil!)) {
-      _impactAckUntil = null;
-    }
     if (_impactRinging) {
       _impactRinging = false;
       _ringing = false;
@@ -205,10 +187,8 @@ class AlarmController extends ChangeNotifier {
     final vibrate = _settings.vibration;
     _svc.setVolume(_settings.alarmVolume); // keep loudness in sync live
 
-    // Respect the user's "Я в укритті — стоп" for the full snooze window — even
-    // for a close/critical target. It auto-re-arms after snoozeSeconds, so the
-    // alarm is never silenced for long, but the STOP button always works now.
-    final snoozing = snoozed;
+    // «Я в укритті — стоп» holds for the whole episode — no repeats.
+    final snoozing = _silenced;
 
     if (newLevel == 'alarm' && !snoozing) {
       if (!_ringing) {
@@ -227,13 +207,12 @@ class AlarmController extends ChangeNotifier {
       // No "approaching" pings — only the full siren on a real alarm.
     }
 
-    // Danger gone → drop any lingering snooze so the next threat rings clean.
-    // Only after it has stayed calm for a while: a single empty/partial update
-    // used to clear the snooze and the siren came straight back after «Стоп».
+    // Episode over → re-arm for the next attack. Only after it has stayed calm
+    // for a while: a single empty/partial update must not end the episode.
     if (newLevel == 'calm') {
       _calmSince ??= DateTime.now();
       if (DateTime.now().difference(_calmSince!) >= _calmToClear) {
-        _snoozeUntil = null;
+        _silenced = false;
       }
     } else {
       _calmSince = null;

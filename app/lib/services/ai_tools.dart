@@ -56,7 +56,7 @@ class AiToolbox {
         _tool(
           'get_settings',
           'Поточні налаштування застосунку: радіус тривоги, радіус чутності, '
-              'гучність, пауза (snooze), тема.',
+              'гучність, тема.',
           {},
         ),
         _tool(
@@ -97,8 +97,6 @@ class AiToolbox {
                 _p('number', 'Радіус чутності вибуху, км (3–60) — коло на карті.'),
             'volume_percent':
                 _p('number', 'Гучність сирени у відсотках (0–100).'),
-            'snooze_seconds':
-                _p('number', 'Тривалість паузи після «відкласти», секунди.'),
             'show_audibility':
                 _p('boolean', 'Показувати коло чутності на карті.'),
             'dark_theme': _p('boolean', 'Темна тема (true) чи світла (false).'),
@@ -210,7 +208,6 @@ class AiToolbox {
       'alarm_radius_km': settings.alarmRadiusKm.round(),
       'audibility_km': settings.audibilityKm.round(),
       'volume_percent': (settings.alarmVolume * 100).round(),
-      'snooze_seconds': settings.snoozeSeconds,
       'show_audibility': settings.showAudibility,
       'dark_theme': theme.dark,
     };
@@ -277,11 +274,6 @@ class AiToolbox {
       final v = (_num(a['volume_percent']) / 100).clamp(0.0, 1.0);
       settings.setAlarmVolume(v);
       changed.add('гучність ${(v * 100).round()}%');
-    }
-    if (a['snooze_seconds'] != null) {
-      final v = _num(a['snooze_seconds']).round();
-      settings.setSnoozeSeconds(v);
-      changed.add('пауза $v с');
     }
     if (a['show_audibility'] != null) {
       final v = _bool(a['show_audibility']);

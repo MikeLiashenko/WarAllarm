@@ -7,6 +7,7 @@ import '../controllers/nav_controller.dart';
 import '../controllers/theme_controller.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import 'brand_icon.dart';
 import 'glass.dart';
 import 'ui_kit.dart';
 
@@ -62,46 +63,16 @@ String fmtAge(Duration d) {
   return '${d.inDays} дн';
 }
 
-/// The WarAlarm mark: a small alert glyph in a rounded red tile.
-class BrandMark extends StatelessWidget {
-  const BrandMark({super.key, this.size = 34});
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFF5A4F), Color(0xFFC81E14)],
-        ),
-        borderRadius: BorderRadius.circular(size * 0.32),
-        boxShadow: [
-          BoxShadow(
-              color: AppColors.threat.withValues(alpha: 0.35),
-              blurRadius: 14,
-              spreadRadius: -4),
-        ],
-      ),
-      child: Icon(Icons.crisis_alert_rounded,
-          color: Colors.white, size: size * 0.58),
-    );
-  }
-}
-
 /// Phone navigation, floating over the content: a round menu button and a
 /// glass capsule of the main destinations with a signal-yellow indicator.
 class FloatingNavBar extends StatelessWidget {
   const FloatingNavBar({super.key});
 
   static const _items = [
-    AppTab.myPlaces,
     AppTab.now,
+    AppTab.map,
+    AppTab.myPlaces,
     AppTab.chat,
-    AppTab.ai,
     AppTab.settings,
   ];
 
@@ -199,6 +170,7 @@ class FloatingRail extends StatelessWidget {
 
   static const _items = [
     AppTab.now,
+    AppTab.map,
     AppTab.myPlaces,
     AppTab.chat,
     AppTab.ai,

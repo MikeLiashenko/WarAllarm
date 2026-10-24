@@ -95,7 +95,6 @@ class SettingsScreen extends StatelessWidget {
             title: 'Тривога та карта',
             children: const [
               _AlarmRadiusSlider(),
-              _SnoozeChoice(),
               _AudibilitySetting(),
             ],
           ),
@@ -390,65 +389,6 @@ class _AudibilitySetting extends StatelessWidget {
                 context.read<SettingsController>().setAudibilityKm(v),
           ),
       ],
-    );
-  }
-}
-
-class _SnoozeChoice extends StatelessWidget {
-  const _SnoozeChoice();
-  @override
-  Widget build(BuildContext context) {
-    final s = context.watch<SettingsController>();
-    const opts = [(30, '30 с'), (90, '1½ хв'), (300, '5 хв')];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(Icons.snooze_rounded,
-                color: AppColors.primary, size: 20),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Text('Пауза звуку',
-                style: TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
-          ),
-          Wrap(
-            spacing: 6,
-            children: [
-              for (final o in opts)
-                ChoiceChip(
-                  label: Text(o.$2),
-                  selected: s.snoozeSeconds == o.$1,
-                  onSelected: (_) =>
-                      context.read<SettingsController>().setSnoozeSeconds(o.$1),
-                  selectedColor: AppColors.primary,
-                  labelStyle: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: s.snoozeSeconds == o.$1
-                        ? Colors.white
-                        : AppColors.textSecondary,
-                  ),
-                  backgroundColor: AppColors.surface,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    side: BorderSide(color: AppColors.border),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }

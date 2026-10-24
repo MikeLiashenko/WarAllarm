@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
-/// The primary destinations. «Мапа» is the home screen — the live map with
-/// the place card and details floating over it.
-enum AppTab { now, myPlaces, chat, ai, settings, apiKeys }
+/// The primary destinations. «Зараз» (the situation dashboard) is home; the
+/// full-screen map is its own tab.
+enum AppTab { now, map, myPlaces, chat, ai, settings, apiKeys }
 
 extension AppTabInfo on AppTab {
   String get label => switch (this) {
-        AppTab.now => 'Мапа',
+        AppTab.now => 'Зараз',
+        AppTab.map => 'Карта',
         AppTab.myPlaces => 'Мої місця',
         AppTab.settings => 'Налаштування',
         AppTab.chat => 'Чат',
@@ -16,6 +17,7 @@ extension AppTabInfo on AppTab {
 
   IconData get icon => switch (this) {
         AppTab.now => Icons.radar_rounded,
+        AppTab.map => Icons.map_outlined,
         AppTab.myPlaces => Icons.place_outlined,
         AppTab.settings => Icons.tune_rounded,
         AppTab.chat => Icons.forum_outlined,
@@ -25,6 +27,7 @@ extension AppTabInfo on AppTab {
 
   IconData get activeIcon => switch (this) {
         AppTab.now => Icons.radar_rounded,
+        AppTab.map => Icons.map_rounded,
         AppTab.myPlaces => Icons.place_rounded,
         AppTab.settings => Icons.tune_rounded,
         AppTab.chat => Icons.forum_rounded,

@@ -33,9 +33,9 @@ class _AlarmOverlayState extends State<AlarmOverlay>
   Widget build(BuildContext context) {
     final alarm = context.watch<AlarmController>();
 
-    // Snoozed → slim bar with a countdown and a "resume" action.
+    // Silenced → slim bar ("off until the all-clear") with a "resume" action.
     if (!alarm.ringing) {
-      if (alarm.snoozed) {
+      if (alarm.silenced) {
         return SafeArea(
           child: Align(
             // Bottom, just above the floating navigation — the top of the
@@ -60,7 +60,7 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                   const Icon(Icons.volume_off_rounded,
                       color: Colors.white, size: 18),
                   const SizedBox(width: 8),
-                  Text('Звук на паузі · ${alarm.snoozeLeftSec} с',
+                  Text('Звук вимкнено до відбою',
                       style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w700,
@@ -259,7 +259,7 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                     ),
                     const SizedBox(height: 10),
                     const Text(
-                      'Звук сам увімкнеться знову, якщо небезпека триває.',
+                      'Сирена більше не повториться до відбою.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.white70, fontSize: 12.5),
                     ),
