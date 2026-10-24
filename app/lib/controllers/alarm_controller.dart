@@ -53,6 +53,8 @@ class AlarmController extends ChangeNotifier {
   String get detail => _detail;
 
   DateTime? _snoozeUntil;
+  DateTime? _calmSince; // when the level last turned calm (snooze hysteresis)
+  static const _calmToClear = Duration(seconds: 60);
   bool get snoozed =>
       _snoozeUntil != null && DateTime.now().isBefore(_snoozeUntil!);
   int get snoozeLeftSec => _snoozeUntil == null
@@ -107,8 +109,9 @@ class AlarmController extends ChangeNotifier {
   // --- core logic -------------------------------------------------------------
 
   void _reevaluate() {
-    // Never alarm on sample/demo data — it must never be mistaken for real.
-    final demo = _map.isDemo;
+    // Never alarm on sample/demo data — it must never be mistaken for real —
+    // nor on a stale snapshot (monitor down: those targets are history).
+    final demo = _map.isDemo || _map.stale;
 
     // ☢️ Найвищий пріоритет — радіаційна/ядерна небезпека (окремий екран і звук).
     if (_map.nuclear) {
@@ -167,7 +170,11 @@ class AlarmController extends ChangeNotifier {
       return;
     }
     // Прилёт минув → повертаємось до звичайної логіки (нижче вирішить рівень).
-    _impactAckUntil = null;
+    // «Стоп» під час прильоту НЕ скидаємо одразу: стадія Overhead/Imminent
+    // може мигати між оновленнями, і сирена знову вмикалась би через секунди.
+    if (_impactAckUntil != null && DateTime.now().isAfter(_impactAckUntil!)) {
+      _impactAckUntil = null;
+    }
     if (_impactRinging) {
       _impactRinging = false;
       _ringing = false;
@@ -221,7 +228,16 @@ class AlarmController extends ChangeNotifier {
     }
 
     // Danger gone → drop any lingering snooze so the next threat rings clean.
-    if (newLevel == 'calm') _snoozeUntil = null;
+    // Only after it has stayed calm for a while: a single empty/partial update
+    // used to clear the snooze and the siren came straight back after «Стоп».
+    if (newLevel == 'calm') {
+      _calmSince ??= DateTime.now();
+      if (DateTime.now().difference(_calmSince!) >= _calmToClear) {
+        _snoozeUntil = null;
+      }
+    } else {
+      _calmSince = null;
+    }
 
     if (newLevel != _level) {
       _level = newLevel;

@@ -38,9 +38,11 @@ class _AlarmOverlayState extends State<AlarmOverlay>
       if (alarm.snoozed) {
         return SafeArea(
           child: Align(
-            alignment: Alignment.topCenter,
+            // Bottom, just above the floating navigation — the top of the
+            // screen holds the live counters.
+            alignment: Alignment.bottomCenter,
             child: Container(
-              margin: const EdgeInsets.all(10),
+              margin: const EdgeInsets.fromLTRB(10, 10, 10, 80),
               padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
               decoration: BoxDecoration(
                 color: _red,

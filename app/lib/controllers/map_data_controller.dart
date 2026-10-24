@@ -51,7 +51,7 @@ class MapDataController extends ChangeNotifier {
 
   // ☢️ Радіаційна/ядерна небезпека (з боту). Найвищий пріоритет у тривозі.
   bool _nuclear = false;
-  bool get nuclear => _nuclear && _live; // тільки на живих даних, ніколи в демо
+  bool get nuclear => _nuclear && fresh; // тільки на живих даних, ніколи в демо
   String _nuclearMsg = '';
   String get nuclearMsg => _nuclearMsg;
 
@@ -77,6 +77,29 @@ class MapDataController extends ChangeNotifier {
   bool _live = false;
   bool get live => _live;
 
+  /// The Reader re-publishes `state` at least every ~20 s while it runs (the
+  /// official-alerts loop). A snapshot older than this means the monitor is
+  /// down: its targets are history, not a live threat, and must never sound
+  /// the siren (a 20-hour-old drone "5 km away" was ringing as a real alarm).
+  static const staleAfter = Duration(minutes: 3);
+
+  /// Connected, but the monitor stopped updating.
+  bool get stale =>
+      _live &&
+      DateTime.now().millisecondsSinceEpoch - _stateTs >
+          staleAfter.inMilliseconds;
+
+  /// Connected AND the data is current — the only state worth alarming on.
+  bool get fresh => _live && !stale;
+
+  /// How old the last snapshot is.
+  Duration get dataAge => Duration(
+      milliseconds:
+          math.max(0, DateTime.now().millisecondsSinceEpoch - _stateTs));
+
+  Timer? _staleTick;
+  bool _wasStale = false;
+
   bool _showDemo = true;
   bool get showDemo => _showDemo;
 
@@ -93,6 +116,13 @@ class MapDataController extends ChangeNotifier {
       _rows = _demoRows();
     }
     _sub = _rtdb.stream('state').listen(_onData, onError: (_) {});
+    // Data can go stale without any new event arriving — re-check on a timer.
+    _staleTick = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (stale != _wasStale) {
+        _wasStale = stale;
+        notifyListeners();
+      }
+    });
   }
 
   void setShowDemo(bool value) {
@@ -157,6 +187,7 @@ class MapDataController extends ChangeNotifier {
   /// Worst stage-rank among targets relevant (≤40 km or same zone) to any
   /// currently selected place → drives the threat indicator.
   bool get threatActive {
+    if (stale) return false;
     for (final p in selectedPlaces) {
       for (final t in alarmTargets) {
         final relevant = _km(t, p) <= 40 || (p.zone != null && t.zone == p.zone);
@@ -219,6 +250,7 @@ class MapDataController extends ChangeNotifier {
     if (data is! Map) return;
     _live = true;
     _stateTs = (data['ts'] as num?)?.toInt() ?? _stateTs;
+    _wasStale = stale;
     _homeName = (data['homeName'] ?? _homeName).toString();
     final home = data['home'];
     if (home is Map && home['lat'] != null && home['lon'] != null) {
@@ -366,6 +398,7 @@ class MapDataController extends ChangeNotifier {
   @override
   void dispose() {
     _sub?.cancel();
+    _staleTick?.cancel();
     super.dispose();
   }
 }

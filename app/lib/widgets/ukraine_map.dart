@@ -15,12 +15,17 @@ import '../utils/svg_path.dart';
 // Geographic bounds of the equirectangular projection — MUST match _Fit.project.
 const double _lon0 = 22.14, _lonSpan = 18.09, _lat1 = 52.38, _latSpan = 7.99;
 
+// Official-alert fills: a deep burgundy and a muted gold read well over imagery.
+const Color _alarmRed = Color(0xFFC0303F);
+const Color _alarmYellow = Color(0xFFD9B21F);
+
 /// Fit the geographic bounds into [size] preserving the lon/lat aspect, so the
 /// projection matches the oblast polygons exactly (the country is drawn from
 /// them — no separate silhouette that could drift out of alignment).
-_Fit _geoFit(Size size) {
+_Fit _geoFit(Size size, [EdgeInsets insets = EdgeInsets.zero]) {
   const pad = 12.0;
-  final aW = size.width - 2 * pad, aH = size.height - 2 * pad;
+  final aW = size.width - 2 * pad - insets.horizontal,
+      aH = size.height - 2 * pad - insets.vertical;
   // Correct for longitude compression at Ukraine's latitude (a degree of lon is
   // ~cos(48.4°)≈0.66 of a degree of lat) — otherwise the country looks squashed.
   final midLat = (_lat1 + (_lat1 - _latSpan)) / 2;
@@ -34,7 +39,11 @@ _Fit _geoFit(Size size) {
     ph = pw / aspect;
   }
   return _Fit(
-      s: 1, pw: pw, ph: ph, oX: (size.width - pw) / 2, oY: (size.height - ph) / 2);
+      s: 1,
+      pw: pw,
+      ph: ph,
+      oX: insets.left + (size.width - insets.horizontal - pw) / 2,
+      oY: insets.top + (size.height - insets.vertical - ph) / 2);
 }
 
 /// Full custom-painted Ukraine threat map — Ukraine silhouette, tiered cities,
@@ -53,7 +62,20 @@ class UkraineMap extends StatefulWidget {
     this.oblastLevels = const {},
     this.raionLevels = const {},
     this.oblastWhole = const {},
+    this.showControls = true,
+    this.showLegend = true,
+    this.insets = EdgeInsets.zero,
+    this.dimTargets = false,
   });
+
+  final bool showControls;
+  final bool showLegend;
+
+  /// Screen area covered by floating UI — the country is fitted into the rest.
+  final EdgeInsets insets;
+
+  /// Draw targets faded (stale snapshot: last known positions, not live).
+  final bool dimTargets;
 
   final List<MapTarget> targets;
   final ({double lat, double lon}) home;
@@ -71,10 +93,10 @@ class UkraineMap extends StatefulWidget {
   final Map<String, String> oblastWhole;
 
   @override
-  State<UkraineMap> createState() => _UkraineMapState();
+  State<UkraineMap> createState() => UkraineMapState();
 }
 
-class _UkraineMapState extends State<UkraineMap>
+class UkraineMapState extends State<UkraineMap>
     with SingleTickerProviderStateMixin {
   late final Map<String, List<_FigPathPart>> _figs;
   late final List<_Oblast> _oblasts;
@@ -90,6 +112,11 @@ class _UkraineMapState extends State<UkraineMap>
   double _startScale = 1;
   Offset _startT = Offset.zero;
   Offset _focalBase = Offset.zero;
+
+  // --- Public controls (the screen draws its own glass buttons) ---
+  void zoomIn() => _zoomAt(_size.center(Offset.zero), 1.35);
+  void zoomOut() => _zoomAt(_size.center(Offset.zero), 1 / 1.35);
+  void resetView() => setState(() => _autoFocus(_size));
 
   @override
   void initState() {
@@ -220,11 +247,14 @@ class _UkraineMapState extends State<UkraineMap>
                     oblastLevels: widget.oblastLevels,
                     raionLevels: widget.raionLevels,
                     oblastWhole: widget.oblastWhole,
+                    insets: widget.insets,
+                    dimTargets: widget.dimTargets,
                   ),
                 ),
               ),
             ),
             ),
+            if (widget.showControls)
             Positioned(
               right: 12,
               top: 12,
@@ -246,7 +276,8 @@ class _UkraineMapState extends State<UkraineMap>
                 ],
               ),
             ),
-            const Positioned(left: 12, bottom: 12, child: _Legend()),
+            if (widget.showLegend)
+              const Positioned(left: 12, bottom: 12, child: _Legend()),
           ],
         );
       },
@@ -314,7 +345,12 @@ class _MapPainter extends CustomPainter {
     required this.oblastLevels,
     required this.raionLevels,
     required this.oblastWhole,
+    this.insets = EdgeInsets.zero,
+    this.dimTargets = false,
   });
+
+  final EdgeInsets insets;
+  final bool dimTargets;
 
   final Map<String, List<_FigPathPart>> figs;
   final List<MapTarget> targets;
@@ -367,16 +403,7 @@ class _MapPainter extends CustomPainter {
     // Pixels-per-unit for the target silhouettes (fig coords are ~±10 units,
     // so a shahed ≈ 19 units × figScale). Fixed on-screen size, independent of
     // zoom; a touch larger on wide desktop windows.
-    final ppu = (size.width / 340).clamp(2.6, 4.2);
-
-    // --- Hot-zone glow under target clusters ---
-    for (final t in targets) {
-      final p = _toScreen(fit.project(t.lon, t.lat));
-      final glow = Paint()
-        ..color = const Color(0xFFFF3B30).withValues(alpha: 0.16)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 22);
-      canvas.drawCircle(p, 26 + 6.0 * t.amount, glow);
-    }
+    final ppu = (size.width / 420).clamp(2.0, 3.4);
 
     // --- Country drawn FROM the oblast polygons, so land, oblast borders and
     //     the alert shading all share the exact same geometry (perfectly
@@ -393,25 +420,59 @@ class _MapPainter extends CustomPainter {
       }
       obPaths[ob] = path;
     }
-    // Land fill.
-    final landPaint = Paint()
-      ..style = PaintingStyle.fill
-      ..color = AppColors.mapLand;
+
+    // Land: a soft vertical gradient so the country reads as a raised surface
+    // on the dark sea, plus a faint outer glow along the border.
+    final bounds = Rect.fromPoints(
+      _toScreen(fit.project(_lon0, _lat1)),
+      _toScreen(fit.project(_lon0 + _lonSpan, _lat1 - _latSpan)),
+    );
+    final land = Path();
     for (final ob in oblasts) {
-      canvas.drawPath(obPaths[ob]!, landPaint);
+      land.addPath(obPaths[ob]!, Offset.zero);
     }
+    canvas.drawPath(
+        land,
+        Paint()
+          ..color = AppColors.primary.withValues(alpha: AppColors.isDark ? 0.10 : 0.08)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18));
+    canvas.drawPath(
+        land,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.lerp(AppColors.mapLand, Colors.white, AppColors.isDark ? 0.05 : 0)!,
+              AppColors.mapLand,
+            ],
+          ).createShader(bounds));
+
+    // --- Hot-zone glow under target clusters ---
+    if (!dimTargets) {
+      for (final t in targets) {
+        final p = _toScreen(fit.project(t.lon, t.lat));
+        canvas.drawCircle(
+            p,
+            22 + 5.0 * t.amount,
+            Paint()
+              ..color = const Color(0xFFFF3B30).withValues(alpha: 0.14)
+              ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20));
+      }
+    }
+
     // Official shading — fill a WHOLE oblast only when the whole oblast is under
     // alarm (like the official map). Per-raion alarms are drawn below.
     for (final ob in oblasts) {
       final lvl = oblastWhole[ob.name];
       if (lvl == null) continue;
       final red = lvl == 'red';
-      final base = red ? const Color(0xFFE23A34) : const Color(0xFFFFC400);
       canvas.drawPath(
           obPaths[ob]!,
           Paint()
             ..style = PaintingStyle.fill
-            ..color = base.withValues(alpha: red ? 0.52 : 0.46));
+            ..color = (red ? _alarmRed : _alarmYellow)
+                .withValues(alpha: red ? 0.5 : 0.4));
     }
     // --- Raion split: fill alarmed raions individually + faint raion borders,
     //     so partially-alarmed oblasts show WHICH raions (official-style). ---
@@ -434,19 +495,19 @@ class _MapPainter extends CustomPainter {
         final lvl = raiLvl[_napo(r.name)];
         if (lvl != null) {
           final red = lvl == 'red';
-          final base = red ? const Color(0xFFE23A34) : const Color(0xFFFFC400);
           canvas.drawPath(
               rp,
               Paint()
                 ..style = PaintingStyle.fill
-                ..color = base.withValues(alpha: red ? 0.52 : 0.5));
+                ..color = (red ? _alarmRed : _alarmYellow)
+                    .withValues(alpha: red ? 0.5 : 0.42));
         }
       }
       canvas.drawPath(
           borderPath,
           Paint()
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 0.6
+            ..strokeWidth = 0.5
             ..strokeJoin = StrokeJoin.round
             ..color = const Color(0xFF8296B4).withValues(alpha: 0.28));
     }
@@ -470,8 +531,7 @@ class _MapPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.3
             ..strokeJoin = StrokeJoin.round
-            ..color = (red ? const Color(0xFFE23A34) : const Color(0xFFFFC400))
-                .withValues(alpha: 0.9));
+            ..color = (red ? _alarmRed : _alarmYellow).withValues(alpha: 0.9));
     }
 
     // --- Cities / towns / villages (tiered by zoom, thinned + de-cluttered) ---
@@ -505,7 +565,10 @@ class _MapPainter extends CustomPainter {
                   ? 1.4
                   : 1.0;
       canvas.drawCircle(
-          p, r, Paint()..color = village ? AppColors.textMuted : AppColors.primary);
+          p,
+          r,
+          Paint()
+            ..color = village ? AppColors.textMuted : AppColors.primary);
       canvas.drawCircle(p, r,
           Paint()
             ..style = PaintingStyle.stroke
@@ -535,7 +598,8 @@ class _MapPainter extends CustomPainter {
       if (clash) continue;
       placed.add(box.inflate(1));
       _text(canvas, c.name, p + Offset(0, -(r + 3)),
-          fs, village ? AppColors.textSecondary : AppColors.textPrimary,
+          fs,
+          village ? AppColors.textSecondary : AppColors.textPrimary,
           center: true, stroke: true);
     }
 
@@ -575,7 +639,13 @@ class _MapPainter extends CustomPainter {
           ..color = const Color(0xFF5AA9FF).withValues(alpha: 1 - pulse * 0.6));
     canvas.drawCircle(hp, 3.2, Paint()..color = const Color(0xFF5AA9FF));
 
-    // --- Targets ---
+    // --- Targets: compact badges (dark disc + coloured ring + silhouette) ---
+    // A stale snapshot is drawn faded and frozen (no dead-reckoning).
+    if (dimTargets) {
+      canvas.saveLayer(Offset.zero & size,
+          Paint()..color = Colors.white.withValues(alpha: 0.4));
+    }
+    final badgeR = (ppu * 4.6).clamp(10.0, 15.0);
     for (final t in targets) {
       final cat = figs.containsKey(t.cat) ? t.cat : 'other';
       final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
@@ -584,7 +654,7 @@ class _MapPainter extends CustomPainter {
 
       // Dead-reckoning: extrapolate along heading from last observed position.
       double lon = t.lon, lat = t.lat;
-      if (known) {
+      if (known && !dimTargets) {
         final em = math.max(0, (nowMs - (t.seenMs == 0 ? nowMs : t.seenMs)) / 60000);
         final d = math.min(60.0, spd * em);
         final m = _moveKm(t.lon, t.lat, t.heading!, d);
@@ -595,54 +665,70 @@ class _MapPainter extends CustomPainter {
 
       // Trail.
       if (t.trail.length > 1) {
-        final tp = Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2
-          ..color = color.withValues(alpha: 0.35);
         final path = Path();
         for (var i = 0; i < t.trail.length; i++) {
           final s = _toScreen(fit.project(t.trail[i][1], t.trail[i][0]));
           i == 0 ? path.moveTo(s.dx, s.dy) : path.lineTo(s.dx, s.dy);
         }
-        canvas.drawPath(path, tp);
+        canvas.drawPath(
+            path,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.4
+              ..strokeCap = StrokeCap.round
+              ..color = color.withValues(alpha: 0.4));
       }
 
-      // AI course prediction: dashed line + ghost + predicted city.
-      if (known && spd > 0) {
+      // Course prediction: dashed line to where it's heading (+ city when zoomed).
+      if (known && spd > 0 && !dimTargets) {
         final lead = math.min(55.0, spd * 10);
         final pd = _moveKm(lon, lat, t.heading!, lead);
         final ps = _toScreen(fit.project(pd.dx, pd.dy));
         _dashedLine(canvas, scr, ps,
             Paint()
-              ..color = color.withValues(alpha: 0.55)
+              ..color = color.withValues(alpha: 0.6)
               ..strokeWidth = 1.3
               ..strokeCap = StrokeCap.round);
-        _drawFig(canvas, ps, t.heading!, cat, color, ppu * 0.85, ghost: true);
-        final nc = _nearestCity(pd.dx, pd.dy);
-        if (nc != null) {
-          _text(canvas, '→ ${nc.name}?', ps + const Offset(9, -9), 11,
-              color.withValues(alpha: 0.95), stroke: true, bold: true);
+        canvas.drawCircle(ps, 2.6, Paint()..color = color.withValues(alpha: 0.8));
+        if (scale >= 1.6) {
+          final nc = _nearestCity(pd.dx, pd.dy);
+          if (nc != null) {
+            _text(canvas, '→ ${nc.name}?', ps + const Offset(7, -8), 10.5,
+                color, stroke: true, bold: true);
+          }
         }
       }
 
-      // Main silhouette.
-      final figH = 19 * figScale(cat) * ppu; // approx on-screen height
-      _drawFig(canvas, scr, t.heading ?? 0, cat, color, ppu);
+      // Badge.
+      canvas.drawCircle(scr, badgeR + 3,
+          Paint()
+            ..color = Colors.black.withValues(alpha: 0.35)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4));
+      canvas.drawCircle(scr, badgeR, Paint()..color = const Color(0xF0101419));
+      canvas.drawCircle(
+          scr,
+          badgeR,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.8
+            ..color = color);
+      _drawFig(canvas, scr, t.heading ?? 0, cat, color, badgeR / 12.5);
 
-      // ×N cluster label.
+      // ×N cluster label above the badge.
       if (t.amount > 1) {
-        _text(canvas, '×${t.amount}', scr + Offset(figH * 0.42, -figH * 0.5),
-            14, color, stroke: true, bold: true);
+        _text(canvas, '×${t.amount}', scr + Offset(0, -badgeR - 2), 12.5,
+            AppColors.textPrimary, center: true, stroke: true, bold: true);
       }
       // Place label when zoomed in.
       if (scale >= 2.2 && t.place.isNotEmpty) {
-        _text(canvas, t.place, scr + Offset(figH * 0.42, figH * 0.36), 10,
-            color, stroke: true, bold: true);
+        _text(canvas, t.place, scr + Offset(badgeR + 4, 0), 10.5,
+            AppColors.textPrimary, stroke: true, bold: true);
       }
     }
+    if (dimTargets) canvas.restore();
   }
 
-  _Fit _fit(Size size) => _geoFit(size);
+  _Fit _fit(Size size) => _geoFit(size, insets);
 
   void _drawFig(Canvas canvas, Offset at, double headingDeg, String cat,
       Color color, double ppu,

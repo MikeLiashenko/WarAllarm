@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -83,7 +83,7 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 14),
 
-          if (Platform.isAndroid) ...[
+          if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) ...[
             _Group(
               title: 'Фонові тривоги',
               children: const [_BackgroundAlarmToggle()],

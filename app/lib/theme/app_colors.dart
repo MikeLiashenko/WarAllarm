@@ -42,6 +42,13 @@ class AppColors {
   // Night summary (violet)
   static Color night = _darkNight;
 
+  // Signal yellow — active-tab indicator, partial alerts (same in both themes).
+  static const Color highlight = Color(0xFFFFD60A);
+
+  // Floating glass over the map.
+  static Color glass = const Color(0xB80E1218);
+  static Color glassBorder = const Color(0x1FFFFFFF);
+
   // Text
   static Color textPrimary = _darkTextPrimary;
   static Color textSecondary = _darkTextSecondary;
@@ -139,6 +146,8 @@ class AppColors {
 
   static void applyLight() {
     isDark = false;
+    glass = const Color(0xD9FFFFFF);
+    glassBorder = const Color(0x140D1117);
     background = _lightBackground;
     surface = _lightSurface;
     surface2 = _lightSurface2;
@@ -173,6 +182,8 @@ class AppColors {
 
   static void applyDark() {
     isDark = true;
+    glass = const Color(0xB80E1218);
+    glassBorder = const Color(0x1FFFFFFF);
     background = _darkBackground;
     surface = _darkSurface;
     surface2 = _darkSurface2;

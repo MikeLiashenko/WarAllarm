@@ -12,18 +12,17 @@ import '../services/home_widget_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/alarm_overlay.dart';
 import '../widgets/boom_prompt.dart';
-import '../widgets/app_sidebar.dart';
+import '../widgets/floating_nav.dart';
 import '../widgets/responsive.dart';
 import 'ai_screen.dart';
 import 'api_keys_screen.dart';
 import 'chat_screen.dart';
-import 'map_screen.dart';
 import 'my_places_screen.dart';
 import 'now_screen.dart';
 import 'settings_screen.dart';
 
-/// Root layout: fixed left sidebar + active screen. Responsive between desktop
-/// windows and Android phone ratios.
+/// Root layout: the active screen full-bleed with the navigation floating over
+/// it (glass capsule at the bottom on phones, glass rail on the left on desktop).
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -86,34 +85,36 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final nav = context.watch<NavController>();
-    final collapsed = Responsive.railCollapsed(context);
     final phone = Responsive.useBottomNav(context);
+    final mq = MediaQuery.of(context);
     // Built fresh (non-const) each build so a theme change rebuilds every screen
-    // and it re-reads the (mutable) AppColors palette.
+    // and it re-reads the (mutable) AppColors palette. Order = AppTab order.
     final screens = <Widget>[
       NowScreen(),
-      MapScreen(),
       MyPlacesScreen(),
-      SettingsScreen(),
       ChatScreen(),
       AiScreen(),
+      SettingsScreen(),
       ApiKeysScreen(),
     ];
 
-    final content = ColoredBox(
-      color: AppColors.background,
+    // The floating nav covers part of the screen: hand that to the screens as
+    // extra safe-area padding, so PageBody/SafeArea keep content clear of it.
+    final navPad = phone
+        ? mq.padding.copyWith(bottom: mq.padding.bottom + 78)
+        : mq.padding.copyWith(left: mq.padding.left + 96);
+
+    final content = MediaQuery(
+      data: mq.copyWith(padding: navPad, viewPadding: navPad),
       child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 220),
         switchInCurve: Curves.easeOut,
-        transitionBuilder: (child, animation) => FadeTransition(
-          opacity: animation,
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 0.015),
-              end: Offset.zero,
-            ).animate(animation),
-            child: child,
-          ),
+        transitionBuilder: (child, animation) =>
+            FadeTransition(opacity: animation, child: child),
+        // Screens fill the whole area (the default layout centres them loosely).
+        layoutBuilder: (current, previous) => Stack(
+          fit: StackFit.expand,
+          children: [...previous, ?current],
         ),
         child: KeyedSubtree(
           key: ValueKey(nav.tab),
@@ -124,29 +125,47 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
     final scaffold = Scaffold(
       backgroundColor: AppColors.background,
-      bottomNavigationBar: phone ? const AppBottomBar() : null,
-      body: phone
-          ? Column(
-              children: [
-                ColoredBox(
-                  color: AppColors.sidebarBg,
-                  child: const SafeArea(bottom: false, child: CompactTopBar()),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(-0.6, -1.1),
+                  radius: 1.3,
+                  // Opaque stops: blending a translucent colour into an opaque one
+                  // tints the whole gradient.
+                  colors: [
+                    Color.alphaBlend(
+                        AppColors.primary
+                            .withValues(alpha: AppColors.isDark ? 0.07 : 0.05),
+                        AppColors.background),
+                    AppColors.background,
+                  ],
                 ),
-                Expanded(
-                  child: MediaQuery.removePadding(
-                      context: context, removeTop: true, child: content),
-                ),
-              ],
-            )
-          : Row(
-              children: [
-                AppSidebar(collapsed: collapsed),
-                Expanded(child: content),
-              ],
+              ),
             ),
+          ),
+          Positioned.fill(child: content),
+          if (phone)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: mq.padding.bottom + 12,
+              child: const FloatingNavBar(),
+            )
+          else
+            Positioned(
+              left: 16,
+              top: 0,
+              bottom: 0,
+              child: const Center(child: FloatingRail()),
+            ),
+        ],
+      ),
     );
 
-    // Overlays sit above the whole scaffold (bottom bar included).
+    // Overlays sit above everything (navigation included).
     return Material(
       type: MaterialType.transparency,
       child: Stack(
