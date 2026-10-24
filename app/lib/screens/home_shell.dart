@@ -87,6 +87,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final nav = context.watch<NavController>();
     final collapsed = Responsive.railCollapsed(context);
+    final phone = Responsive.useBottomNav(context);
     // Built fresh (non-const) each build so a theme change rebuilds every screen
     // and it re-reads the (mutable) AppColors palette.
     final screens = <Widget>[
@@ -99,44 +100,58 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       ApiKeysScreen(),
     ];
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Stack(
-        children: [
-          Row(
-            children: [
-              AppSidebar(collapsed: collapsed),
-              Expanded(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [AppColors.background, AppColors.scaffold],
-                    ),
-                  ),
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
-                    switchInCurve: Curves.easeOut,
-                    transitionBuilder: (child, animation) => FadeTransition(
-                      opacity: animation,
-                      child: SlideTransition(
-                        position: Tween<Offset>(
-                          begin: const Offset(0, 0.02),
-                          end: Offset.zero,
-                        ).animate(animation),
-                        child: child,
-                      ),
-                    ),
-                    child: KeyedSubtree(
-                      key: ValueKey(nav.tab),
-                      child: screens[nav.tab.index],
-                    ),
-                  ),
-                ),
-              ),
-            ],
+    final content = ColoredBox(
+      color: AppColors.background,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        switchInCurve: Curves.easeOut,
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.015),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
           ),
+        ),
+        child: KeyedSubtree(
+          key: ValueKey(nav.tab),
+          child: screens[nav.tab.index],
+        ),
+      ),
+    );
+
+    final scaffold = Scaffold(
+      backgroundColor: AppColors.background,
+      bottomNavigationBar: phone ? const AppBottomBar() : null,
+      body: phone
+          ? Column(
+              children: [
+                ColoredBox(
+                  color: AppColors.sidebarBg,
+                  child: const SafeArea(bottom: false, child: CompactTopBar()),
+                ),
+                Expanded(
+                  child: MediaQuery.removePadding(
+                      context: context, removeTop: true, child: content),
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                AppSidebar(collapsed: collapsed),
+                Expanded(child: content),
+              ],
+            ),
+    );
+
+    // Overlays sit above the whole scaffold (bottom bar included).
+    return Material(
+      type: MaterialType.transparency,
+      child: Stack(
+        children: [
+          Positioned.fill(child: scaffold),
           // Siren overlay + snooze bar, above every screen.
           const AlarmOverlay(),
           // After an alarm ends, offer the optional "чи було чути вибух?" window.
@@ -156,9 +171,10 @@ class PageBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = Responsive.isCompact(context);
     final padding = EdgeInsets.symmetric(
-      horizontal: Responsive.isCompact(context) ? 16 : 28,
-      vertical: 22,
+      horizontal: compact ? 14 : 32,
+      vertical: compact ? 14 : 26,
     );
     final content = ConstrainedBox(
       constraints:

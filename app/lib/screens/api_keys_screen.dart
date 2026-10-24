@@ -314,8 +314,9 @@ class _CodeBlock extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0xFF0F2035),
-        borderRadius: BorderRadius.circular(16),
+        color: AppColors.isDark ? const Color(0xFF07090D) : const Color(0xFF111821),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -332,7 +333,7 @@ class _CodeBlock extends StatelessWidget {
                   onPressed: onCopy,
                   icon: const Icon(Icons.copy_rounded,
                       size: 15, color: Colors.white70),
-                  label: const Text('Copy',
+                  label: const Text('Копіювати',
                       style: TextStyle(color: Colors.white70, fontSize: 12.5)),
                 ),
               ],

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/alarm_controller.dart';
-import '../theme/app_colors.dart';
 
 /// Full-screen alert that appears over everything while the siren is ringing,
 /// plus a slim "sound paused" bar while snoozed. This is what actually makes an
@@ -20,6 +19,9 @@ class _AlarmOverlayState extends State<AlarmOverlay>
     vsync: this,
     duration: const Duration(milliseconds: 700),
   )..repeat(reverse: true);
+
+  // Fixed (theme-independent) alarm reds so white text always reads well.
+  static const _red = Color(0xFFB3170F);
 
   @override
   void dispose() {
@@ -39,11 +41,16 @@ class _AlarmOverlayState extends State<AlarmOverlay>
             alignment: Alignment.topCenter,
             child: Container(
               margin: const EdgeInsets.all(10),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
               decoration: BoxDecoration(
-                color: AppColors.threatDark,
-                borderRadius: BorderRadius.circular(14),
+                color: _red,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Color(0x55000000),
+                      blurRadius: 16,
+                      offset: Offset(0, 6)),
+                ],
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -55,16 +62,23 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                       style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w700,
+                          fontFeatures: [FontFeature.tabularFigures()],
                           fontSize: 13)),
-                  const SizedBox(width: 12),
-                  GestureDetector(
-                    onTap: () => context.read<AlarmController>().resume(),
+                  const SizedBox(width: 10),
+                  TextButton(
+                    onPressed: () => context.read<AlarmController>().resume(),
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: 0.18),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      minimumSize: Size.zero,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20)),
+                    ),
                     child: const Text('Увімкнути',
                         style: TextStyle(
-                            color: Colors.white,
-                            decoration: TextDecoration.underline,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13)),
+                            fontWeight: FontWeight.w800, fontSize: 13)),
                   ),
                 ],
               ),
@@ -77,129 +91,211 @@ class _AlarmOverlayState extends State<AlarmOverlay>
 
     // Ringing → full-screen unmissable alarm. The background and the button stay
     // steady (opaque) so the button is always crisp and instantly tappable —
-    // only the 🚨 icon pulses, for the "alarm" feel.
+    // only the rings behind the icon pulse, for the "alarm" feel.
+    final nuclear = alarm.nuclearAlarm;
+    final impact = alarm.impactAlarm;
+    // Радіація — окремий, темний «не-червоний» фон, щоб миттєво відрізнявся.
+    final colors = nuclear
+        ? const [Color(0xFF1A1500), Color(0xFF3A2E00)]
+        : const [Color(0xFF5E0B0B), Color(0xFFD3261D)];
+    final ringColor = nuclear ? const Color(0xFFFFD60A) : Colors.white;
+
     return Positioned.fill(
-      child: Container(
-        // Радіація — окремий, темний «не-червоний» фон, щоб миттєво відрізнявся.
-        color: (alarm.nuclearAlarm
-                ? const Color(0xFF241C00)
-                : AppColors.threat)
-            .withValues(alpha: 0.98),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: colors,
+          ),
+        ),
         child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(28),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FadeTransition(
-                    opacity: _pulse.drive(Tween(begin: 0.45, end: 1.0)),
-                    child: Text(
-                        alarm.nuclearAlarm
-                            ? '☢️'
-                            : alarm.impactAlarm
-                                ? '💥'
-                                : '🚨',
-                        style: const TextStyle(fontSize: 72),
-                        textAlign: TextAlign.center),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                      alarm.nuclearAlarm
-                          ? 'РАДІАЦІЙНА НЕБЕЗПЕКА'
-                          : alarm.impactAlarm
-                              ? 'ПРИЛІТ ПОРУЧ'
-                              : 'ТРИВОГА',
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      height: 150,
+                      child: AnimatedBuilder(
+                        animation: _pulse,
+                        builder: (_, _) => Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            for (final k in const [1.0, 0.72])
+                              Container(
+                                width: 150 * k * (0.86 + 0.14 * _pulse.value),
+                                height: 150 * k * (0.86 + 0.14 * _pulse.value),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: ringColor.withValues(
+                                          alpha: 0.18 + 0.2 * _pulse.value),
+                                      width: 2),
+                                ),
+                              ),
+                            Container(
+                              width: 84,
+                              height: 84,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: ringColor.withValues(alpha: 0.16),
+                              ),
+                              child: Text(
+                                  nuclear
+                                      ? '☢️'
+                                      : impact
+                                          ? '💥'
+                                          : '🚨',
+                                  style: const TextStyle(fontSize: 46)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                        nuclear
+                            ? 'РАДІАЦІЙНА НЕБЕЗПЕКА'
+                            : impact
+                                ? 'ПРИЛІТ ПОРУЧ'
+                                : 'ТРИВОГА',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: nuclear
+                                ? 30
+                                : impact
+                                    ? 42
+                                    : 52,
+                            height: 1.05,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2)),
+                    const SizedBox(height: 14),
+                    Text(
+                      alarm.detail.isEmpty
+                          ? 'Загроза поруч — в укриття!'
+                          : alarm.detail,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                           color: Colors.white,
-                          fontSize: alarm.nuclearAlarm
-                              ? 28
-                              : alarm.impactAlarm
-                                  ? 40
-                                  : 46,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.5)),
-                  // Прилёт над домом — предупреждаем, что сейчас может быть громко.
-                  if (alarm.impactAlarm && !alarm.nuclearAlarm) ...[
-                    const SizedBox(height: 12),
-                    const Text('⚠️ Зараз може бути гучно',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 4),
-                    const Text('Вибухи або робота ППО поруч. Тримайся, це нормально боятися.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: Colors.white, fontSize: 14.5, height: 1.35)),
-                  ],
-                  // Радіація — дії ІНШІ, ніж при звичайній тривозі (не в підвал за стіни,
-                  // а укритися в приміщенні й загерметизуватися).
-                  if (alarm.nuclearAlarm) ...[
-                    const SizedBox(height: 12),
-                    const Text('Негайно в приміщення',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 8),
-                    const Text(
+                          fontSize: 17,
+                          height: 1.35,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    // Прилёт над домом — предупреждаем, что сейчас может быть громко.
+                    if (impact && !nuclear) ...[
+                      const SizedBox(height: 18),
+                      _card(
+                        '⚠️ Зараз може бути гучно',
+                        'Вибухи або робота ППО поруч. Тримайся, це нормально боятися.',
+                      ),
+                    ],
+                    // Радіація — дії ІНШІ, ніж при звичайній тривозі (не в підвал за стіни,
+                    // а укритися в приміщенні й загерметизуватися).
+                    if (nuclear) ...[
+                      const SizedBox(height: 18),
+                      _card(
+                        'Негайно в приміщення',
                         '• Зачини вікна, двері, вимкни вентиляцію/кондиціонер\n'
-                        '• Углиб будівлі, подалі від вікон і зовнішніх стін\n'
-                        '• Не виходь надвір. Був надворі — зніми верхній одяг, прийми душ\n'
-                        '• Йод (калію йодид) — ЛИШЕ за вказівкою ДСНС\n'
-                        '• Слухай офіційні джерела (ДСНС, ОВА), чекай відбою',
-                        textAlign: TextAlign.left,
-                        style: TextStyle(
-                            color: Colors.white, fontSize: 14.5, height: 1.5)),
-                  ],
-                  const SizedBox(height: 12),
-                  Text(
-                    alarm.detail.isEmpty
-                        ? 'Загроза поруч — в укриття!'
-                        : alarm.detail,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        color: Colors.white, fontSize: 17,
-                        fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 22),
-                  if (!alarm.nuclearAlarm)
+                            '• Углиб будівлі, подалі від вікон і зовнішніх стін\n'
+                            '• Не виходь надвір. Був надворі — зніми верхній одяг, прийми душ\n'
+                            '• Йод (калію йодид) — ЛИШЕ за вказівкою ДСНС\n'
+                            '• Слухай офіційні джерела (ДСНС, ОВА), чекай відбою',
+                        left: true,
+                      ),
+                    ],
+                    if (!nuclear) ...[
+                      const SizedBox(height: 18),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final s in const [
+                            'Подалі від вікон',
+                            'Правило двох стін',
+                            'Будь з дорослими',
+                          ])
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.25)),
+                              ),
+                              child: Text(s,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 30),
+                    ElevatedButton(
+                      onPressed: () => context.read<AlarmController>().hush(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor:
+                            nuclear ? const Color(0xFF3A2E00) : _red,
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                      ),
+                      child: const Text('Я в укритті — стоп звук',
+                          style: TextStyle(
+                              fontSize: 17, fontWeight: FontWeight.w900)),
+                    ),
+                    const SizedBox(height: 10),
                     const Text(
-                      'Подалі від вікон · правило двох стін · будь з дорослими',
+                      'Звук сам увімкнеться знову, якщо небезпека триває.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                          color: Colors.white, fontSize: 14.5, height: 1.4),
+                      style: TextStyle(color: Colors.white70, fontSize: 12.5),
                     ),
-                  const SizedBox(height: 34),
-                  ElevatedButton(
-                    onPressed: () =>
-                        context.read<AlarmController>().hush(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: AppColors.threatDark,
-                      padding: const EdgeInsets.symmetric(vertical: 20),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18)),
-                    ),
-                    child: const Text('Я в укритті — стоп звук',
-                        style: TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.w800)),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Звук сам увімкнеться знову, якщо небезпека триває.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white70, fontSize: 12.5),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _card(String title, String body, {bool left = false}) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment:
+            left ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+        children: [
+          Text(title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Text(body,
+              textAlign: left ? TextAlign.left : TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.white, fontSize: 14.5, height: 1.5)),
+        ],
+      ),
     );
   }
 }

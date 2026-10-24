@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
 
-/// Consistent screen / section heading with optional trailing action.
+/// Screen heading: big title, optional muted subtitle, optional trailing
+/// action. The icon renders as a small tile to the left.
 class SectionHeader extends StatelessWidget {
   const SectionHeader({
     super.key,
@@ -24,13 +26,14 @@ class SectionHeader extends StatelessWidget {
       children: [
         if (icon != null) ...[
           Container(
-            width: 42,
-            height: 42,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color: AppColors.primarySoft,
-              borderRadius: BorderRadius.circular(13),
+              color: AppColors.surface2,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              border: Border.all(color: AppColors.border),
             ),
-            child: Icon(icon, color: AppColors.primary, size: 22),
+            child: Icon(icon, color: AppColors.textPrimary, size: 20),
           ),
           const SizedBox(width: 14),
         ],
@@ -41,18 +44,19 @@ class SectionHeader extends StatelessWidget {
               Text(
                 title,
                 style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 24,
+                  height: 1.15,
+                  fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary,
-                  letterSpacing: -0.4,
+                  letterSpacing: -0.6,
                 ),
               ),
               if (subtitle != null) ...[
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   subtitle!,
                   style: TextStyle(
-                    fontSize: 13.5,
+                    fontSize: 13,
                     color: AppColors.textSecondary,
                   ),
                 ),

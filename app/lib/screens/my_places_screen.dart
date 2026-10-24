@@ -6,7 +6,9 @@ import '../data/places_gazetteer.dart';
 import '../data/ukraine_geo.dart';
 import '../models/saved_place.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
 import '../widgets/glass_container.dart';
+import '../widgets/ui_kit.dart';
 import '../widgets/section_header.dart';
 import 'home_shell.dart';
 
@@ -38,9 +40,8 @@ class MyPlacesScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SectionHeader(
-            title: 'My Places',
-            subtitle: 'Pin and manage the regions you monitor',
-            icon: Icons.place_rounded,
+            title: 'Мої місця',
+            subtitle: 'Міста й райони, за якими стежить тривога',
             trailing: ElevatedButton.icon(
               onPressed: () => _showAddDialog(context, controller),
               icon: const Icon(Icons.add, size: 18),
@@ -53,20 +54,20 @@ class MyPlacesScreen extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 46),
               child: Column(
                 children: [
-                  Icon(Icons.map_outlined,
-                      size: 42, color: AppColors.textMuted),
+                  Icon(Icons.add_location_alt_outlined,
+                      size: 40, color: AppColors.textMuted),
                   const SizedBox(height: 12),
-                  Text('No saved places yet',
+                  Text('Ще немає збережених місць',
                       style: TextStyle(
                           fontWeight: FontWeight.w600,
                           color: AppColors.textPrimary)),
                   const SizedBox(height: 4),
-                  Text('Add a city or region to start monitoring it.',
+                  Text('Додай місто чи район — і тривога стежитиме за ним.',
                       style: TextStyle(color: AppColors.textSecondary)),
                   const SizedBox(height: 16),
                   ElevatedButton(
                     onPressed: () => _showAddDialog(context, controller),
-                    child: const Text('Add your first place'),
+                    child: const Text('Додати перше місце'),
                   ),
                 ],
               ),
@@ -83,7 +84,7 @@ class MyPlacesScreen extends StatelessWidget {
                     crossAxisCount: columns,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    mainAxisExtent: 116,
+                    mainAxisExtent: 84,
                   ),
                   itemBuilder: (context, i) =>
                       _PlaceCard(place: places[i], controller: controller),
@@ -233,32 +234,17 @@ class _PlaceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
         border: Border.all(color: AppColors.border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0A1B3A66),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-            spreadRadius: -8,
-          ),
-        ],
       ),
       child: Row(
         children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: AppColors.primarySoft,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(Icons.location_city_rounded,
-                color: AppColors.primary),
-          ),
+          IconTile(Icons.location_city_rounded,
+              color: place.notify ? AppColors.primary : AppColors.textMuted,
+              size: 42),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -267,36 +253,40 @@ class _PlaceCard extends StatelessWidget {
               children: [
                 Text(
                   place.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 15.5,
+                    fontSize: 15,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   place.region.isEmpty
-                      ? '${place.lat.toStringAsFixed(2)}, ${place.lng.toStringAsFixed(2)}'
+                      ? '${place.lat.toStringAsFixed(3)}, ${place.lng.toStringAsFixed(3)}'
                       : place.region,
                   style: TextStyle(
-                      fontSize: 12.5, color: AppColors.textSecondary),
+                      fontSize: 12,
+                      color: AppColors.textMuted,
+                      fontFeatures: AppText.tabular),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
           IconButton(
-            tooltip: place.notify ? 'Notifications on' : 'Notifications off',
+            tooltip: place.notify ? 'Сповіщення увімкнено' : 'Сповіщення вимкнено',
             onPressed: () => controller.toggleNotify(place.id),
             icon: Icon(
               place.notify
                   ? Icons.notifications_active_rounded
-                  : Icons.notifications_off_rounded,
+                  : Icons.notifications_off_outlined,
               color: place.notify ? AppColors.primary : AppColors.textMuted,
             ),
           ),
           IconButton(
-            tooltip: 'Remove',
+            tooltip: 'Видалити',
             onPressed: () => controller.remove(place.id),
             icon: Icon(Icons.delete_outline_rounded,
                 color: AppColors.textMuted),

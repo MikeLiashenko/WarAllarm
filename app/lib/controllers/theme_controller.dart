@@ -7,12 +7,16 @@ import '../theme/app_colors.dart';
 /// which rebuilds the app so every widget picks up the new (non-const) colors.
 class ThemeController extends ChangeNotifier {
   ThemeController(this._store) {
-    _dark = _store.getBool('set_dark', fallback: false);
+    // The 2026-10 redesign is dark-first and uses a fresh key, so every
+    // install starts in the dark "night ops" theme (light is one tap away).
+    _dark = _store.getBool(_key, fallback: true);
     _apply();
   }
 
+  static const _key = 'ui_dark';
+
   final LocalStore _store;
-  bool _dark = false;
+  bool _dark = true;
   bool get dark => _dark;
 
   void _apply() => _dark ? AppColors.applyDark() : AppColors.applyLight();
@@ -23,7 +27,7 @@ class ThemeController extends ChangeNotifier {
   void setDark(bool value) {
     if (value == _dark) return;
     _dark = value;
-    _store.setBool('set_dark', value);
+    _store.setBool(_key, value);
     _apply();
     notifyListeners();
   }

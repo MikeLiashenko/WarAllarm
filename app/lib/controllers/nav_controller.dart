@@ -1,21 +1,50 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
-/// The seven primary destinations in the fixed sidebar.
+/// The seven primary destinations.
 enum AppTab { now, map, myPlaces, settings, chat, ai, apiKeys }
 
 extension AppTabInfo on AppTab {
   String get label => switch (this) {
-        AppTab.now => 'Now',
-        AppTab.map => 'Map',
-        AppTab.myPlaces => 'My Places',
-        AppTab.settings => 'Settings',
-        AppTab.chat => 'Chat',
-        AppTab.ai => 'AI',
+        AppTab.now => 'Зараз',
+        AppTab.map => 'Карта',
+        AppTab.myPlaces => 'Мої місця',
+        AppTab.settings => 'Налаштування',
+        AppTab.chat => 'Чат',
+        AppTab.ai => 'AI-помічник',
         AppTab.apiKeys => 'API · Дані',
+      };
+
+  /// Short label for the phone's bottom bar.
+  String get shortLabel => switch (this) {
+        AppTab.myPlaces => 'Місця',
+        AppTab.settings => 'Налашт.',
+        AppTab.ai => 'AI',
+        AppTab.apiKeys => 'API',
+        _ => label,
+      };
+
+  IconData get icon => switch (this) {
+        AppTab.now => Icons.radar_rounded,
+        AppTab.map => Icons.map_outlined,
+        AppTab.myPlaces => Icons.place_outlined,
+        AppTab.settings => Icons.tune_rounded,
+        AppTab.chat => Icons.forum_outlined,
+        AppTab.ai => Icons.auto_awesome_outlined,
+        AppTab.apiKeys => Icons.data_object_rounded,
+      };
+
+  IconData get activeIcon => switch (this) {
+        AppTab.now => Icons.radar_rounded,
+        AppTab.map => Icons.map_rounded,
+        AppTab.myPlaces => Icons.place_rounded,
+        AppTab.settings => Icons.tune_rounded,
+        AppTab.chat => Icons.forum_rounded,
+        AppTab.ai => Icons.auto_awesome_rounded,
+        AppTab.apiKeys => Icons.data_object_rounded,
       };
 }
 
-/// Tracks the active sidebar tab.
+/// Tracks the active tab.
 class NavController extends ChangeNotifier {
   AppTab _tab = AppTab.now;
   AppTab get tab => _tab;

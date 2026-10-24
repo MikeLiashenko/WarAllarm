@@ -53,9 +53,9 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SectionHeader(
-            title: 'Community chat',
-            subtitle: 'Share and receive local updates',
-            icon: Icons.chat_bubble_rounded,
+            title: 'Чат',
+            subtitle: 'Діліться новинами з людьми поруч',
+            icon: Icons.forum_outlined,
           ),
           const SizedBox(height: 16),
           Expanded(
@@ -67,7 +67,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               child: messages.isEmpty
                   ? Center(
-                      child: Text('No messages yet',
+                      child: Text('Поки що повідомлень немає',
                           style: TextStyle(color: AppColors.textSecondary)),
                     )
                   : ListView.builder(

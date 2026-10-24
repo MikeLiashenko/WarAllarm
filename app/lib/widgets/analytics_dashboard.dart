@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../domain/analytics.dart';
 import '../models/analytics_row.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
 import 'glass_container.dart';
+import 'ui_kit.dart';
 
 /// Analytics dashboard ported from the Reader's `map.html` — KPIs + charts by
 /// day, hour and threat type, computed from the alarm journal (`rows`).
@@ -32,15 +34,17 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
     final kpi = computeKpis(rows, _period);
 
     return GlassContainer(
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text('Аналітика',
+              Text('Аналітика тривог',
                   style: TextStyle(
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
                       color: AppColors.textPrimary)),
               const Spacer(),
               _periodTabs(),
@@ -62,7 +66,7 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
             'За годиною доби',
             'коли найчастіше тривоги',
             byHour(alarms),
-            const Color(0xFFF4B740),
+            AppColors.warn,
             firstLabel: '00',
             midLabel: '12',
             lastLabel: '23',
@@ -74,78 +78,41 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
     );
   }
 
-  Widget _periodTabs() {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: AppColors.primarySoft.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(11),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final p in _periods)
-            GestureDetector(
-              onTap: () => setState(() => _period = p.$1),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                decoration: BoxDecoration(
-                  color: _period == p.$1 ? AppColors.primary : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(p.$2,
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: _period == p.$1
-                            ? Colors.white
-                            : AppColors.textSecondary)),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget _periodTabs() => Segmented<String>(
+        value: _period,
+        items: _periods,
+        onChanged: (p) => setState(() => _period = p),
+      );
 
   Widget _kpiRow(AnalyticsKpis k) {
     final tiles = [
-      ('${k.alarms}', '🔔 Тривог', AppColors.threat),
-      ('${k.impacts}', '💥 Прильотів', AppColors.threat),
-      ('${widget.targetsNow}', '🎯 Цілей зараз', AppColors.primary),
-      ('${k.daysWithAlarms}', '📅 Днів', AppColors.textPrimary),
-      (k.avgPerDay.toStringAsFixed(1), '📈 Сер./день', const Color(0xFFF4B740)),
+      ('${k.alarms}', 'Тривог', AppColors.threat),
+      ('${k.impacts}', 'Прильотів', AppColors.threat),
+      ('${widget.targetsNow}', 'Цілей зараз', AppColors.primary),
+      ('${k.daysWithAlarms}', 'Днів з тривогами', AppColors.textPrimary),
+      (k.avgPerDay.toStringAsFixed(1), 'Сер. за день', AppColors.warn),
     ];
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: [
-        for (final t in tiles)
-          Container(
-            width: 96,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.border),
+    return LayoutBuilder(builder: (context, c) {
+      final cols = c.maxWidth >= 640 ? 5 : (c.maxWidth >= 380 ? 3 : 2);
+      final w = (c.maxWidth - (cols - 1) * 10) / cols;
+      return Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          for (final t in tiles)
+            Container(
+              width: w,
+              padding: const EdgeInsets.fromLTRB(14, 12, 12, 14),
+              decoration: BoxDecoration(
+                color: AppColors.surface2,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Metric(value: t.$1, label: t.$2, color: t.$3, size: 24),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(t.$1,
-                    style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: t.$3)),
-                const SizedBox(height: 2),
-                Text(t.$2,
-                    style: TextStyle(
-                        fontSize: 11, color: AppColors.textSecondary)),
-              ],
-            ),
-          ),
-      ],
-    );
+        ],
+      );
+    });
   }
 
   Widget _barChart(String title, String sub, List<int> values, Color color,

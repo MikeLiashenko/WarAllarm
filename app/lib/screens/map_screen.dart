@@ -13,6 +13,8 @@ import '../controllers/settings_controller.dart';
 import '../data/ukraine_geo.dart';
 import '../models/map_target.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
+import '../widgets/ui_kit.dart';
 import '../widgets/section_header.dart';
 import '../widgets/ukraine_map.dart';
 import 'home_shell.dart';
@@ -87,21 +89,9 @@ class MapScreen extends StatelessWidget {
                   child: Container(
                     clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24),
+                      borderRadius: BorderRadius.circular(AppRadii.xl),
                       border: Border.all(color: AppColors.border),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [AppColors.mapSea, AppColors.background],
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x14123A6B),
-                          blurRadius: 30,
-                          spreadRadius: -6,
-                          offset: Offset(0, 14),
-                        ),
-                      ],
+                      color: AppColors.mapSea,
                     ),
                     child: UkraineMap(
                       targets: map.targets,
@@ -127,21 +117,19 @@ class MapScreen extends StatelessWidget {
                   left: 12,
                   top: 12,
                   child: Material(
-                    color: AppColors.surface,
-                    elevation: 2,
-                    shadowColor: const Color(0x22123A6B),
+                    color: AppColors.surface2,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(9),
+                      borderRadius: BorderRadius.circular(AppRadii.sm + 2),
                       side: BorderSide(color: AppColors.border),
                     ),
                     child: InkWell(
-                      borderRadius: BorderRadius.circular(9),
+                      borderRadius: BorderRadius.circular(AppRadii.sm + 2),
                       onTap: () => _shareMap(context),
                       child: SizedBox(
-                        width: 34,
-                        height: 34,
+                        width: 36,
+                        height: 36,
                         child: Icon(Icons.ios_share_rounded,
-                            color: AppColors.primaryDark, size: 18),
+                            color: AppColors.textPrimary, size: 18),
                       ),
                     ),
                   ),
@@ -158,52 +146,28 @@ class MapScreen extends StatelessWidget {
 
   Widget _liveBadge(MapDataController map) {
     if (map.isDemo) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFF2D6),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFFE9B949)),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.science_rounded, size: 14, color: Color(0xFFB8860B)),
-            SizedBox(width: 6),
-            Text('ДЕМО',
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF8A6D0B))),
-          ],
-        ),
-      );
+      return Tag('ДЕМО', color: AppColors.warn, icon: Icons.science_outlined);
     }
     final count = map.targets.length;
+    final c = count > 0 ? AppColors.threat : AppColors.safe;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
       decoration: BoxDecoration(
-        color: count > 0 ? AppColors.threatSoft : AppColors.safeSoft,
+        color: c.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(
-              color: count > 0 ? AppColors.threat : AppColors.safe,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 7),
+          LiveDot(color: c, size: 7, pulse: map.live),
+          const SizedBox(width: 2),
           Text(
             count > 0 ? '$count ${_plural(count)}' : 'Чисто',
             style: TextStyle(
               fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: count > 0 ? AppColors.threatDark : AppColors.safe,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+              fontFeatures: AppText.tabular,
             ),
           ),
         ],
@@ -215,22 +179,19 @@ class MapScreen extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xE6B8860B),
+        color: AppColors.warn,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(color: Color(0x33000000), blurRadius: 10, offset: Offset(0, 3)),
-        ],
       ),
       child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.science_rounded, size: 15, color: Colors.white),
+          Icon(Icons.science_outlined, size: 15, color: Colors.black87),
           SizedBox(width: 7),
           Text('ДЕМО-ДАНІ · не реальні загрози',
               style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w800,
-                  color: Colors.white,
+                  color: Colors.black87,
                   letterSpacing: 0.2)),
         ],
       ),
@@ -255,29 +216,20 @@ class _TargetStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     if (targets.isEmpty) {
       final honest = live; // only claim "clear" when we actually have a feed
-      return Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: honest ? AppColors.safeSoft : AppColors.primarySoft,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Text(
-          honest
-              ? '✅ Наразі чисто — активних цілей немає'
-              : 'Немає підключення до монітора — даних поки немає',
-          style: TextStyle(
-              color: honest ? AppColors.safe : AppColors.primaryDark,
-              fontWeight: FontWeight.w600),
-        ),
+      return Notice(
+        color: honest ? AppColors.safe : AppColors.textMuted,
+        icon: honest ? Icons.verified_outlined : Icons.cloud_off_outlined,
+        title: honest
+            ? 'Наразі чисто — активних цілей немає'
+            : 'Немає підключення до монітора — даних поки немає',
       );
     }
     return SizedBox(
-      height: 74,
+      height: 66,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: targets.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 10),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, i) => _card(targets[i]),
       ),
     );
@@ -286,25 +238,17 @@ class _TargetStrip extends StatelessWidget {
   Widget _card(MapTarget t) {
     final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
     return Container(
-      width: 210,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      width: 220,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadii.md),
         border: Border.all(color: AppColors.border),
       ),
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Icon(Icons.navigation_rounded, color: color, size: 20),
-          ),
-          const SizedBox(width: 12),
+          IconTile(Icons.navigation_rounded, color: color, size: 38),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -327,14 +271,11 @@ class _TargetStrip extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(left: 4),
                         child: Text('×${t.amount}',
-                            style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w800,
-                                color: color)),
+                            style: AppText.number(12.5, color: color)),
                       ),
                   ],
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   [
                     if (t.distKm != null) '${t.distKm!.round()} км',
@@ -344,7 +285,9 @@ class _TargetStrip extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: 11.5, color: AppColors.textSecondary),
+                      fontSize: 11.5,
+                      color: AppColors.textSecondary,
+                      fontFeatures: AppText.tabular),
                 ),
               ],
             ),

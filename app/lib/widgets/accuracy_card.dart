@@ -46,7 +46,7 @@ class AccuracyCard extends StatelessWidget {
     final color = qualityPct >= 70
         ? AppColors.safe
         : qualityPct >= 45
-            ? const Color(0xFFF4B740)
+            ? AppColors.warn
             : AppColors.threat;
 
     return Container(

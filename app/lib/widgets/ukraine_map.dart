@@ -255,11 +255,9 @@ class _UkraineMapState extends State<UkraineMap>
 
   Widget _zoomButton(IconData icon, VoidCallback onTap) {
     return Material(
-      color: AppColors.surface,
-      elevation: 2,
-      shadowColor: const Color(0x22123A6B),
+      color: AppColors.surface2,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(10),
         side: BorderSide(color: AppColors.border),
       ),
       child: InkWell(
@@ -732,12 +730,9 @@ class _Legend extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surface.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.border),
-        boxShadow: const [
-          BoxShadow(color: Color(0x14123A6B), blurRadius: 10, offset: Offset(0, 3)),
-        ],
       ),
       child: Wrap(
         spacing: 12,

@@ -94,7 +94,9 @@ class WarAlarmApp extends StatelessWidget {
           title: 'WarAlarm',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.build(),
-          home: HomeShell(),
+          // Keyed by the theme so const widgets (which cache the mutable
+          // AppColors) are rebuilt too when light/dark is toggled.
+          home: HomeShell(key: ValueKey(theme.dark)),
         ),
       ),
     );

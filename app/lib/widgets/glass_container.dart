@@ -1,18 +1,20 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
 
-/// Elegant frosted-glass container: subtle blur + translucent white overlay.
+/// The basic panel of the design system: flat surface, hairline border,
+/// soft radius. (Kept under its old name — it used to be frosted glass — so
+/// every screen picks up the new look without call-site changes; [blur] is
+/// accepted and ignored.)
 class GlassContainer extends StatelessWidget {
   const GlassContainer({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(20),
+    this.padding = const EdgeInsets.all(18),
     this.margin,
-    this.borderRadius = 22,
-    this.blur = 18,
+    this.borderRadius = AppRadii.lg,
+    this.blur = 0,
     this.color,
     this.borderColor,
     this.onTap,
@@ -30,44 +32,32 @@ class GlassContainer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(borderRadius);
-    final content = ClipRRect(
-      borderRadius: radius,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: color ?? AppColors.glassFill,
-            borderRadius: radius,
-            border: Border.all(
-              color: borderColor ?? AppColors.glassStroke,
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.glassShadow,
-                blurRadius: 30,
-                spreadRadius: -6,
-                offset: Offset(0, 14),
-              ),
-            ],
-          ),
-          child: child,
-        ),
+    Widget content = Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: color ?? AppColors.surface,
+        borderRadius: radius,
+        border: Border.all(color: borderColor ?? AppColors.border),
+        boxShadow: AppColors.isDark
+            ? null
+            : [
+                BoxShadow(
+                  color: AppColors.glassShadow,
+                  blurRadius: 18,
+                  spreadRadius: -10,
+                  offset: const Offset(0, 8),
+                ),
+              ],
       ),
+      child: child,
     );
 
-    if (onTap == null) return Padding(padding: margin ?? EdgeInsets.zero, child: content);
-    return Padding(
-      padding: margin ?? EdgeInsets.zero,
-      child: Material(
+    if (onTap != null) {
+      content = Material(
         color: Colors.transparent,
-        child: InkWell(
-          borderRadius: radius,
-          onTap: onTap,
-          child: content,
-        ),
-      ),
-    );
+        child: InkWell(borderRadius: radius, onTap: onTap, child: content),
+      );
+    }
+    return Padding(padding: margin ?? EdgeInsets.zero, child: content);
   }
 }

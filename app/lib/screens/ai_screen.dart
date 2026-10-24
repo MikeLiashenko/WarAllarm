@@ -18,6 +18,7 @@ import '../theme/app_colors.dart';
 import '../utils/formatting.dart';
 import '../widgets/accuracy_card.dart';
 import '../widgets/glass_container.dart';
+import '../widgets/ui_kit.dart';
 import '../widgets/section_header.dart';
 import 'home_shell.dart';
 
@@ -109,29 +110,11 @@ class _AiScreenState extends State<AiScreen> {
           const SizedBox(height: 18),
 
           if (data.isDemo) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF2D6),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFE9B949)),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.science_rounded, color: Color(0xFFB8860B), size: 20),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Аналіз нижче — на ДЕМО-даних (приклад). Реальний ІІ-аналіз '
-                      'зʼявиться, коли монітор підключено.',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B540A)),
-                    ),
-                  ),
-                ],
-              ),
+            Notice(
+              color: AppColors.warn,
+              icon: Icons.science_outlined,
+              title: 'Аналіз нижче — на ДЕМО-даних (приклад)',
+              body: 'Реальний ІІ-аналіз зʼявиться, коли монітор підключено.',
             ),
             const SizedBox(height: 16),
           ],
@@ -455,7 +438,7 @@ class _AiScreenState extends State<AiScreen> {
     final color = r.cls == 'alarm'
         ? AppColors.threat
         : r.cls == 'warn'
-            ? const Color(0xFFF4B740)
+            ? AppColors.warn
             : AppColors.safe;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),

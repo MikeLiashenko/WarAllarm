@@ -18,10 +18,13 @@ class Responsive {
   static bool isExpanded(BuildContext c) =>
       MediaQuery.sizeOf(c).width >= medium;
 
-  /// Whether the sidebar should collapse to icons-only (narrow windows/phones).
+  /// Phones get a bottom navigation bar instead of a side rail.
+  static bool useBottomNav(BuildContext c) => isCompact(c);
+
+  /// Whether the sidebar should collapse to icons-only (narrow windows).
   static bool railCollapsed(BuildContext c) =>
-      MediaQuery.sizeOf(c).width < 900;
+      MediaQuery.sizeOf(c).width < 1100;
 
   /// Max content width so text lines stay comfortable on wide desktop windows.
-  static double contentMaxWidth(BuildContext c) => 1180;
+  static double contentMaxWidth(BuildContext c) => 1240;
 }

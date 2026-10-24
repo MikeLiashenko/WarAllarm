@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../data/ukraine_geo.dart';
 import '../domain/probability.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
 
 /// Big "chance of a strike" card for a place: an arc gauge with the percentage,
 /// a plain verdict, the official oblast status, the top contributing threats and
@@ -17,7 +18,7 @@ class ProbabilityGauge extends StatelessWidget {
   Color get _color => prob.cls == 'alarm'
       ? AppColors.threat
       : prob.cls == 'warn'
-          ? const Color(0xFFF4B740)
+          ? AppColors.warn
           : AppColors.safe;
 
   @override
@@ -27,8 +28,8 @@ class ProbabilityGauge extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -40,7 +41,7 @@ class ProbabilityGauge extends StatelessWidget {
                 height: 92,
                 child: CustomPaint(
                   painter: _GaugePainter(prob.percent / 100, color,
-                      AppColors.divider),
+                      AppColors.surface2),
                   child: Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -48,9 +49,11 @@ class ProbabilityGauge extends StatelessWidget {
                         const SizedBox(height: 14),
                         Text('${prob.percent}%',
                             style: TextStyle(
-                                fontSize: 27,
+                                fontSize: 28,
                                 height: 1,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -1,
+                                fontFeatures: AppText.tabular,
                                 color: color)),
                         Text('удар',
                             style: TextStyle(
@@ -113,7 +116,7 @@ class ProbabilityGauge extends StatelessWidget {
 
   Widget _officialBadge(String level) {
     final red = level == 'red';
-    final c = red ? AppColors.threat : const Color(0xFFF4B740);
+    final c = red ? AppColors.threat : AppColors.warn;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(
@@ -150,7 +153,7 @@ class ProbabilityGauge extends StatelessWidget {
                     child: LinearProgressIndicator(
                       value: e.value / 100,
                       minHeight: 8,
-                      backgroundColor: AppColors.divider,
+                      backgroundColor: AppColors.surface2,
                       valueColor: AlwaysStoppedAnimation(
                           kThreatColors[e.key] ?? AppColors.primary),
                     ),

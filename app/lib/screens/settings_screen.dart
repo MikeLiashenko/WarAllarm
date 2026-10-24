@@ -28,14 +28,14 @@ class SettingsScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SectionHeader(
-            title: 'Settings',
-            subtitle: 'App preferences and notifications',
-            icon: Icons.settings_rounded,
+            title: 'Налаштування',
+            subtitle: 'Тривога, сповіщення, вигляд',
+            icon: Icons.tune_rounded,
           ),
           const SizedBox(height: 18),
 
           _Group(
-            title: 'Profile',
+            title: 'Профіль',
             children: [
               _NameField(
                 value: s.displayName,
@@ -46,33 +46,33 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 14),
 
           _Group(
-            title: 'Notifications',
+            title: 'Сповіщення',
             children: [
               _ToggleRow(
                 icon: Icons.notifications_active_rounded,
-                title: 'Push notifications',
-                subtitle: 'Receive alerts on this device',
+                title: 'Push-сповіщення',
+                subtitle: 'Отримувати тривоги на цьому пристрої',
                 value: s.pushNotifications,
                 onChanged: s.setPush,
               ),
               _ToggleRow(
                 icon: Icons.volume_up_rounded,
-                title: 'Sound alerts',
-                subtitle: 'Play a sound on new threats',
+                title: 'Звук тривоги',
+                subtitle: 'Сирена при новій загрозі',
                 value: s.soundAlerts,
                 onChanged: s.setSound,
               ),
               _ToggleRow(
                 icon: Icons.vibration_rounded,
-                title: 'Vibration',
-                subtitle: 'Vibrate on active threats',
+                title: 'Вібрація',
+                subtitle: 'Вібрувати при активній загрозі',
                 value: s.vibration,
                 onChanged: s.setVibration,
               ),
               _ToggleRow(
                 icon: Icons.crisis_alert_rounded,
-                title: 'Threats only',
-                subtitle: 'Hide non-threat events from the feed',
+                title: 'Лише загрози',
+                subtitle: 'Ховати в стрічці все, що не є загрозою',
                 value: s.threatOnly,
                 onChanged: s.setThreatOnly,
                 accent: AppColors.threat,
@@ -162,14 +162,14 @@ class SettingsScreen extends StatelessWidget {
                     : 'Показувати приклад загроз (вимкни для чистого екрана)',
                 value: map.showDemo,
                 onChanged: map.setShowDemo,
-                accent: const Color(0xFFB8860B),
+                accent: AppColors.warn,
               ),
             ],
           ),
           const SizedBox(height: 14),
 
           _Group(
-            title: 'Display',
+            title: 'Вигляд',
             children: [
               _ToggleRow(
                 icon: Icons.dark_mode_rounded,
@@ -181,15 +181,15 @@ class SettingsScreen extends StatelessWidget {
               ),
               _ToggleRow(
                 icon: Icons.view_agenda_rounded,
-                title: 'Compact feed',
-                subtitle: 'Denser event list',
+                title: 'Компактна стрічка',
+                subtitle: 'Щільніший список подій',
                 value: s.compactFeed,
                 onChanged: s.setCompactFeed,
               ),
               _ToggleRow(
                 icon: Icons.screen_lock_portrait_rounded,
-                title: 'Keep screen on',
-                subtitle: 'Prevent sleep during active alerts',
+                title: 'Не вимикати екран',
+                subtitle: 'Під час активної тривоги екран не гасне',
                 value: s.keepScreenOn,
                 onChanged: s.setKeepScreenOn,
               ),
@@ -198,13 +198,13 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 14),
 
           _Group(
-            title: 'About',
+            title: 'Про застосунок',
             children: const [
-              _InfoRow(label: 'Project', value: FirebaseConfig.projectId),
-              _InfoRow(label: 'Backend', value: 'Realtime Database (REST + SSE)'),
-              _InfoRow(label: 'Version', value: '1.0.0 (MVP)'),
+              _InfoRow(label: 'Проєкт', value: FirebaseConfig.projectId),
+              _InfoRow(label: 'Бекенд', value: 'Realtime Database (REST + SSE)'),
+              _InfoRow(label: 'Версія', value: '1.1.0 · новий дизайн'),
               _InfoRow(
-                  label: 'Platforms', value: 'Android · Windows Desktop'),
+                  label: 'Платформи', value: 'Android · Windows Desktop'),
             ],
           ),
           const SizedBox(height: 20),
@@ -681,8 +681,8 @@ class _NameFieldState extends State<_NameField> {
               onSubmitted: widget.onChanged,
               onTapOutside: (_) => widget.onChanged(_ctl.text),
               decoration: const InputDecoration(
-                labelText: 'Display name',
-                hintText: 'Guest',
+                labelText: 'Імʼя в чаті',
+                hintText: 'Гість',
               ),
             ),
           ),
