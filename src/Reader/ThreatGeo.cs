@@ -274,6 +274,8 @@ public static class ThreatGeo
     // Скорость цели, км/ч → из неё считаем ETA. Значения приблизительные, боевые.
     public static double SpeedKmh(ThreatKind kind, string? ammo)
     {
+        // Конкретний засіб зі словника (Х-101 750, Іскандер-М 7000, Кинджал 4500…).
+        if (WeaponCatalog.SpeedFor(ammo) is { } known) return known;
         var a = ammo?.ToLowerInvariant() ?? "";
         return kind switch
         {

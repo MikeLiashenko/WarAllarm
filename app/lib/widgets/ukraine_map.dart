@@ -650,7 +650,8 @@ class _MapPainter extends CustomPainter {
       final cat = figs.containsKey(t.cat) ? t.cat : 'other';
       final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
       final known = t.heading != null;
-      final spd = speedKmMin(t.cat, t.label);
+      // Speed from the Reader's weapon catalog when known, else a per-type guess.
+      final spd = t.kmh > 0 ? t.kmh / 60 : speedKmMin(t.cat, t.label);
 
       // Dead-reckoning: extrapolate along heading from last observed position.
       double lon = t.lon, lat = t.lat;

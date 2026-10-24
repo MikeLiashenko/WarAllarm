@@ -104,12 +104,15 @@ public static class KyivMonitor
 
     static (ThreatKind, string?) DetectKind(string l)
     {
-        if (l.Contains("циркон")) return (ThreatKind.Missile, "Циркон");
+        // Розвідники — своя мітка; решта — словник засобів (Х-101, Іскандер, «бандероль»
+        // = крилата ракета, «ціль» = крилата, «швидкісна ціль» = балістика).
+        if (Regex.IsMatch(l, @"мавік|mavic|орлан|зала|supercam|суперкам")) return (ThreatKind.Drone, "розвідник");
+        if (Regex.IsMatch(l, @"розвід|дорозвід") && !Regex.IsMatch(l, @"ракет|балісти|каб")) return (ThreatKind.Drone, "розвідка");
+        if (WeaponCatalog.Match(l) is { } w) return (w.Kind, WeaponCatalog.DisplayName(w));
         if (l.Contains("балісти") || l.Contains("баллист") || Regex.IsMatch(l, @"кн-?23|точка[-\s]?у")) return (ThreatKind.Ballistic, null);
         if (l.Contains("каб") || l.Contains("умпк") || l.Contains("умпб")) return (ThreatKind.Kab, null);
         if (l.Contains("реактивн") || l.Contains("шаболд") || l.Contains("молні")) return (ThreatKind.Drone, "реакт. шахед");
         if (l.Contains("гербер")) return (ThreatKind.Drone, "гербера-пастка");
-        if (l.Contains("бандерол")) return (ThreatKind.Drone, "бандероль");
         if (l.Contains("шахед") || l.Contains("шахід") || l.Contains("геран") || l.Contains("geran")) return (ThreatKind.Drone, "шахед");
         if (Regex.IsMatch(l, @"мавік|mavic|орлан|\bзала\b|supercam|суперкам")) return (ThreatKind.Drone, "розвідник");
         if (Regex.IsMatch(l, ThreatParser.DroneRe)) return (ThreatKind.Drone, null);

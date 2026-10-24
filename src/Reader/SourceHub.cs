@@ -355,9 +355,17 @@ public sealed class SourceHub
 
             // ── розбір ──
             string? dflt = src.Oblasts.Length == 1 ? src.Oblasts[0] : null;
+            // Балістика з названим містом («Іскандер-М на Харків», «швидкісна ціль на Київ»)
+            // — на карту; без міста — лише попередження нижче.
             var events = ThreatParser.Parse(clean, dflt)
-                .Where(e => e.Kind is not (ThreatKind.AllClear or ThreatKind.Ballistic or ThreatKind.Aviation))
+                .Where(e => e.Kind is not (ThreatKind.AllClear or ThreatKind.Aviation)
+                            && !(e.Kind == ThreatKind.Ballistic && e.City == null))
                 .ToList();
+            // Балістика без місця — коротке живе попередження (довга «оцінка загроз на ніч» — ні).
+            bool ballisticText = (Ballistic.IsMatch(clean) || WeaponCatalog.Match(clean)?.Kind == ThreatKind.Ballistic)
+                                 && clean.Length < 160 && !Regex.IsMatch(clean, @"відбій|оцінка", RegexOptions.IgnoreCase);
+            if (ballisticText && events.All(e => e.City == null))
+                return new(HubVerdict.Ballistic, [], clean.Replace("\n", " "));
             bool bare = false;
             if (events.All(e => e.City == null) && src.Oblasts.Length > 0)
             {

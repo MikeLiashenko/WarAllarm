@@ -27,6 +27,9 @@ class MapTarget {
   final int sources;
   final List<String> srcs;
 
+  /// Швидкість засобу, км/год (словник Reader: Х-101 750, Іскандер-М 7000…); 0 — невідома.
+  final double kmh;
+
   /// Per-place distance, filled in by the situation logic.
   final double? pdist;
 
@@ -51,6 +54,7 @@ class MapTarget {
     this.pdist,
     this.sources = 0,
     this.srcs = const [],
+    this.kmh = 0,
   });
 
   MapTarget withPdist(double? d) => MapTarget(
@@ -58,7 +62,7 @@ class MapTarget {
         heading: heading, amount: amount, place: place, dir: dir,
         stageLabel: stageLabel, icon: icon, distKm: distKm, etaMin: etaMin,
         seenMs: seenMs, trail: trail, pdist: d, approx: approx,
-        sources: sources, srcs: srcs,
+        sources: sources, srcs: srcs, kmh: kmh,
       );
 
   factory MapTarget.fromMap(Map<dynamic, dynamic> m) {
@@ -82,6 +86,7 @@ class MapTarget {
       approx: m['approx'] == true,
       sources: (m['src'] as num?)?.toInt() ?? 0,
       srcs: (m['srcs'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      kmh: d(m['kmh']) ?? 0,
       trail: (m['trail'] as List<dynamic>? ?? [])
           .map((e) => [
                 ((e as List)[0] as num).toDouble(),

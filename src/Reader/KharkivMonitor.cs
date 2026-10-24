@@ -225,7 +225,12 @@ public static class KharkivMonitor
     // Тип угрозы + уточнение боеприпаса (местный сленг Харькова).
     static (ThreatKind, string?) DetectKind(string l)
     {
-        if (l.Contains("бандерол")) return (ThreatKind.Kab, "Бандероль");        // у Харкові — реакт. авиабомба
+        // Розвідники й FPV — свої мітки; решта — словник засобів (Х-101, Іскандер, «бандероль»
+        // = крилата ракета, «ціль» = крилата, «швидкісна ціль» = балістика).
+        if (Regex.IsMatch(l, @"розвід|развед|мавік|mavic|орлан|зала|supercam|суперкам")) return (ThreatKind.Drone, "розвідувальний");
+        if (l.Contains("fpv")) return (ThreatKind.Drone, "FPV");
+        if (l.Contains("петух")) return (ThreatKind.Aviation, "пуски КАБ");
+        if (WeaponCatalog.Match(l) is { } w) return (w.Kind, WeaponCatalog.DisplayName(w));
         if (l.Contains("каб") || l.Contains("умпк") || l.Contains("умпб")) return (ThreatKind.Kab, null);
         if (l.Contains("балісти") || l.Contains("баллист") || Regex.IsMatch(l, @"кн-?23|точка[-\s]?у")) return (ThreatKind.Ballistic, null);
         if (l.Contains("молні")) return (ThreatKind.Drone, "Молнія");

@@ -109,6 +109,8 @@ public static class MapWriter
             sb.Append(",\"lat\":").Append(N(t.Pos!.Value.lat)).Append(",\"lon\":").Append(N(t.Pos!.Value.lon));
             sb.Append(",\"dist\":").Append(t.DistKm is { } d ? N(d) : "null");
             sb.Append(",\"eta\":").Append(t.EtaMin is { } e ? N(e) : "null");
+            // Швидкість засобу (словник: Х-101 750, Іскандер-М 7000…) — для руху маркера між постами.
+            sb.Append(",\"kmh\":").Append(N(ThreatGeo.SpeedKmh(t.Kind, t.Ammo)));
             sb.Append(",\"dir\":\"").Append(Esc(t.Dir)).Append('"');
             sb.Append(",\"n\":").Append(amount);
             sb.Append(",\"heading\":").Append(t.Heading is { } h ? N(h) : "null");

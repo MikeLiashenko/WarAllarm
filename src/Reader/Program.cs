@@ -201,6 +201,24 @@ if (args.Length >= 1 && (args[0].Equals("parse", StringComparison.OrdinalIgnoreC
     return;
 }
 
+// ── Тест словника засобів (оффлайн):  dotnet run -- weapons [файл]  (по рядку на фразу)
+if (args.Length >= 1 && args[0].Equals("weapons", StringComparison.OrdinalIgnoreCase))
+{
+    var lines = args.Length >= 2 && File.Exists(args[1])
+        ? File.ReadAllLines(args[1])
+        : new[] { "2 ціль на Київ", "Бандероль на Харків", "Швидкісна ціль на Дніпро", "Іскандер-М з Курська", "Ракети Х-101 курсом на Вінницю",
+                  "КАБ на Святогірськ", "Реактивний БпЛА на Оболонь", "Шахед на Бровари", "3 х Калібр на Одесу", "Пуск Кинджал" };
+    foreach (var raw in lines.Select(l => l.Trim()).Where(l => l.Length > 0))
+    {
+        var w = WeaponCatalog.Match(raw);
+        var ev = ThreatParser.Parse(raw).FirstOrDefault();
+        var speed = w is null ? "" : $"{w.SpeedKmh} км/год";
+        Console.WriteLine($"{raw,-42} → {(w is null ? "❓ не розпізнано" : $"{w.Kind,-9} «{WeaponCatalog.DisplayName(w) ?? "(лише тип)"}» {speed}{(w.Decoy ? " · приманка" : "")}")}"
+            + (ev?.City is { } c ? $" · місто: {c}" : ""));
+    }
+    return;
+}
+
 // ── Тест хаба джерел (оффлайн, без Telegram і без запису в Firebase):
 //    dotnet run -- sources <файл>   формат: «##### @канал» + пости через «---»
 if (args.Length >= 2 && args[0].Equals("sources", StringComparison.OrdinalIgnoreCase))
@@ -1388,6 +1406,8 @@ try
         Ui.Line(ConsoleColor.Green, "✅ Підписки в порядку — усі потрібні канали на місці.");
     // 📡 Каталог джерел (neptun.in.ua/dzherela): скільки з них реально приходить.
     var hubMissing = SourceCatalog.All.Keys.Where(u => !subscribed.Contains(u)).ToList();
+    // Повний список — у файл (консоль показує лише перші 12): посилання, щоб швидко підписатись.
+    try { File.WriteAllLines("sources_missing.txt", hubMissing.Select(u => $"https://t.me/{u}")); } catch { }
     Ui.Line(hubMissing.Count == 0 ? ConsoleColor.Green : ConsoleColor.Yellow,
         $"📡 Джерела: підписаний на {SourceCatalog.All.Count - hubMissing.Count}/{SourceCatalog.All.Count}"
         + (hubMissing.Count > 0 ? " · без підписки: " + string.Join(", ", hubMissing.Take(12).Select(u => "@" + u)) + (hubMissing.Count > 12 ? "…" : "") : ""));

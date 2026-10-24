@@ -40,7 +40,7 @@ public static class ThreatParser
     // шахед · герань(geran) · гербера-пастка · бандероль · мопед · FPV · молнія · шаболда ·
     // ланцет · мавік · орлан · зала · supercam.
     public const string DroneRe =
-        @"бпла|дрон|шахед|шахід|shahed|італмас|italmas|геран|geran|гербер|бандерол|мопед|\bfpv\b|молні|шаболд|ланцет|мавік|mavic|орлан|\bзала\b|supercam|суперкам";
+        @"бпла|дрон|шахед|шахід|shahed|італмас|italmas|геран|geran|гербер|мопед|\bfpv\b|молні|шаболд|ланцет|мавік|mavic|орлан|\bзала\b|supercam|суперкам";
 
     // Строки-шум: подписки, ссылки, донаты, комментарии к фото, новости о прошлых ударах.
     static readonly string[] Noise =
@@ -162,16 +162,18 @@ public static class ThreatParser
         var mc = Regex.Match(line, @"^\s*(\d+)\s*[хx×]?\s*(?=\S)");
         if (mc.Success) int.TryParse(mc.Groups[1].Value, out count);
 
-        var kind = DetectKind(line);
-        // «Реактивний» шахед летит ~500 км/ч (обычный ~180) — помечаем для верной ETA.
-        string? extra = Regex.IsMatch(line, @"реактивн|рбпла", RegexOptions.IgnoreCase) ? "реакт. шахед" : null;
+        // Конкретний засіб зі словника («Х-101», «Іскандер-М», «реактивний», «ціль»…) —
+        // і тип, і назва на карті, і швидкість для ETA. Інакше — загальне визначення.
+        var weapon = WeaponCatalog.Match(line);
+        var kind = weapon?.Kind ?? DetectKind(line);
+        string? extra = weapon is { } w ? WeaponCatalog.DisplayName(w) : null;
 
         var mn = Regex.Match(line, @"\bна\s+(.+)$", RegexOptions.IgnoreCase);
         // Інші звороти регіональних моніторів: «курс Куликівка», «в районі Ірпеня»,
         // «над Борисполем», «у бік Білої Церкви», «через Ананьїв».
         if (!mn.Success)
             mn = Regex.Match(line,
-                @"\b(?:курсом|курс|над|біля|поблизу|в\s+районі|у\s+районі|в\s+напрямку|у\s+напрямку|напрямок|в\s+бік|у\s+бік|в\s+сторону|через|повз)\s+(.+)$",
+                @"\b(?:курсом|курс|над|біля|поблизу|в\s+районі|у\s+районі|в\s+напрямку|у\s+напрямку|напрямок|в\s+бік|у\s+бік|в\s+сторону|через|повз|по(?=\s+(?-i:[А-ЯІЇЄҐ])))\s+(.+)$",
                 RegexOptions.IgnoreCase);
         string? city = mn.Success ? mn.Groups[1].Value.Trim().TrimEnd('.', ' ', '!') : null;
         // Отсекаем «хвост» после названия: «на Васильків повз Борову», «на X у напрямку Y»,
@@ -192,8 +194,7 @@ public static class ThreatParser
         if (l.Contains("каб") || l.Contains("умпк") || l.Contains("умпб") || Regex.IsMatch(l, @"фаб[-\s]?\d")) return ThreatKind.Kab;
         if (Regex.IsMatch(l, @"балісти|кн-?23|точка[-\s]?у")) return ThreatKind.Ballistic;
         if (Regex.IsMatch(l, @"ракет|крилат|калібр|кинджал|іскандер|циркон|онікс|onyx|х[-\s]?\d{2,3}|с[-\s]?300")) return ThreatKind.Missile;
-        if (l.Contains("ціль")) return ThreatKind.Target;
-        return ThreatKind.Unknown;
+        return WeaponCatalog.Match(l)?.Kind ?? ThreatKind.Unknown;
     }
 
     // ── помощники для демонстрации/фильтра ───────────────────────────────────
