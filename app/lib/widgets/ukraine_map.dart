@@ -67,7 +67,21 @@ class UkraineMap extends StatefulWidget {
     this.showLegend = true,
     this.insets = EdgeInsets.zero,
     this.dimTargets = false,
+    this.selectedId,
+    this.followId,
+    this.onTargetTap,
+    this.onUserMove,
   });
+
+  /// Picked target (highlighted) and the one the camera follows (by id).
+  final String? selectedId;
+  final String? followId;
+
+  /// Tap on the map: the target under the finger, or null for empty map.
+  final ValueChanged<MapTarget?>? onTargetTap;
+
+  /// The user dragged / zoomed the map themselves (e.g. to stop following).
+  final VoidCallback? onUserMove;
 
   final bool showControls;
   final bool showLegend;
@@ -114,10 +128,65 @@ class UkraineMapState extends State<UkraineMap>
   Offset _startT = Offset.zero;
   Offset _focalBase = Offset.zero;
 
+  // --- Target picking & following ---
+  String? _followStarted;
+
+  /// Screen position of a target right now (same projection + motion as the painter).
+  Offset _screenOf(MapTarget t) {
+    final mo = motionOf(t, DateTime.now().millisecondsSinceEpoch, frozen: widget.dimTargets);
+    final b = _geoFit(_size, widget.insets).project(mo.lon, mo.lat);
+    return Offset(_tx + _scale * b.dx, _ty + _scale * b.dy);
+  }
+
+  /// The target under [local] (nearest within ~28 px), or null.
+  MapTarget? targetAt(Offset local) {
+    MapTarget? best;
+    var bd = 28.0;
+    for (final t in widget.targets) {
+      final d = (_screenOf(t) - local).distance;
+      if (d < bd) {
+        bd = d;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  /// Keep the followed target in the middle of the visible map (every frame).
+  void _followTick() {
+    final id = widget.followId;
+    if (id == null) {
+      _followStarted = null;
+      return;
+    }
+    final t = widget.targets.where((x) => x.id == id).firstOrNull;
+    if (t == null) return;
+    if (_followStarted != id) {
+      _followStarted = id;
+      if (_scale < 3.5) _scale = 3.5; // come closer once when following starts
+    }
+    final mo = motionOf(t, DateTime.now().millisecondsSinceEpoch, frozen: widget.dimTargets);
+    final b = _geoFit(_size, widget.insets).project(mo.lon, mo.lat);
+    final c = Offset(widget.insets.left + (_size.width - widget.insets.horizontal) / 2,
+        widget.insets.top + (_size.height - widget.insets.vertical) / 2);
+    _tx = c.dx - _scale * b.dx;
+    _ty = c.dy - _scale * b.dy;
+  }
+
   // --- Public controls (the screen draws its own glass buttons) ---
   void zoomIn() => _zoomAt(_size.center(Offset.zero), 1.35);
   void zoomOut() => _zoomAt(_size.center(Offset.zero), 1 / 1.35);
   void resetView() => setState(() => _autoFocus(_size));
+
+  /// Centre a point in the visible map, zooming in to at least [scale].
+  void focusOn(double lat, double lon, {double scale = 3.5}) => setState(() {
+        if (_scale < scale) _scale = scale;
+        final b = _geoFit(_size, widget.insets).project(lon, lat);
+        final c = Offset(widget.insets.left + (_size.width - widget.insets.horizontal) / 2,
+            widget.insets.top + (_size.height - widget.insets.vertical) / 2);
+        _tx = c.dx - _scale * b.dx;
+        _ty = c.dy - _scale * b.dy;
+      });
 
   @override
   void initState() {
@@ -215,12 +284,16 @@ class UkraineMapState extends State<UkraineMap>
                 }
               },
               child: GestureDetector(
+              onTapUp: (d) => widget.onTargetTap?.call(targetAt(d.localPosition)),
               onScaleStart: (d) {
                 _startScale = _scale;
                 _startT = Offset(_tx, _ty);
                 _focalBase = (d.localFocalPoint - _startT) / _startScale;
               },
               onScaleUpdate: (d) {
+                if ((d.focalPointDelta.distance > 2 || d.scale != 1) && widget.followId != null) {
+                  widget.onUserMove?.call();
+                }
                 setState(() {
                   _scale = (_startScale * d.scale).clamp(1.0, 8.0);
                   _tx = d.localFocalPoint.dx - _scale * _focalBase.dx;
@@ -229,7 +302,9 @@ class UkraineMapState extends State<UkraineMap>
               },
               child: AnimatedBuilder(
                 animation: _anim,
-                builder: (context, _) => CustomPaint(
+                builder: (context, _) {
+                  _followTick();
+                  return CustomPaint(
                   size: Size.infinite,
                   painter: _MapPainter(
                     figs: _figs,
@@ -250,8 +325,10 @@ class UkraineMapState extends State<UkraineMap>
                     oblastWhole: widget.oblastWhole,
                     insets: widget.insets,
                     dimTargets: widget.dimTargets,
+                    selectedId: widget.selectedId,
                   ),
-                ),
+                );
+                },
               ),
             ),
             ),
@@ -348,8 +425,10 @@ class _MapPainter extends CustomPainter {
     required this.oblastWhole,
     this.insets = EdgeInsets.zero,
     this.dimTargets = false,
+    this.selectedId,
   });
 
+  final String? selectedId;
   final EdgeInsets insets;
   final bool dimTargets;
 
@@ -553,7 +632,9 @@ class _MapPainter extends CustomPainter {
       if (!show) continue;
       final p = _toScreen(fit.project(c.lon, c.lat));
       if (p.dx < -30 || p.dx > size.width + 30 ||
-          p.dy < -20 || p.dy > size.height + 20) continue;
+          p.dy < -20 || p.dy > size.height + 20) {
+        continue;
+      }
       final village = c.tier == 3;
 
       // Even out village dot density: cap per ~46px screen cell.
@@ -766,6 +847,19 @@ class _MapPainter extends CustomPainter {
             ..color = color);
       _drawFig(canvas, scr, mo.heading, cat, color, badgeR / 12.5);
 
+      // Picked target: pulsing ring.
+      if (selectedId != null && t.id == selectedId) {
+        canvas.drawCircle(scr, badgeR + 6 + 6 * pulse,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.2
+              ..color = AppColors.highlight.withValues(alpha: 1 - 0.7 * pulse));
+        canvas.drawCircle(scr, badgeR + 3,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.5
+              ..color = AppColors.highlight);
+      }
       // ×N cluster label above the badge.
       if (t.amount > 1) {
         _text(canvas, '×${t.amount}', scr + Offset(0, -badgeR - 2), 12.5,

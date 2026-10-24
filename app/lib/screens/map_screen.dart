@@ -13,12 +13,16 @@ import '../controllers/alerts_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/nav_controller.dart';
 import '../controllers/settings_controller.dart';
+import '../controllers/target_focus_controller.dart';
+import '../domain/motion.dart';
+import '../models/map_target.dart';
 import '../theme/app_colors.dart';
 import '../widgets/glass.dart';
 import '../widgets/responsive.dart';
 import '../services/local_store.dart';
 import '../widgets/map3d.dart';
 import '../widgets/map_legend.dart';
+import '../widgets/target_card.dart';
 import '../widgets/ukraine_map.dart';
 import 'now_screen.dart';
 
@@ -37,9 +41,18 @@ class _MapScreenState extends State<MapScreen> {
   final _shotKey = GlobalKey();
 
   /// 3D view on/off (remembered between launches).
-  late bool _is3d = context.read<LocalStore>().getBool('map_3d', fallback: false);
+  late bool _is3d = context.read<LocalStore>().getBool(
+    'map_3d',
+    fallback: false,
+  );
 
   bool _legend = false;
+
+  /// Re-draws the target card every second (distance, ETA, flight progress).
+  final _tick = Stream<int>.periodic(
+    const Duration(seconds: 1),
+    (i) => i,
+  ).asBroadcastStream();
 
   void _toggle3d() {
     setState(() => _is3d = !_is3d);
@@ -52,18 +65,55 @@ class _MapScreenState extends State<MapScreen> {
     final alarm = context.watch<AlarmController>();
     final alerts = context.watch<AlertsController>();
     final settings = context.watch<SettingsController>();
+    final focus = context.watch<TargetFocusController>();
     final s = Situation(data, alarm, alerts);
+    final selected = focus.id == null
+        ? null
+        : data.targets.where((t) => t.id == focus.id).firstOrNull;
+    // The followed target left the feed — nothing to ride along with any more.
+    if (focus.id != null && selected == null && focus.follow) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => focus.setFollow(false),
+      );
+    }
+    void onTargetTap(MapTarget? t) =>
+        t == null ? focus.clear() : focus.select(t.id, follow: focus.follow);
+    void onUserMove() => focus.setFollow(false);
     final pad = MediaQuery.paddingOf(context);
     final phone = Responsive.useBottomNav(context);
 
     // Place card: bottom-left on desktop, full width above the nav on phones.
     const cardH = 118.0;
-    final card = Glass(
-      radius: 24,
-      padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
-      onTap: () => context.read<NavController>().select(AppTab.now),
-      child: PlaceHeader(s: s),
-    );
+    // A selected target replaces it with the full target card (live, 1 s).
+    final Widget card = focus.id == null
+        ? Glass(
+            radius: 24,
+            padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
+            onTap: () => context.read<NavController>().select(AppTab.now),
+            child: PlaceHeader(s: s),
+          )
+        : ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight:
+                  MediaQuery.sizeOf(context).height * (phone ? 0.46 : 0.7),
+            ),
+            child: SingleChildScrollView(
+              child: StreamBuilder<int>(
+                stream: _tick,
+                builder: (context, _) => TargetCard(
+                  target: selected,
+                  place: s.place,
+                  following: focus.follow,
+                  stateTs: data.stateTs,
+                  onFollow: (v) => v
+                      ? focus.select(focus.id!, follow: true)
+                      : focus.setFollow(false),
+                  onShow: () => _show(selected),
+                  onClose: focus.clear,
+                ),
+              ),
+            ),
+          );
 
     return Stack(
       children: [
@@ -81,29 +131,41 @@ class _MapScreenState extends State<MapScreen> {
                       oblastWhole: alerts.oblastWhole,
                       raionLevels: alerts.raions,
                       dimTargets: s.stale,
+                      selectedId: focus.id,
+                      followId: focus.follow ? focus.id : null,
+                      onTargetTap: onTargetTap,
+                      onUserMove: onUserMove,
                       insets: EdgeInsets.fromLTRB(
-                          pad.left, pad.top + (phone ? 90 : 60), phone ? 0 : 60,
-                          pad.bottom + cardH + (phone ? 12 : 24)),
+                        pad.left,
+                        pad.top + (phone ? 90 : 60),
+                        phone ? 0 : 60,
+                        pad.bottom + cardH + (phone ? 12 : 24),
+                      ),
                     )
                   : UkraineMap(
-                key: _mapKey,
-                targets: data.targets,
-                home: (lat: s.place.lat, lon: s.place.lon),
-                homeName: s.place.name,
-                audibilityKm: settings.audibilityKm,
-                showAudibility: settings.showAudibility,
-                oblastLevels: alerts.levels,
-                raionLevels: alerts.raions,
-                oblastWhole: alerts.oblastWhole,
-                showControls: false,
-                showLegend: false,
-                dimTargets: s.stale,
-                insets: EdgeInsets.fromLTRB(
-                    pad.left + (phone ? 0 : 8),
-                    pad.top + (phone ? 96 : 70),
-                    phone ? 0 : 70,
-                    pad.bottom + cardH + (phone ? 12 : 24)),
-              ),
+                      key: _mapKey,
+                      targets: data.targets,
+                      home: (lat: s.place.lat, lon: s.place.lon),
+                      homeName: s.place.name,
+                      audibilityKm: settings.audibilityKm,
+                      showAudibility: settings.showAudibility,
+                      oblastLevels: alerts.levels,
+                      raionLevels: alerts.raions,
+                      oblastWhole: alerts.oblastWhole,
+                      showControls: false,
+                      showLegend: false,
+                      dimTargets: s.stale,
+                      selectedId: focus.id,
+                      followId: focus.follow ? focus.id : null,
+                      onTargetTap: onTargetTap,
+                      onUserMove: onUserMove,
+                      insets: EdgeInsets.fromLTRB(
+                        pad.left + (phone ? 0 : 8),
+                        pad.top + (phone ? 96 : 70),
+                        phone ? 0 : 70,
+                        pad.bottom + cardH + (phone ? 12 : 24),
+                      ),
+                    ),
             ),
           ),
         ),
@@ -113,11 +175,7 @@ class _MapScreenState extends State<MapScreen> {
           top: pad.top + 12,
           child: ThreatCounters(data: data, alerts: alerts),
         ),
-        Positioned(
-          right: 12,
-          top: pad.top + 12,
-          child: _controls(context),
-        ),
+        Positioned(right: 12, top: pad.top + 12, child: _controls(context)),
         if (_legend)
           Positioned(
             right: 66,
@@ -135,23 +193,41 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  /// «Показати»: fly the camera to the target once (no following).
+  void _show(MapTarget? t) {
+    if (t == null) return;
+    final m = motionOf(t, DateTime.now().millisecondsSinceEpoch);
+    _is3d
+        ? _map3dKey.currentState?.focusOn(m.lat, m.lon)
+        : _mapKey.currentState?.focusOn(m.lat, m.lon);
+  }
+
   Widget _controls(BuildContext context) {
     return Column(
       children: [
         GlassIconButton(
-            icon: Icons.add_rounded,
-            tooltip: 'Наблизити',
-            onTap: () => _is3d ? _map3dKey.currentState?.zoomIn() : _mapKey.currentState?.zoomIn()),
+          icon: Icons.add_rounded,
+          tooltip: 'Наблизити',
+          onTap: () => _is3d
+              ? _map3dKey.currentState?.zoomIn()
+              : _mapKey.currentState?.zoomIn(),
+        ),
         const SizedBox(height: 8),
         GlassIconButton(
-            icon: Icons.remove_rounded,
-            tooltip: 'Віддалити',
-            onTap: () => _is3d ? _map3dKey.currentState?.zoomOut() : _mapKey.currentState?.zoomOut()),
+          icon: Icons.remove_rounded,
+          tooltip: 'Віддалити',
+          onTap: () => _is3d
+              ? _map3dKey.currentState?.zoomOut()
+              : _mapKey.currentState?.zoomOut(),
+        ),
         const SizedBox(height: 8),
         GlassIconButton(
-            icon: Icons.center_focus_strong_outlined,
-            tooltip: 'Уся Україна',
-            onTap: () => _is3d ? _map3dKey.currentState?.resetView() : _mapKey.currentState?.resetView()),
+          icon: Icons.center_focus_strong_outlined,
+          tooltip: 'Уся Україна',
+          onTap: () => _is3d
+              ? _map3dKey.currentState?.resetView()
+              : _mapKey.currentState?.resetView(),
+        ),
         const SizedBox(height: 8),
         // 2D ↔ 3D.
         Tooltip(
@@ -165,25 +241,30 @@ class _MapScreenState extends State<MapScreen> {
               width: 44,
               height: 44,
               child: Center(
-                child: Text(_is3d ? '2D' : '3D',
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                        color: _is3d ? Colors.white : AppColors.textPrimary)),
+                child: Text(
+                  _is3d ? '2D' : '3D',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    color: _is3d ? Colors.white : AppColors.textPrimary,
+                  ),
+                ),
               ),
             ),
           ),
         ),
         const SizedBox(height: 8),
         GlassIconButton(
-            icon: _legend ? Icons.info_rounded : Icons.info_outline_rounded,
-            tooltip: 'Легенда',
-            onTap: () => setState(() => _legend = !_legend)),
+          icon: _legend ? Icons.info_rounded : Icons.info_outline_rounded,
+          tooltip: 'Легенда',
+          onTap: () => setState(() => _legend = !_legend),
+        ),
         const SizedBox(height: 8),
         GlassIconButton(
-            icon: Icons.ios_share_rounded,
-            tooltip: 'Поділитися картою',
-            onTap: () => _shareMap(context)),
+          icon: Icons.ios_share_rounded,
+          tooltip: 'Поділитися картою',
+          onTap: () => _shareMap(context),
+        ),
       ],
     );
   }
@@ -195,9 +276,9 @@ class _MapScreenState extends State<MapScreen> {
           _shotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (bnd == null) return;
       final image = await bnd.toImage(pixelRatio: 2.5);
-      final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))
-          ?.buffer
-          .asUint8List();
+      final bytes = (await image.toByteData(
+        format: ui.ImageByteFormat.png,
+      ))?.buffer.asUint8List();
       if (bytes == null || kIsWeb) return;
       final stamp = DateTime.now().millisecondsSinceEpoch;
       if (defaultTargetPlatform == TargetPlatform.android ||
@@ -206,7 +287,9 @@ class _MapScreenState extends State<MapScreen> {
         final dir = await getTemporaryDirectory();
         final f = File('${dir.path}/waralarm_map_$stamp.png');
         await f.writeAsBytes(bytes, flush: true);
-        await Share.shareXFiles([XFile(f.path)], text: 'WarAlarm — карта загроз');
+        await Share.shareXFiles([
+          XFile(f.path),
+        ], text: 'WarAlarm — карта загроз');
       } else {
         // Desktop: sharing files isn't supported — save to Downloads instead.
         Directory? dir;
@@ -217,11 +300,13 @@ class _MapScreenState extends State<MapScreen> {
         final f = File('${dir.path}/waralarm_map_$stamp.png');
         await f.writeAsBytes(bytes, flush: true);
         messenger.showSnackBar(
-            SnackBar(content: Text('Карту збережено: ${f.path}')));
+          SnackBar(content: Text('Карту збережено: ${f.path}')),
+        );
       }
     } catch (e) {
       messenger.showSnackBar(
-          SnackBar(content: Text('Не вдалося зробити скрін: $e')));
+        SnackBar(content: Text('Не вдалося зробити скрін: $e')),
+      );
     }
   }
 }

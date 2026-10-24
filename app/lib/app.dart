@@ -12,6 +12,7 @@ import 'controllers/map_data_controller.dart';
 import 'controllers/nav_controller.dart';
 import 'controllers/places_controller.dart';
 import 'controllers/settings_controller.dart';
+import 'controllers/target_focus_controller.dart';
 import 'controllers/theme_controller.dart';
 import 'services/local_store.dart';
 import 'services/rtdb_service.dart';
@@ -40,6 +41,8 @@ class WarAlarmApp extends StatelessWidget {
         Provider<RtdbService>.value(value: rtdb),
         Provider<LocalStore>.value(value: store),
         ChangeNotifierProvider<NavController>(create: (_) => NavController()),
+        // Picked / followed target on the maps.
+        ChangeNotifierProvider<TargetFocusController>(create: (_) => TargetFocusController()),
         ChangeNotifierProvider<ThemeController>(
           create: (_) => ThemeController(store)..applyNow(),
           lazy: false,

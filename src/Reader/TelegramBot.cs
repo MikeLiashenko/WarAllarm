@@ -17,7 +17,9 @@ public sealed record BotFeatures(
     Func<string> Stats,
     Func<Task<string>> Alerts,
     Func<Task<(byte[] png, string caption)>>? Night = null, // 🌙 підсумок ночі
-    Func<string>? Sources = null); // 📡 які канали що дали (SourceHub)
+    Func<string>? Sources = null, // 📡 які канали що дали (SourceHub)
+    Func<double, double, int, List<(string id, string text)>>? TargetsNear = null, // 🛰 найближчі цілі
+    Func<string, double, double, string?>? TargetInfo = null); // 🛰 опис цілі за id (null — зникла)
 
 public sealed class TelegramBot
 {
@@ -30,6 +32,10 @@ public sealed class TelegramBot
     readonly BotFeatures _f;
     readonly Dictionary<long, Place?> _users = new();      // chat → місто (null = ще не задано)
     readonly Dictionary<long, bool> _lastAlarm = new();    // для фронта тривоги
+    // 🛰 Стеження: chat → (id цілі, останній надісланий опис). Ключі кнопок — короткі
+    // (callback_data ≤ 64 байти, а id цілі кирилицею довший).
+    readonly Dictionary<long, (string id, string last)> _tracking = new();
+    readonly Dictionary<string, string> _trackKeys = new();
     long _offset;
 
     public TelegramBot(string token, BotFeatures features)
@@ -49,7 +55,7 @@ public sealed class TelegramBot
             new[] { "🎯 Ризик", "🏠 Укриття" },
             new[] { "📍 Моє місто", "📈 Аналітика" },
             new[] { "🤖 ШІ", "🚨 Тривоги" },
-            new[] { "❓ Довідка" },
+            new[] { "🛰 Цілі", "❓ Довідка" },
         },
         resize_keyboard = true,
     };
@@ -108,6 +114,27 @@ public sealed class TelegramBot
                     try { await Send(chat, $"🟢 Відбій — {place.Name}. Наразі поруч чисто."); } catch { }
                 _lastAlarm[chat] = alarm;
             }
+            // 🛰 Стеження: ціль змінилась (місце/стадія/курс) — шлемо оновлення; зникла — кінець.
+            if (_f.TargetInfo is { } ti)
+                foreach (var (chat, tr) in _tracking.ToArray())
+                {
+                    var pl = _users.TryGetValue(chat, out var up) ? up : null;
+                    if (pl is null) { _tracking.Remove(chat); continue; }
+                    var info = ti(tr.id, pl.Lat, pl.Lon);
+                    if (info is null)
+                    {
+                        _tracking.Remove(chat);
+                        try { await Send(chat, "🛰 Ціль зникла з радарів (збита, долетіла або відбій) — стеження завершено."); } catch { }
+                        continue;
+                    }
+                    // Рядок «оновлено HH:mm:ss» не рахуємо зміною — лише рух/стадію.
+                    static string Core(string x) => string.Join("\n", x.Split('\n').Where(l => !l.StartsWith("🕒")));
+                    if (Core(info) != Core(tr.last))
+                    {
+                        _tracking[chat] = (tr.id, info);
+                        try { await SendInline(chat, "🛰 Ціль рухається:\n\n" + info, UntrackKb); } catch { }
+                    }
+                }
         }
     }
 
@@ -142,7 +169,7 @@ public sealed class TelegramBot
                     + "📊 Статус — цілі + ймовірність по твоєму місту\n"
                     + "🎯 Ризик — детально по типах\n🏠 Укриття — найближчі укриття/метро\n🗺 Карта — карта України\n"
                     + "🚨 Тривоги — офіційні по областях\n📈 Аналітика — статистика\n"
-                    + "🤖 ШІ — розумний аналіз\n📡 Джерела — що дали канали моніторингу\n/stop — відписатися",
+                    + "🤖 ШІ — розумний аналіз\n📡 Джерела — що дали канали моніторингу\n🛰 Цілі — найближчі цілі + стеження\n/stop — відписатися",
                     withKeyboard: true);
                 return;
         }
@@ -164,6 +191,21 @@ public sealed class TelegramBot
                 await SendPhoto(chat, png, caption.Length > 1000 ? caption[..1000] : caption);
             }
             catch (Exception ex) { await Send(chat, "Не вдалося: " + ex.Message); }
+            return;
+        }
+        if (Match(text, cmd, "/untrack", "⏹", "не стежити"))
+        {
+            await Send(chat, _tracking.Remove(chat) ? "⏹ Стеження вимкнено." : "Ти ні за чим не стежиш.");
+            return;
+        }
+        if (_f.TargetsNear is { } near && Match(text, cmd, "/targets", "🛰", "цілі"))
+        {
+            if (!(_users.TryGetValue(chat, out var tp) && tp is not null)) { await Send(chat, "Спершу напиши назву свого міста 📍"); return; }
+            var list = near(tp.Lat, tp.Lon, 5);
+            if (list.Count == 0) { await Send(chat, $"🛰 Поруч із {tp.Name} (250 км) цілей немає."); return; }
+            await Send(chat, $"🛰 Найближчі цілі до {tp.Name} ({list.Count}). Натисни «Стежити» — пришлю зміни, щойно ціль рухається.");
+            foreach (var (id, info) in list)
+                await SendInline(chat, info, TrackKb(id));
             return;
         }
         if (Match(text, cmd, "/stats", "📈", "аналітика")) { await Send(chat, _f.Stats()); return; }
@@ -276,9 +318,37 @@ public sealed class TelegramBot
         try { await Http.PostAsync($"{_api}/answerCallbackQuery", content); } catch { }
     }
 
+    object TrackKb(string id)
+    {
+        var key = "trk:" + ((uint)id.GetHashCode()).ToString("x");
+        _trackKeys[key] = id;
+        return new { inline_keyboard = new[] { new object[] { new { text = "👁 Стежити", callback_data = key } } } };
+    }
+
+    static readonly object UntrackKb = new
+    {
+        inline_keyboard = new[] { new object[] { new { text = "⏹ Не стежити", callback_data = "untrk" } } }
+    };
+
     // Натиснули «чи було чути вибух?» → пишемо у журнал (краудсорс реальних прильотів).
     async Task HandleCallback(long chat, string data, string cbId)
     {
+        if (data.StartsWith("trk:") && _trackKeys.TryGetValue(data, out var tid))
+        {
+            var p = _users.TryGetValue(chat, out var tpl) ? tpl : null;
+            var info = p is null ? null : _f.TargetInfo?.Invoke(tid, p.Lat, p.Lon);
+            if (info is null) { await AnswerCallback(cbId, "Ця ціль уже зникла з радарів"); return; }
+            _tracking[chat] = (tid, info);
+            await AnswerCallback(cbId, "👁 Стежу");
+            await SendInline(chat, "👁 Стежу за ціллю — пришлю, щойно вона зміниться:\n\n" + info, UntrackKb);
+            return;
+        }
+        if (data == "untrk")
+        {
+            _tracking.Remove(chat);
+            await AnswerCallback(cbId, "⏹ Стеження вимкнено");
+            return;
+        }
         if (data is "boom_yes" or "boom_no")
         {
             var p = _users.TryGetValue(chat, out var pl) ? pl : null;

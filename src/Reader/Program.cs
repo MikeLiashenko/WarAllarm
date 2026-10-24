@@ -241,6 +241,9 @@ if (args.Length >= 1 && args[0].Equals("traj", StringComparison.OrdinalIgnoreCas
         }
     }
     Console.WriteLine("\n* — район пуску / точка скиду оцінені (канал не назвав)");
+    // Картка цілі (як у боті «🛰 Цілі»): найближча до дому.
+    if (tt.Active.Where(x => x.Pos is not null).MinBy(x => ThreatGeo.Km(x.Pos!.Value, (HomeLat, HomeLon))) is { } near0)
+        Console.WriteLine("\n── Картка цілі ──\n" + TargetText(near0, HomeLat, HomeLon));
     return;
 }
 
@@ -536,7 +539,9 @@ if (!string.IsNullOrWhiteSpace(botToken))
         Stats: BuildBotStats,
         Alerts: BuildBotAlerts,
         Night: async () => { var (from, to) = NightSummary.Window(DateTime.Now); var r = await BuildNight(from, to); return (r.png, r.plain); },
-        Sources: BuildSourcesText);
+        Sources: BuildSourcesText,
+        TargetsNear: TargetsNear,
+        TargetInfo: TargetInfo);
     var bot = new TelegramBot(botToken, features);
     _ = bot.RunAsync();                 // команди + персональні тривоги по місту
     Console.WriteLine($"🤖 Telegram-бот ВКЛ (підписників: {bot.SubscriberCount}). Напиши боту /start у Telegram.\n");
@@ -1155,6 +1160,43 @@ async Task<string> BuildBotAi()
 }
 
 // Аналітика з журналу alarms.csv: сьогодні / тиждень / усього / пік / за типами.
+// ── 🛰 Ціль детально / стеження (бот) ───────────────────────────────────────
+// Найближчі до точки цілі (до 250 км): (id, опис) — для «🛰 Цілі» у боті.
+List<(string id, string text)> TargetsNear(double lat, double lon, int n) =>
+    tracker.Active.Where(t => t.Pos is not null)
+        .Select(t => (t, km: ThreatGeo.Km(t.Pos!.Value, (lat, lon))))
+        .Where(x => x.km <= 250).OrderBy(x => x.km).Take(n)
+        .Select(x => (x.t.Id, TargetText(x.t, lat, lon))).ToList();
+
+// Поточний опис цілі за id (null — ціль знята / зникла з радарів).
+string? TargetInfo(string id, double lat, double lon) =>
+    tracker.Active.FirstOrDefault(t => t.Id == id) is { Pos: not null } t ? TargetText(t, lat, lon) : null;
+
+string TargetText(Threat t, double lat, double lon)
+{
+    var km = ThreatGeo.Km(t.Pos!.Value, (lat, lon));
+    var spd = ThreatGeo.SpeedKmh(t.Kind, t.Ammo);
+    var eta = km / spd * 60;
+    var lines = new List<string>
+    {
+        $"🎯 {ThreatTracker.Label(t)}{(t.Amount > 1 ? $" ×{t.Amount}" : "")}",
+        $"📍 {t.LastPlace} · {ThreatTracker.StageLabel(t.Stage)}",
+        $"📏 {km:0} км від тебе · підліт ~{(eta < 1 ? "<1" : eta.ToString("0"))} хв (за {spd:0} км/год)",
+    };
+    if (t.Heading is { } h && !t.Launch) lines.Add($"🧭 курс {ThreatGeo.Compass(h)} ({h:0}°)");
+    if (t.FromName is { Length: > 0 } fn)
+        lines.Add(t.Launch ? $"🚀 пуск: {fn}, ціль невідома" : $"↗ звідки: {fn}{(t.FromGuess ? " (оцінка)" : "")}");
+    if (t.FlightMin is { } fm && !t.Launch)
+    {
+        var left = Math.Max(0, fm - (DateTime.Now - t.LaunchAt).TotalMinutes);
+        lines.Add($"⏱ політ ~{fm:0.0} хв, лишилось ~{left:0.0} хв");
+    }
+    string[] srcs; lock (t.Srcs) srcs = t.Srcs.ToArray();
+    if (srcs.Length > 0) lines.Add($"📡 джерела ({srcs.Length}): {string.Join(", ", srcs.Take(5).Select(s => "@" + s))}");
+    lines.Add($"🕒 оновлено {t.LastUpdate:HH:mm:ss}");
+    return string.Join("\n", lines);
+}
+
 string BuildBotStats()
 {
     if (!File.Exists("alarms.csv")) return "📈 Ще немає даних — журнал зʼявиться після перших тривог.";

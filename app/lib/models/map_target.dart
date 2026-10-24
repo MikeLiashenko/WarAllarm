@@ -3,6 +3,8 @@
 /// Mirrors the `threats[]` objects the website map consumes, so the same
 /// backend JSON can feed both.
 class MapTarget {
+  /// Stable id from the Reader (select / follow a target across updates).
+  final String id;
   final String label;
   final String cat; // shahed | missile | balist | kab | avia | other
   final String zone; // e.g. "Харків" / "Київ" / "UA"
@@ -45,6 +47,7 @@ class MapTarget {
   final double? pdist;
 
   const MapTarget({
+    this.id = '',
     required this.label,
     required this.cat,
     required this.lat,
@@ -75,7 +78,7 @@ class MapTarget {
   });
 
   MapTarget withPdist(double? d) => MapTarget(
-        label: label, cat: cat, lat: lat, lon: lon, zone: zone, stage: stage,
+        id: id, label: label, cat: cat, lat: lat, lon: lon, zone: zone, stage: stage,
         heading: heading, amount: amount, place: place, dir: dir,
         stageLabel: stageLabel, icon: icon, distKm: distKm, etaMin: etaMin,
         seenMs: seenMs, trail: trail, pdist: d, approx: approx,
@@ -90,6 +93,7 @@ class MapTarget {
   factory MapTarget.fromMap(Map<dynamic, dynamic> m) {
     double? d(dynamic v) => v == null ? null : (v as num).toDouble();
     return MapTarget(
+      id: (m['id'] ?? '').toString(),
       label: (m['label'] ?? 'Ціль').toString(),
       cat: (m['cat'] ?? 'other').toString(),
       zone: (m['zone'] ?? 'UA').toString(),

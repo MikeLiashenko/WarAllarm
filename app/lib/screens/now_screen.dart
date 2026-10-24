@@ -6,6 +6,7 @@ import '../controllers/alerts_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/nav_controller.dart';
 import '../controllers/settings_controller.dart';
+import '../controllers/target_focus_controller.dart';
 import '../data/ukraine_geo.dart';
 import '../domain/probability.dart';
 import '../domain/situation.dart';
@@ -38,11 +39,17 @@ class Situation {
         if (seen.add('${t.zone}|${t.place}|${t.label}')) sel.add(t);
       }
     }
-    probs = scope
-        .map((p) => probabilityFor(p, real,
-            officialLevel: officialLevelFor(p, alerts.levels)))
-        .toList()
-      ..sort((a, b) => b.percent.compareTo(a.percent));
+    probs =
+        scope
+            .map(
+              (p) => probabilityFor(
+                p,
+                real,
+                officialLevel: officialLevelFor(p, alerts.levels),
+              ),
+            )
+            .toList()
+          ..sort((a, b) => b.percent.compareTo(a.percent));
     prob = probs.isEmpty ? null : probs.first;
     // The card / radar follow the most endangered place.
     place = prob?.place ?? scope.first;
@@ -57,7 +64,8 @@ class Situation {
     if (stale) {
       tone = AppColors.warn;
       status = 'Дані застаріли';
-      message = 'Монітор не оновлює дані ${fmtAge(data.dataAge)} '
+      message =
+          'Монітор не оновлює дані ${fmtAge(data.dataAge)} '
           '(останні — о ${fmtClock(data.stateTs).substring(0, 5)}). '
           'Тривога за цими даними не вмикається.';
     } else if (!data.live && !data.isDemo) {
@@ -67,11 +75,13 @@ class Situation {
     } else if (active) {
       tone = AppColors.threat;
       status = 'Тривога — в укриття';
-      message = '${worst?.label ?? 'Загроза'} поруч · ${worst?.stageLabel ?? ''}';
+      message =
+          '${worst?.label ?? 'Загроза'} поруч · ${worst?.stageLabel ?? ''}';
     } else if (threat) {
       tone = AppColors.warn;
       status = 'Загроза поруч';
-      message = '${worst!.label} · ${worst.pdist?.round() ?? '?'} км · '
+      message =
+          '${worst!.label} · ${worst.pdist?.round() ?? '?'} км · '
           '${fmtEta(etaNow(worst, data.stateTs))}';
     } else {
       tone = AppColors.safe;
@@ -109,11 +119,12 @@ class NowScreen extends StatefulWidget {
     if (sel.isNotEmpty) return sel;
     return [
       MonitoredPlace(
-          id: 'home',
-          icon: '🏠',
-          name: d.homeName,
-          lat: d.home.lat,
-          lon: d.home.lon),
+        id: 'home',
+        icon: '🏠',
+        name: d.homeName,
+        lat: d.home.lat,
+        lon: d.home.lon,
+      ),
     ];
   }
 
@@ -157,8 +168,10 @@ class _NowScreenState extends State<NowScreen> {
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SectionLabel('Ймовірність удару',
-                  trailing: Tag('через API')),
+              const SectionLabel(
+                'Ймовірність удару',
+                trailing: Tag('через API'),
+              ),
               ProbabilityGauge(prob: s.prob!),
             ],
           )
@@ -183,8 +196,9 @@ class _NowScreenState extends State<NowScreen> {
         SectionLabel(
           data.selectedId == 'all' ? 'Цілі · вся Україна' : 'Цілі поруч',
           // «Вся Україна» → скільки бортів у повітрі всього (сума ×N).
-          count:
-              data.selectedId == 'all' ? '~${data.airborne}' : '${s.sel.length}',
+          count: data.selectedId == 'all'
+              ? '~${data.airborne}'
+              : '${s.sel.length}',
           trailing: s.stale ? Tag('застарілі', color: AppColors.warn) : null,
         ),
         if (targets.isEmpty)
@@ -197,7 +211,10 @@ class _NowScreenState extends State<NowScreen> {
                 for (var i = 0; i < targets.length; i++) ...[
                   if (i > 0) Divider(height: 1, color: AppColors.divider),
                   _TargetRow(
-                      t: targets[i], stateTs: data.stateTs, stale: s.stale),
+                    t: targets[i],
+                    stateTs: data.stateTs,
+                    stale: s.stale,
+                  ),
                 ],
               ],
             ),
@@ -219,43 +236,54 @@ class _NowScreenState extends State<NowScreen> {
           ),
           gap,
           ...events,
-          LayoutBuilder(builder: (context, c) {
-            if (c.maxWidth >= 860) {
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          LayoutBuilder(
+            builder: (context, c) {
+              if (c.maxWidth >= 860) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 5,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          radar,
+                          if (prob != null) ...[gap, prob],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      flex: 6,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          places,
+                          gap,
+                          targetList,
+                          gap,
+                          _SourcesPanel(data: data),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    flex: 5,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [radar, if (prob != null) ...[gap, prob]],
-                    ),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    flex: 6,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [places, gap, targetList, gap, _SourcesPanel(data: data)],
-                    ),
-                  ),
+                  radar,
+                  if (prob != null) ...[gap, prob],
+                  gap,
+                  places,
+                  gap,
+                  targetList,
+                  gap,
+                  _SourcesPanel(data: data),
                 ],
               );
-            }
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                radar,
-                if (prob != null) ...[gap, prob],
-                gap,
-                places,
-                gap,
-                targetList,
-                gap,
-                _SourcesPanel(data: data),
-              ],
-            );
-          }),
+            },
+          ),
           gap,
           AnalyticsDashboard(rows: data.rows, targetsNow: data.targets.length),
           const SizedBox(height: 8),
@@ -280,7 +308,8 @@ class _NowScreenState extends State<NowScreen> {
         Notice(
           color: const Color(0xFFFF7A3C),
           emoji: '🚀',
-          title: 'Пуск ~${data.launched} шахедів'
+          title:
+              'Пуск ~${data.launched} шахедів'
               '${data.launchedAt.isNotEmpty ? ' о ${data.launchedAt}' : ''}',
           body: data.launchOrigins.isNotEmpty ? data.launchOrigins : null,
         ),
@@ -295,7 +324,7 @@ class _NowScreenState extends State<NowScreen> {
           // Світло по всьому Києву: які черги зараз без світла.
           body: data.powerGroupsOff.isNotEmpty
               ? 'Без світла черги: ${data.powerGroupsOff.join(', ')}'
-                  '${data.powerAt.isNotEmpty ? ' (з ${data.powerAt})' : ''}'
+                    '${data.powerAt.isNotEmpty ? ' (з ${data.powerAt})' : ''}'
               : null,
         ),
       // 🌙 Підсумок ночі (останній, що зібрав бот).
@@ -324,7 +353,6 @@ class _NowScreenState extends State<NowScreen> {
   }
 }
 
-
 /// The top of «Зараз»: the place card as a hero — tone glow, status, strike
 /// chance, place chips, key numbers and the shelter button.
 class _Hero extends StatelessWidget {
@@ -339,25 +367,28 @@ class _Hero extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(AppRadii.xl + 4),
         border: Border.all(
-            color: s.active
-                ? AppColors.threat.withValues(alpha: 0.6)
-                : AppColors.glassBorder),
+          color: s.active
+              ? AppColors.threat.withValues(alpha: 0.6)
+              : AppColors.glassBorder,
+        ),
         gradient: RadialGradient(
           center: const Alignment(-0.9, -1.0),
           radius: 1.4,
           colors: [
             Color.alphaBlend(
-                s.tone.withValues(alpha: AppColors.isDark ? 0.18 : 0.12),
-                AppColors.surface),
+              s.tone.withValues(alpha: AppColors.isDark ? 0.18 : 0.12),
+              AppColors.surface,
+            ),
             AppColors.surface,
           ],
         ),
         boxShadow: [
           BoxShadow(
-              color: s.tone.withValues(alpha: 0.12),
-              blurRadius: 40,
-              spreadRadius: -12,
-              offset: const Offset(0, 18)),
+            color: s.tone.withValues(alpha: 0.12),
+            blurRadius: 40,
+            spreadRadius: -12,
+            offset: const Offset(0, 18),
+          ),
         ],
       ),
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
@@ -372,7 +403,11 @@ class _Hero extends StatelessWidget {
           const SizedBox(height: 14),
           FilledButton.icon(
             onPressed: () => showSheltersSheet(
-                context, s.place.lat, s.place.lon, s.place.name),
+              context,
+              s.place.lat,
+              s.place.lon,
+              s.place.name,
+            ),
             style: FilledButton.styleFrom(
               backgroundColor: s.active ? AppColors.threat : AppColors.primary,
               padding: const EdgeInsets.symmetric(vertical: 15),
@@ -385,6 +420,7 @@ class _Hero extends StatelessWidget {
     );
   }
 }
+
 /// Collapsed-sheet card: place name, status dot + word, strike chance.
 class PlaceHeader extends StatelessWidget {
   const PlaceHeader({super.key, required this.s, this.big = false});
@@ -403,53 +439,64 @@ class PlaceHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(s.place.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: big ? 30 : 24,
-                      height: 1.1,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: big ? -0.9 : -0.6,
-                      color: AppColors.textPrimary)),
+              Text(
+                s.place.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: big ? 30 : 24,
+                  height: 1.1,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: big ? -0.9 : -0.6,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               const SizedBox(height: 6),
               Row(
                 children: [
                   LiveDot(
-                      color: s.tone,
-                      size: 8,
-                      pulse: s.active || (s.data.fresh && !s.threat)),
+                    color: s.tone,
+                    size: 8,
+                    pulse: s.active || (s.data.fresh && !s.threat),
+                  ),
                   const SizedBox(width: 2),
                   Flexible(
-                    child: Text(s.status,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: s.active
-                                ? AppColors.threat
-                                : AppColors.textPrimary)),
+                    child: Text(
+                      s.status,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: s.active
+                            ? AppColors.threat
+                            : AppColors.textPrimary,
+                      ),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 4),
-              Text(s.message,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 13,
-                      height: 1.35,
-                      color: AppColors.textSecondary,
-                      fontFeatures: AppText.tabular)),
+              Text(
+                s.message,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.35,
+                  color: AppColors.textSecondary,
+                  fontFeatures: AppText.tabular,
+                ),
+              ),
             ],
           ),
         ),
         if (pct != null && !s.stale) ...[
           const SizedBox(width: 12),
           _PercentRing(
-              percent: pct,
-              color: AppColors.forCls(s.prob!.cls),
-              size: big ? 78 : 64),
+            percent: pct,
+            color: AppColors.forCls(s.prob!.cls),
+            size: big ? 78 : 64,
+          ),
         ],
       ],
     );
@@ -458,8 +505,11 @@ class PlaceHeader extends StatelessWidget {
 
 /// Small ring with the strike chance in the middle.
 class _PercentRing extends StatelessWidget {
-  const _PercentRing(
-      {required this.percent, required this.color, this.size = 64});
+  const _PercentRing({
+    required this.percent,
+    required this.color,
+    this.size = 64,
+  });
   final int percent;
   final Color color;
   final double size;
@@ -488,8 +538,10 @@ class _PercentRing extends StatelessWidget {
             children: [
               Text('$percent%', style: AppText.number(size / 4, color: color)),
               const SizedBox(height: 2),
-              Text('удар',
-                  style: TextStyle(fontSize: 9.5, color: AppColors.textMuted)),
+              Text(
+                'удар',
+                style: TextStyle(fontSize: 9.5, color: AppColors.textMuted),
+              ),
             ],
           ),
         ],
@@ -511,19 +563,25 @@ class _Metrics extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-              child: Metric(
-                  value: s.stale ? '—' : '${s.focus.length}', label: 'Поруч')),
-          Expanded(
             child: Metric(
-                value: s.stale ? '—' : (n?.pdist?.round().toString() ?? '—'),
-                unit: !s.stale && n?.pdist != null ? 'км' : null,
-                label: 'Найближча'),
+              value: s.stale ? '—' : '${s.focus.length}',
+              label: 'Поруч',
+            ),
           ),
           Expanded(
-              child: Metric(
-                  value: eta == null ? '—' : fmtEta(eta),
-                  label: 'Підліт',
-                  size: 18)),
+            child: Metric(
+              value: s.stale ? '—' : (n?.pdist?.round().toString() ?? '—'),
+              unit: !s.stale && n?.pdist != null ? 'км' : null,
+              label: 'Найближча',
+            ),
+          ),
+          Expanded(
+            child: Metric(
+              value: eta == null ? '—' : fmtEta(eta),
+              label: 'Підліт',
+              size: 18,
+            ),
+          ),
         ],
       ),
     );
@@ -542,8 +600,9 @@ class _Panel extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       padding: padding,
       decoration: BoxDecoration(
-        color: AppColors.textPrimary
-            .withValues(alpha: AppColors.isDark ? 0.04 : 0.03),
+        color: AppColors.textPrimary.withValues(
+          alpha: AppColors.isDark ? 0.04 : 0.03,
+        ),
         borderRadius: BorderRadius.circular(AppRadii.lg),
         border: Border.all(color: AppColors.glassBorder),
       ),
@@ -563,16 +622,22 @@ class _EmptyTargets extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
       child: Column(
         children: [
-          Icon(live ? Icons.verified_outlined : Icons.cloud_off_outlined,
-              color: c, size: 28),
+          Icon(
+            live ? Icons.verified_outlined : Icons.cloud_off_outlined,
+            color: c,
+            size: 28,
+          ),
           const SizedBox(height: 8),
           Text(
-              live
-                  ? 'Наразі чисто — активних цілей немає'
-                  : 'Немає свіжих даних від монітора',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            live
+                ? 'Наразі чисто — активних цілей немає'
+                : 'Немає свіжих даних від монітора',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
         ],
       ),
     );
@@ -593,8 +658,9 @@ class _PlaceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final arr =
-        stale ? const <MapTarget>[] : placeThreats(place, data.alarmTargets);
+    final arr = stale
+        ? const <MapTarget>[]
+        : placeThreats(place, data.alarmTargets);
     final s = statusOf(worstOf(arr));
     final accent = stale ? AppColors.textMuted : AppColors.forCls(s.cls);
 
@@ -603,7 +669,8 @@ class _PlaceRow extends StatelessWidget {
       detail = 'Немає свіжих даних';
     } else if (arr.isNotEmpty) {
       final n = arr.first;
-      detail = '${n.label}${n.amount > 1 ? ' ×${n.amount}' : ''} · '
+      detail =
+          '${n.label}${n.amount > 1 ? ' ×${n.amount}' : ''} · '
           '${n.pdist?.round() ?? '?'} км · ${fmtEta(etaNow(n, data.stateTs))}'
           '${arr.length > 1 ? ' · ще ${arr.length - 1}' : ''}';
     } else {
@@ -623,7 +690,10 @@ class _PlaceRow extends StatelessWidget {
                 color: accent,
                 shape: BoxShape.circle,
                 boxShadow: [
-                  BoxShadow(color: accent.withValues(alpha: 0.5), blurRadius: 8),
+                  BoxShadow(
+                    color: accent.withValues(alpha: 0.5),
+                    blurRadius: 8,
+                  ),
                 ],
               ),
             ),
@@ -632,27 +702,35 @@ class _PlaceRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(place.name,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
+                  Text(
+                    place.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                   const SizedBox(height: 3),
-                  Text(detail,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          color: AppColors.textSecondary,
-                          fontFeatures: AppText.tabular)),
+                  Text(
+                    detail,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.textSecondary,
+                      fontFeatures: AppText.tabular,
+                    ),
+                  ),
                 ],
               ),
             ),
             if (prob != null && !stale) ...[
               const SizedBox(width: 10),
-              Text('${prob!.percent}%',
-                  style: AppText.number(18, color: accent)),
+              Text(
+                '${prob!.percent}%',
+                style: AppText.number(18, color: accent),
+              ),
             ] else if (!stale) ...[
               const SizedBox(width: 10),
               Tag(s.title, color: accent),
@@ -665,8 +743,11 @@ class _PlaceRow extends StatelessWidget {
 }
 
 class _TargetRow extends StatelessWidget {
-  const _TargetRow(
-      {required this.t, required this.stateTs, required this.stale});
+  const _TargetRow({
+    required this.t,
+    required this.stateTs,
+    required this.stale,
+  });
   final MapTarget t;
   final int stateTs;
   final bool stale;
@@ -676,96 +757,126 @@ class _TargetRow extends StatelessWidget {
     final threat = !stale && (kRank[t.stage] ?? 0) >= 3;
     final kind = kThreatColors[t.cat] ?? kThreatColors['other']!;
     final dist = t.pdist ?? t.distKm;
-    return Opacity(
-      opacity: stale ? 0.55 : 1,
-      child: Container(
-        color: threat ? AppColors.threat.withValues(alpha: 0.07) : null,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: const Color(0xF0101419),
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: threat ? AppColors.threat : kind, width: 1.6),
+    // Tap → open the map riding along with this target.
+    return InkWell(
+      onTap: t.id.isEmpty
+          ? null
+          : () {
+              context.read<TargetFocusController>().select(t.id, follow: true);
+              context.read<NavController>().select(AppTab.map);
+            },
+      child: Opacity(
+        opacity: stale ? 0.55 : 1,
+        child: Container(
+          color: threat ? AppColors.threat.withValues(alpha: 0.07) : null,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0xF0101419),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: threat ? AppColors.threat : kind,
+                    width: 1.6,
+                  ),
+                ),
+                child: ThreatGlyph(t.cat, size: 20, heading: t.heading ?? 0),
               ),
-              child: ThreatGlyph(t.cat, size: 20, heading: t.heading ?? 0),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          t.label,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            t.label,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
                               color: threat
                                   ? AppColors.threatDark
-                                  : AppColors.textPrimary),
+                                  : AppColors.textPrimary,
+                            ),
+                          ),
                         ),
+                        if (t.amount > 1) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            '×${t.amount}',
+                            style: AppText.number(13, color: kind),
+                          ),
+                        ],
+                        // Скільки незалежних каналів підтвердили ціль.
+                        if (t.sources > 1) ...[
+                          const SizedBox(width: 6),
+                          Tooltip(
+                            message: t.srcs.map((s) => '@$s').join(', '),
+                            child: Tag('✓${t.sources}', color: AppColors.safe),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      [
+                        if (t.stageLabel.isNotEmpty) t.stageLabel,
+                        // Звідки летить («?» — район пуску оцінений, канал не назвав).
+                        if (t.fromName.isNotEmpty && !t.launch)
+                          'з ${t.fromName}${t.fromGuess ? '?' : ''}',
+                        if (t.dir.isNotEmpty) 'напрям ${t.dir}',
+                        if (t.place.isNotEmpty) t.place,
+                      ].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
                       ),
-                      if (t.amount > 1) ...[
-                        const SizedBox(width: 6),
-                        Text('×${t.amount}',
-                            style: AppText.number(13, color: kind)),
-                      ],
-                      // Скільки незалежних каналів підтвердили ціль.
-                      if (t.sources > 1) ...[
-                        const SizedBox(width: 6),
-                        Tooltip(
-                          message: t.srcs.map((s) => '@$s').join(', '),
-                          child: Tag('✓${t.sources}', color: AppColors.safe),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 3),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
                   Text(
-                    [
-                      if (t.stageLabel.isNotEmpty) t.stageLabel,
-                      // Звідки летить («?» — район пуску оцінений, канал не назвав).
-                      if (t.fromName.isNotEmpty && !t.launch)
-                        'з ${t.fromName}${t.fromGuess ? '?' : ''}',
-                      if (t.dir.isNotEmpty) 'напрям ${t.dir}',
-                      if (t.place.isNotEmpty) t.place,
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style:
-                        TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                    dist != null ? '${dist.round()} км' : '—',
+                    style: AppText.number(
+                      15,
+                      color: threat ? AppColors.threat : AppColors.textPrimary,
+                    ),
                   ),
+                  if (!stale) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      fmtEta(etaNow(t, stateTs)),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.textMuted,
+                        fontFeatures: AppText.tabular,
+                      ),
+                    ),
+                  ],
                 ],
               ),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(dist != null ? '${dist.round()} км' : '—',
-                    style: AppText.number(15,
-                        color:
-                            threat ? AppColors.threat : AppColors.textPrimary)),
-                if (!stale) ...[
-                  const SizedBox(height: 4),
-                  Text(fmtEta(etaNow(t, stateTs)),
-                      style: TextStyle(
-                          fontSize: 11.5,
-                          color: AppColors.textMuted,
-                          fontFeatures: AppText.tabular)),
-                ],
+              if (t.id.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: AppColors.textMuted,
+                ),
               ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -775,8 +886,12 @@ class _TargetRow extends StatelessWidget {
 /// Floating counters over the map: one glass chip per threat kind (with the
 /// map's own silhouette), official alerts, and the snapshot time.
 class ThreatCounters extends StatelessWidget {
-  const ThreatCounters(
-      {super.key, required this.data, required this.alerts, this.onSurface = false});
+  const ThreatCounters({
+    super.key,
+    required this.data,
+    required this.alerts,
+    this.onSurface = false,
+  });
   final MapDataController data;
   final AlertsController alerts;
 
@@ -825,13 +940,19 @@ class ThreatCounters extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.verified_outlined,
-                        size: 18, color: AppColors.safe),
+                    Icon(
+                      Icons.verified_outlined,
+                      size: 18,
+                      color: AppColors.safe,
+                    ),
                     const SizedBox(width: 6),
-                    Text('Цілей немає',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary)),
+                    Text(
+                      'Цілей немає',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -846,8 +967,9 @@ class ThreatCounters extends StatelessWidget {
                       width: 10,
                       height: 10,
                       decoration: BoxDecoration(
-                          color: AppColors.threat,
-                          borderRadius: BorderRadius.circular(3)),
+                        color: AppColors.threat,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
                     ),
                     const SizedBox(width: 7),
                     Text('${alerts.redCount}', style: AppText.number(16)),
@@ -857,51 +979,59 @@ class ThreatCounters extends StatelessWidget {
                         width: 10,
                         height: 10,
                         decoration: BoxDecoration(
-                            color: AppColors.highlight,
-                            borderRadius: BorderRadius.circular(3)),
+                          color: AppColors.highlight,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
                       ),
                       const SizedBox(width: 7),
                       Text('${alerts.yellowCount}', style: AppText.number(16)),
                     ],
                     const SizedBox(width: 5),
-                    Text('обл.',
-                        style: TextStyle(
-                            fontSize: 12, color: AppColors.textSecondary)),
+                    Text(
+                      'обл.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
                   ],
                 ),
               ),
           ],
         ),
         if (!onSurface) ...[
-        const SizedBox(height: 8),
-        Glass(
-          radius: 10,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          color: stale ? AppColors.warn.withValues(alpha: 0.88) : null,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (stale) ...[
-                const Icon(Icons.warning_amber_rounded,
-                    size: 14, color: Colors.black87),
-                const SizedBox(width: 5),
-              ],
-              Text(
-                !data.live
-                    ? 'немає зв\'язку'
-                    : stale
-                        ? 'дані застарілі · ${fmtAge(data.dataAge)} тому'
-                        : 'станом на ${fmtClock(data.stateTs)}',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: stale ? Colors.black87 : AppColors.textSecondary,
-                  fontFeatures: AppText.tabular,
+          const SizedBox(height: 8),
+          Glass(
+            radius: 10,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            color: stale ? AppColors.warn.withValues(alpha: 0.88) : null,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (stale) ...[
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    size: 14,
+                    color: Colors.black87,
+                  ),
+                  const SizedBox(width: 5),
+                ],
+                Text(
+                  !data.live
+                      ? 'немає зв\'язку'
+                      : stale
+                      ? 'дані застарілі · ${fmtAge(data.dataAge)} тому'
+                      : 'станом на ${fmtClock(data.stateTs)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: stale ? Colors.black87 : AppColors.textSecondary,
+                    fontFeatures: AppText.tabular,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
         ],
       ],
     );
@@ -920,10 +1050,12 @@ class _SourcesPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SectionLabel('Джерела',
-            count: data.sourcesCatalog > 0
-                ? '${data.sourcesActive}/${data.sourcesCatalog}'
-                : null),
+        SectionLabel(
+          'Джерела',
+          count: data.sourcesCatalog > 0
+              ? '${data.sourcesActive}/${data.sourcesCatalog}'
+              : null,
+        ),
         _Panel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -932,11 +1064,14 @@ class _SourcesPanel extends StatelessWidget {
                 data.sourcesCatalog == 0
                     ? 'Монітор ще не надіслав статистику джерел.'
                     : 'Слухаю ${data.sourcesCatalog} каналів моніторингу. '
-                        'На карту йде лише підтверджене: офіційні, розвідка й місцеві '
-                        'про свій регіон — одразу, решта — після 2-го джерела'
-                        '${data.sourcesPending > 0 ? ' (зараз чекають: ${data.sourcesPending})' : ''}.',
+                          'На карту йде лише підтверджене: офіційні, розвідка й місцеві '
+                          'про свій регіон — одразу, решта — після 2-го джерела'
+                          '${data.sourcesPending > 0 ? ' (зараз чекають: ${data.sourcesPending})' : ''}.',
                 style: TextStyle(
-                    fontSize: 12.5, height: 1.4, color: AppColors.textSecondary),
+                  fontSize: 12.5,
+                  height: 1.4,
+                  color: AppColors.textSecondary,
+                ),
               ),
               if (top.isNotEmpty) ...[
                 const SizedBox(height: 12),
@@ -945,20 +1080,30 @@ class _SourcesPanel extends StatelessWidget {
                     padding: const EdgeInsets.only(bottom: 7),
                     child: Row(
                       children: [
-                        Icon(Icons.podcasts_rounded,
-                            size: 15, color: AppColors.textMuted),
+                        Icon(
+                          Icons.podcasts_rounded,
+                          size: 15,
+                          color: AppColors.textMuted,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: Text('@${s.user}',
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.textPrimary)),
-                        ),
-                        Text(s.tier,
+                          child: Text(
+                            '@${s.user}',
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                fontSize: 11, color: AppColors.textMuted)),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          s.tier,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
                         const SizedBox(width: 10),
                         Tag('✓${s.confirmed}', color: AppColors.safe),
                         const SizedBox(width: 6),

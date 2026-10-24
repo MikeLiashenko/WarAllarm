@@ -38,7 +38,21 @@ class Map3D extends StatefulWidget {
     this.raionLevels = const {},
     this.dimTargets = false,
     this.insets = EdgeInsets.zero,
+    this.selectedId,
+    this.followId,
+    this.onTargetTap,
+    this.onUserMove,
   });
+
+  /// Picked target (highlighted) and the one the camera follows (by id).
+  final String? selectedId;
+  final String? followId;
+
+  /// Tap on the map: the target under the finger, or null for empty map.
+  final ValueChanged<MapTarget?>? onTargetTap;
+
+  /// The user moved the camera themselves (e.g. to stop following).
+  final VoidCallback? onUserMove;
 
   final List<MapTarget> targets;
   final ({double lat, double lon}) home;
@@ -85,6 +99,27 @@ List<_Poly> _parsePolys(String json) {
           [for (final p in (ring as List)) Offset((p[0] as num).toDouble(), (p[1] as num).toDouble())],
       ]),
   ];
+}
+
+double _apogee(double distKm) => math.min(240.0, 40 + distKm * 0.35);
+
+/// Display height of a target (km, exaggerated), shrinking with zoom ([hs]).
+double targetHeight3d(MapTarget t, TargetMotion m, double hs) {
+  if (m.isFlight) {
+    final p = m.progress!;
+    if (t.cat == 'kab') return 55 * (1 - p) * hs;
+    final d = kmBetween(t.from![0], t.from![1], t.to![0], t.to![1]);
+    return _apogee(d) * 4 * p * (1 - p) * hs;
+  }
+  final double base = switch (t.cat) {
+    'shahed' => 12,
+    'missile' => 9,
+    'avia' => 30,
+    'kab' => 40,
+    'balist' => 20,
+    _ => 10,
+  };
+  return base * hs;
 }
 
 String _napo(String s) => s.replaceAll('’', "'").replaceAll('ʼ', "'").replaceAll('`', "'");
@@ -240,6 +275,50 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
         _clampFocus();
       });
 
+  // ── Picking & following ──
+  String? _followStarted;
+
+  /// The target under [local] (nearest badge within ~30 px), or null.
+  MapTarget? targetAt(Offset local) {
+    final cam = _cam();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    MapTarget? best;
+    var bd = 30.0;
+    for (final t in widget.targets) {
+      final m = motionOf(t, now, frozen: widget.dimTargets);
+      final o = cam.proj(m.lat, m.lon, targetHeight3d(t, m, cam.hScale)).o;
+      final d = (o - local).distance;
+      if (d < bd) {
+        bd = d;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  /// Every frame: keep the followed target at the focus (camera rides along).
+  void _followTick() {
+    final id = widget.followId;
+    if (id == null) {
+      _followStarted = null;
+      return;
+    }
+    final t = widget.targets.where((x) => x.id == id).firstOrNull;
+    if (t == null) return;
+    if (_followStarted != id) {
+      _followStarted = id;
+      if (_zoom < 6) _zoom = 6; // come closer once when following starts
+    }
+    final m = motionOf(t, DateTime.now().millisecondsSinceEpoch, frozen: widget.dimTargets);
+    _focusLat = m.lat;
+    _focusLon = m.lon;
+    _clampFocus();
+  }
+
+  void _userMoved() {
+    if (widget.followId != null) widget.onUserMove?.call();
+  }
+
   bool get _ctrl => HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isShiftPressed;
 
   @override
@@ -269,6 +348,7 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
               },
               onPointerPanZoomUpdate: (e) => setState(() {
                 final pos = e.localPosition;
+                if ((e.localPan - _lastPan).distance > 2) _userMoved();
                 _panScreen(pos, pos + (e.localPan - _lastPan));
                 _zoomAt(pos, e.scale / _lastScale);
                 _yaw = (_yaw - (e.rotation - _lastRotation) * 180 / math.pi) % 360;
@@ -290,6 +370,7 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
                 // Count the drag from the touch-down point, not after the slop — the
                 // first pixels of a pan used to be lost.
                 dragStartBehavior: DragStartBehavior.down,
+                onTapUp: (d) => widget.onTargetTap?.call(targetAt(d.localPosition)),
                 onDoubleTapDown: (d) => _lastTap = d.localPosition,
                 onDoubleTap: () => setState(() => _zoomAt(_lastTap, 2)),
                 onScaleStart: (d) {
@@ -309,6 +390,7 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
                       _yaw = (_yaw - delta.dx * 0.35) % 360;
                       _tilt = (_tilt - delta.dy * 0.3).clamp(0.0, 75.0);
                     } else {
+                      if (delta.distance > 2) _userMoved(); // dragging the map stops following
                       _panScreen(_lastFocal, d.localFocalPoint);
                     }
                     _lastFocal = d.localFocalPoint;
@@ -319,7 +401,9 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
                 onScaleEnd: (_) => _rotateMode = false,
                 child: AnimatedBuilder(
                   animation: _anim,
-                  builder: (context, _) => CustomPaint(
+                  builder: (context, _) {
+                    _followTick();
+                    return CustomPaint(
                     size: Size.infinite,
                     painter: _Map3DPainter(
                       cam: _cam(),
@@ -332,8 +416,10 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
                       pulse: _anim.value,
                       nowMs: DateTime.now().millisecondsSinceEpoch,
                       dim: widget.dimTargets,
+                      selectedId: widget.selectedId,
                     ),
-                  ),
+                  );
+                  },
                 ),
               ),
             ),
@@ -447,8 +533,10 @@ class _Map3DPainter extends CustomPainter {
     required this.pulse,
     required this.nowMs,
     required this.dim,
+    this.selectedId,
   });
 
+  final String? selectedId;
   final _Cam cam;
   final List<_Poly> oblasts, raions;
   final List<MapTarget> targets;
@@ -676,26 +764,7 @@ class _Map3DPainter extends CustomPainter {
     canvas.drawCircle(top.o, 2, Paint()..color = Colors.white);
   }
 
-  double _apogee(double distKm) => math.min(240.0, 40 + distKm * 0.35);
-
-  double _height(MapTarget t, TargetMotion m) {
-    final hs = cam.hScale;
-    if (m.isFlight) {
-      final p = m.progress!;
-      if (t.cat == 'kab') return 55 * (1 - p) * hs;
-      final d = kmBetween(t.from![0], t.from![1], t.to![0], t.to![1]);
-      return _apogee(d) * 4 * p * (1 - p) * hs;
-    }
-    final double base = switch (t.cat) {
-      'shahed' => 12,
-      'missile' => 9,
-      'avia' => 30,
-      'kab' => 40,
-      'balist' => 20,
-      _ => 10,
-    };
-    return base * hs;
-  }
+  double _height(MapTarget t, TargetMotion m) => targetHeight3d(t, m, cam.hScale);
 
   void _target(Canvas canvas, MapTarget t, TargetMotion m) {
     final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
@@ -788,6 +857,18 @@ class _Map3DPainter extends CustomPainter {
           ..strokeWidth = 1.8
           ..color = color);
     paintThreatGlyph(canvas, air.o, r * 1.7, t.cat, color, m.heading - cam.yaw);
+    if (selectedId != null && t.id == selectedId) {
+      canvas.drawCircle(air.o, r + 6 + 7 * pulse,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.2
+            ..color = AppColors.highlight.withValues(alpha: 1 - 0.7 * pulse));
+      canvas.drawCircle(air.o, r + 3,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5
+            ..color = AppColors.highlight);
+    }
     if (t.amount > 1) {
       _text(canvas, '×${t.amount}', air.o + Offset(0, -r - 9), 12, AppColors.textPrimary, bold: true);
     }

@@ -101,6 +101,7 @@ public static class MapWriter
             var (t, amount) = merged[i];
             if (i > 0) sb.Append(',');
             sb.Append("{\"label\":\"").Append(Esc(ThreatTracker.Label(t))).Append('"');
+            sb.Append(",\"id\":\"").Append(Esc(t.Id)).Append('"'); // стабільний ідентифікатор (вибір / стеження в застосунку)
             sb.Append(",\"zone\":\"").Append(Esc(t.Zone)).Append('"');
             sb.Append(",\"cat\":\"").Append(Cat(t.Kind)).Append('"');
             sb.Append(",\"stage\":\"").Append(t.Stage).Append('"');
