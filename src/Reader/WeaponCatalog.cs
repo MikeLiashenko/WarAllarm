@@ -71,7 +71,7 @@ public static class WeaponCatalog
         W("УМПБ Д-30СН", ThreatKind.Kab, 700, @"умпб|д[\s-]?30\s?сн"),
 
         // ── Ударні БпЛА / приманки ──
-        W("реакт. шахед", ThreatKind.Drone, 500, @"герань[\s-]?3|shahed[\s-]?238|шахед[\s-]?238|реактивн|рбпла|\bреактив|шаболд"),
+        W("реакт. шахед", ThreatKind.Drone, 500, @"герань[\s-]?3|shahed[\s-]?238|шахед[\s-]?238|реактивн|рбпла|\bреакт(?:ив|\.)|шаболд"),
         W("Shahed-136", ThreatKind.Drone, 185, @"(?:shahed|шахед|шахід)[\s-]?136|(?:герань|geran)[\s-]?2"),
         W("Shahed-131", ThreatKind.Drone, 180, @"(?:shahed|шахед|шахід)[\s-]?131|(?:герань|geran)[\s-]?1(?!\d)"),
         W("Ланцет", ThreatKind.Drone, 110, @"ланцет|lancet"),
