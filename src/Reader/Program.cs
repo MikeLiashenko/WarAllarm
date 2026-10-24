@@ -25,6 +25,8 @@ double HomeLat = double.TryParse(cfg.GetValueOrDefault("my_lat", ""), NumberStyl
 double HomeLon = double.TryParse(cfg.GetValueOrDefault("my_lon", ""), NumberStyles.Any, CultureInfo.InvariantCulture, out var _hlo)
     ? _hlo : (ThreatGeo.Of(MyDistrict)?.lon ?? 36.310);
 var tracker = new ThreatTracker((HomeLat, HomeLon));
+// 📡 Хаб усіх каналів моніторингу (neptun.in.ua/dzherela): розбір, звірка, статистика.
+var hub = new SourceHub();
 const string MapPath = "map.html";
 // Доп. места для карты: строка settings  places=Назва@широта,довгота;Назва2@...  (необязательно).
 List<(string name, double lat, double lon)> ParsePlaces(string raw)
@@ -195,6 +197,14 @@ if (args.Length >= 1 && (args[0].Equals("parse", StringComparison.OrdinalIgnoreC
                       || args[0].Equals("parsefile", StringComparison.OrdinalIgnoreCase)))
 {
     RunParseDemo(args.Length >= 2 ? args[1] : "samples.txt");
+    return;
+}
+
+// ── Тест хаба джерел (оффлайн, без Telegram і без запису в Firebase):
+//    dotnet run -- sources <файл>   формат: «##### @канал» + пости через «---»
+if (args.Length >= 2 && args[0].Equals("sources", StringComparison.OrdinalIgnoreCase))
+{
+    RunSourcesDemo(args[1]);
     return;
 }
 
@@ -481,7 +491,8 @@ if (!string.IsNullOrWhiteSpace(botToken))
         Ai: BuildBotAi,
         Stats: BuildBotStats,
         Alerts: BuildBotAlerts,
-        Night: async () => { var (from, to) = NightSummary.Window(DateTime.Now); var r = await BuildNight(from, to); return (r.png, r.plain); });
+        Night: async () => { var (from, to) = NightSummary.Window(DateTime.Now); var r = await BuildNight(from, to); return (r.png, r.plain); },
+        Sources: BuildSourcesText);
     var bot = new TelegramBot(botToken, features);
     _ = bot.RunAsync();                 // команди + персональні тривоги по місту
     Console.WriteLine($"🤖 Telegram-бот ВКЛ (підписників: {bot.SubscriberCount}). Напиши боту /start у Telegram.\n");
@@ -506,6 +517,7 @@ var daySeen = new HashSet<string>();
 var ppoSeen = new Dictionary<string, DateTime>(); // зона → коли востаннє згадали роботу ППО
 DateTime? nuclearUntil = null; // ☢️ доки активна радіаційна/ядерна небезпека (30 хв від згадки)
 DateTime? lastLaunch = null;   // 🚀 коли востаннє попереджали про пуски (щоб не спамити)
+DateTime? lastBallistic = null; // ☄ коли востаннє будили через балістику (хаб джерел)
 var kyivOff = new SortedSet<int>(); // 🔌 черги Києва, які ЗАРАЗ без світла (з постів єСвітло)
 string? kyivOffAt = null;           // час останнього перемикання черг («11:30»)
 
@@ -1373,6 +1385,11 @@ try
         Ui.Line(ConsoleColor.Yellow, "⚠ НЕ підписаний на: " + string.Join(", ", missing.Select(u => "@" + u)) + " — по ним live не прийде! Вступи в них.");
     else
         Ui.Line(ConsoleColor.Green, "✅ Підписки в порядку — усі потрібні канали на місці.");
+    // 📡 Каталог джерел (neptun.in.ua/dzherela): скільки з них реально приходить.
+    var hubMissing = SourceCatalog.All.Keys.Where(u => !subscribed.Contains(u)).ToList();
+    Ui.Line(hubMissing.Count == 0 ? ConsoleColor.Green : ConsoleColor.Yellow,
+        $"📡 Джерела: підписаний на {SourceCatalog.All.Count - hubMissing.Count}/{SourceCatalog.All.Count}"
+        + (hubMissing.Count > 0 ? " · без підписки: " + string.Join(", ", hubMissing.Take(12).Select(u => "@" + u)) + (hubMissing.Count > 12 ? "…" : "") : ""));
 }
 catch { /* проверка не критична */ }
 
@@ -1482,9 +1499,16 @@ async Task OnUpdate(Update update)
     var time = m.date.ToString("HH:mm:ss");
     var oneLine = m.message.Replace("\n", " ").Trim();
 
+    // Канал лише з каталогу джерел (не з наших спец-парсерів) — хабу ПОТРІБНІ повтори
+    // з різних каналів: саме так він підтверджує ціль. Дедуп для нього не робимо.
+    var hubSrc = SourceCatalog.Get(uname);
+    bool hubOnly = hubSrc is not null && !isUaPrivate && !(uname != null &&
+        ((WatchKharkiv && khChannels.Contains(uname)) || (WatchKyiv && kyChannels.Contains(uname))
+         || uaChannels.Contains(uname) || powerChannels.Contains(uname) || launchChannels.Contains(uname)));
+
     // Дедуп: одинаковый текст из разных каналов за короткое окно — обрабатываем один раз
     // (частый случай: репост/копипаста одной и той же угрозы). Так не пищит дважды.
-    if (SeenRecently(oneLine)) return;
+    if (!hubOnly && SeenRecently(oneLine)) return;
 
     // ── ☢️ РАДІАЦІЙНА/ЯДЕРНА НЕБЕЗПЕКА — найвищий пріоритет над усім ──────────────
     // Тільки з наших моніторених каналів і лише за явним сигналом (NuclearMention).
@@ -1669,7 +1693,11 @@ async Task OnUpdate(Update update)
         bool drew = false;
         foreach (var ev in events)
         {
-            if (tracker.IngestUa(ev, DateTime.Now) is not null) drew = true; // на карту — вся країна
+            if (tracker.IngestUa(ev, DateTime.Now) is { } uu) // на карту — вся країна
+            {
+                drew = true;
+                lock (uu.Threat.Srcs) uu.Threat.Srcs.Add(src.TrimStart('@'));
+            }
             var rel = ThreatParser.Relevance(ev, MyOblast, MyCity);
             if (rel == RelLevel.None) continue;
             var head = $"{(rel == RelLevel.City ? "🔴 твоє місто" : "🟠 твоя область")} {ThreatParser.Icon(ev.Kind)} {ev.City ?? ev.Oblast}";
@@ -1682,7 +1710,127 @@ async Task OnUpdate(Update update)
         return;
     }
 
+    // ── 📡 Усі інші канали моніторингу з каталогу → хаб (розбір + звірка джерел) ──
+    if (hubOnly)
+    {
+        await HandleHub(hubSrc!, m.message, src, time);
+        return;
+    }
+
     // прочие каналы — не наши
+}
+
+// ── 📡 Хаб джерел: розбір повідомлення каталогу → звірка → карта/сповіщення ─────
+async Task HandleHub(SourceInfo si, string text, string src, string time)
+{
+    var now = DateTime.Now;
+    var r = hub.Process(si, text, now);
+    var oneLine = text.Replace("\n", " ").Trim();
+    if (oneLine.Length > 90) oneLine = oneLine[..90] + "…";
+    switch (r.Verdict)
+    {
+        case HubVerdict.Noise or HubVerdict.News or HubVerdict.Unplaced:
+            Ui.Line(ConsoleColor.DarkGray, $"·  [{time}] {src} — {r.Note}");
+            return;
+
+        case HubVerdict.AllClear:
+            // Відбій від місцевого спостерігача: прибираємо «затихлі» (>2 хв) цілі ЙОГО області.
+            // Без області (агрегатор) — лише в журнал: загальний відбій дає офіційний API.
+            int gone = 0;
+            if (r.ClearOblast is { } co && co != "*")
+                gone = tracker.SweepWhere(t => t.Zone == "UA" && t.Oblast != null
+                    && string.Equals(t.Oblast, co, StringComparison.OrdinalIgnoreCase)
+                    && now - t.LastUpdate > TimeSpan.FromMinutes(2)).Count;
+            Ui.Line(ConsoleColor.Green, $"✅ [{time}] {src} · відбій{(r.ClearOblast is { } o && o != "*" ? $" ({o})" : "")}{(gone > 0 ? $" — прибрано цілей: {gone}" : "")}");
+            if (gone > 0) { MapWriter.SourcesJson = hub.Json(now); MapWriter.Write(MapPath, tracker, MyDistrict, now); }
+            return;
+
+        case HubVerdict.Ballistic:
+            Ui.Line(ConsoleColor.Red, $"☄ [{time}] {src} · {r.Note}");
+            // Пуш лише коли стосується тебе: місцевий канал твоєї області або назване твоє місто.
+            bool mine = si.Oblasts.Contains(MyOblast, StringComparer.OrdinalIgnoreCase)
+                        || text.Contains(MyCity[..Math.Min(MyCity.Length, 4)], StringComparison.OrdinalIgnoreCase);
+            bool recentBall = lastBallistic is { } lb && now - lb < TimeSpan.FromMinutes(5);
+            if (mine && !recentBall)
+            {
+                lastBallistic = now;
+                await Notify(MyCity, new AlarmInfo(time, src, "☄ ЗАГРОЗА БАЛІСТИКИ — в укриття!", oneLine, ThreatKind.Ballistic, true), clear: false);
+            }
+            return;
+
+        case HubVerdict.Pending:
+            Ui.Line(ConsoleColor.DarkYellow, $"…  [{time}] {src} · {oneLine}  (чекаю 2-ге джерело)");
+            return;
+    }
+
+    // Підтверджені цілі → трекер (карта / застосунок / ризик).
+    bool drew = false;
+    foreach (var he in r.Confirmed)
+    {
+        if (tracker.IngestUa(he.Ev, now) is not { } up) continue;
+        drew = true;
+        lock (up.Threat.Srcs) foreach (var s in he.Sources) up.Threat.Srcs.Add(s);
+        var tag = he.Sources.Count > 1 ? $"✓{he.Sources.Count} джерела" : $"✓{si.Label}";
+        var rel = ThreatParser.Relevance(he.Ev, MyOblast, MyCity);
+        var head = $"{ThreatParser.Icon(he.Ev.Kind)} {he.Place}{(he.Ev.Count > 1 ? $" ×{he.Ev.Count}" : "")} · {tag}";
+        if (rel == RelLevel.City && he.Fresh)
+            await Notify(MyCity, new AlarmInfo(time, src, $"🔴 твоє місто {head}", oneLine, he.Ev.Kind, true), clear: false);
+        else
+            Ui.Line(he.Fresh ? ConsoleColor.Yellow : ConsoleColor.DarkYellow, $"📡 [{time}] {src} · {head}{(rel == RelLevel.Oblast ? "  (твоя область)" : "")}");
+    }
+    if (drew)
+    {
+        MapWriter.SourcesJson = hub.Json(now);
+        MapWriter.Write(MapPath, tracker, MyDistrict, now);
+        await MaybeAi(false);
+    }
+}
+
+// 📡 Відповідь бота «Джерела»: скільки каналів, хто що дав.
+string BuildSourcesText()
+{
+    var j = hub.Report(12);
+    return $"📡 Джерела моніторингу: {SourceCatalog.All.Count} каналів (neptun.in.ua/dzherela)\n"
+         + $"Чекають підтвердження: {hub.Pending}\n\n"
+         + (j.Length > 0 ? j : "Поки що тихо — повідомлень з каналів не було.")
+         + "\nПравило: офіційні/розвідка й місцеві про свій регіон — одразу; інші — після 2-го джерела.";
+}
+
+// Оффлайн-прогін хаба на зібраних постах: показує, що він робить з кожним.
+void RunSourcesDemo(string path)
+{
+    if (!File.Exists(path)) { Console.WriteLine($"❌ Не знайдено файл: {path}"); return; }
+    var demoHub = new SourceHub();
+    string? ch = null;
+    var t0 = DateTime.Now;
+    int i = 0;
+    foreach (var block in Regex.Split(File.ReadAllText(path), @"(?m)^---\s*$"))
+    {
+        var text = block.Trim();
+        // Заголовок «##### @канал» або «##### @канал|2026-10-24T11:40:00+00:00» (реальний час поста).
+        var mh = Regex.Match(text, @"(?m)^#####\s*@([^\s|]+)(?:\|(\S+))?.*$");
+        DateTime? at = null;
+        if (mh.Success)
+        {
+            ch = mh.Groups[1].Value; text = text.Replace(mh.Value, "").Trim();
+            if (DateTimeOffset.TryParse(mh.Groups[2].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dto)) at = dto.LocalDateTime;
+        }
+        if (text.Length == 0 || ch is null) continue;
+        var si = SourceCatalog.Get(ch);
+        if (si is null) { Console.WriteLine($"?? @{ch} нема в каталозі"); continue; }
+        var r = demoHub.Process(si, text, at ?? t0.AddSeconds(5 * i));
+        i++;
+        var line = text.Replace("\n", " ⏎ ");
+        if (line.Length > 70) line = line[..70] + "…";
+        var what = r.Verdict switch
+        {
+            HubVerdict.Confirmed => "✅ " + string.Join("; ", r.Confirmed.Select(e => $"{e.Ev.Kind} {e.Place}×{e.Ev.Count} [{string.Join(",", e.Sources)}]")),
+            HubVerdict.AllClear => "🟢 відбій " + (r.ClearOblast ?? ""),
+            _ => $"{r.Verdict} {r.Note}",
+        };
+        Console.WriteLine($"@{ch,-18} {line}\n      → {what}");
+    }
+    Console.WriteLine("\n" + demoHub.Report(20));
 }
 
 // Дедуп одинаковых сообщений в коротком окне (репосты/копипаста между каналами).
@@ -1727,6 +1875,7 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
         var up = tracker.Ingest(e, zone, DateTime.Now);
         if (up is { } u)
         {
+            lock (u.Threat.Srcs) u.Threat.Srcs.Add(src.TrimStart('@'));
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
             // Прилёт → отдельная запись в журнал (для аналитики «прильотів»).
             if (u.StageChanged && u.Threat.Stage == TrackStage.Impact)

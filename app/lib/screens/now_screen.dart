@@ -236,7 +236,7 @@ class _NowScreenState extends State<NowScreen> {
                     flex: 6,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [places, gap, targetList],
+                      children: [places, gap, targetList, gap, _SourcesPanel(data: data)],
                     ),
                   ),
                 ],
@@ -251,6 +251,8 @@ class _NowScreenState extends State<NowScreen> {
                 places,
                 gap,
                 targetList,
+                gap,
+                _SourcesPanel(data: data),
               ],
             );
           }),
@@ -717,6 +719,14 @@ class _TargetRow extends StatelessWidget {
                         Text('×${t.amount}',
                             style: AppText.number(13, color: kind)),
                       ],
+                      // Скільки незалежних каналів підтвердили ціль.
+                      if (t.sources > 1) ...[
+                        const SizedBox(width: 6),
+                        Tooltip(
+                          message: t.srcs.map((s) => '@$s').join(', '),
+                          child: Tag('✓${t.sources}', color: AppColors.safe),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 3),
@@ -890,6 +900,73 @@ class ThreatCounters extends StatelessWidget {
           ),
         ),
         ],
+      ],
+    );
+  }
+}
+
+/// 📡 Where the data comes from: the Reader's source hub — how many monitoring
+/// channels it listens to, and which ones actually delivered (confirmed) targets.
+class _SourcesPanel extends StatelessWidget {
+  const _SourcesPanel({required this.data});
+  final MapDataController data;
+
+  @override
+  Widget build(BuildContext context) {
+    final top = data.sourcesTop.where((s) => s.threats > 0).take(6).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionLabel('Джерела',
+            count: data.sourcesCatalog > 0
+                ? '${data.sourcesActive}/${data.sourcesCatalog}'
+                : null),
+        _Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                data.sourcesCatalog == 0
+                    ? 'Монітор ще не надіслав статистику джерел.'
+                    : 'Слухаю ${data.sourcesCatalog} каналів моніторингу. '
+                        'На карту йде лише підтверджене: офіційні, розвідка й місцеві '
+                        'про свій регіон — одразу, решта — після 2-го джерела'
+                        '${data.sourcesPending > 0 ? ' (зараз чекають: ${data.sourcesPending})' : ''}.',
+                style: TextStyle(
+                    fontSize: 12.5, height: 1.4, color: AppColors.textSecondary),
+              ),
+              if (top.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                for (final s in top)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 7),
+                    child: Row(
+                      children: [
+                        Icon(Icons.podcasts_rounded,
+                            size: 15, color: AppColors.textMuted),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text('@${s.user}',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary)),
+                        ),
+                        Text(s.tier,
+                            style: TextStyle(
+                                fontSize: 11, color: AppColors.textMuted)),
+                        const SizedBox(width: 10),
+                        Tag('✓${s.confirmed}', color: AppColors.safe),
+                        const SizedBox(width: 6),
+                        Tag('1-й ${s.first}', color: AppColors.primary),
+                      ],
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
       ],
     );
   }

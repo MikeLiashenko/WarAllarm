@@ -41,6 +41,7 @@ public sealed class Threat
     public bool MyArea;                   // назван ТВОЙ район
     public HashSet<string> Hits = new();  // названные места по этой цели (для истории/траектории)
     public int Count;                     // явная к-сть из текста поста («2 БпЛА»)
+    public HashSet<string> Srcs = new(StringComparer.OrdinalIgnoreCase); // канали, що бачили ціль (хаб джерел)
     public List<(string place, double? dist, DateTime t)> Trail = new();
     // ×N = число целей строго из текста поста («2 БпЛА»), не раздувая по числу упомянутых мест
     public int Amount => Math.Max(1, Count);

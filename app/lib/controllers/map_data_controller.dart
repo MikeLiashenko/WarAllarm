@@ -228,6 +228,25 @@ class MapDataController extends ChangeNotifier {
       DateTime.now().millisecondsSinceEpoch - _launchedTs < 2 * 3600 * 1000;
   int get launched => _launched;
 
+  // 📡 Джерела моніторингу (state.sources від Reader).
+  Map<String, dynamic> _sources = const {};
+  int get sourcesCatalog => (_sources['catalog'] as num?)?.toInt() ?? 0;
+  int get sourcesActive => (_sources['active'] as num?)?.toInt() ?? 0;
+  int get sourcesPending => (_sources['pending'] as num?)?.toInt() ?? 0;
+  /// Топ каналів: (username, рівень, цілей, підтверджено, першим).
+  List<({String user, String tier, int threats, int confirmed, int first})> get sourcesTop =>
+      [
+        for (final e in (_sources['top'] as List<dynamic>? ?? const []))
+          if (e is Map)
+            (
+              user: (e['u'] ?? '').toString(),
+              tier: (e['tier'] ?? '').toString(),
+              threats: (e['threats'] as num?)?.toInt() ?? 0,
+              confirmed: (e['confirmed'] as num?)?.toInt() ?? 0,
+              first: (e['first'] as num?)?.toInt() ?? 0,
+            ),
+      ];
+
   // 🌙 Підсумок ночі (бот збирає з історії каналів).
   Map<String, dynamic> _night = const {};
   bool get hasNight {
@@ -291,6 +310,10 @@ class MapDataController extends ChangeNotifier {
       _nuclear = false;
       _nuclearMsg = '';
     }
+
+    // 📡 Хаб джерел (Reader): скільки каналів моніторингу, хто що дав.
+    final srcs = data['sources'];
+    if (srcs is Map) _sources = Map<String, dynamic>.from(srcs);
 
     final night = data['night'];
     if (night is Map) _night = Map<String, dynamic>.from(night);

@@ -23,6 +23,10 @@ class MapTarget {
   /// Показуємо на карті, але НЕ рахуємо для тривоги.
   final bool approx;
 
+  /// Скільки незалежних каналів бачили ціль (хаб джерел Reader) і перші з них.
+  final int sources;
+  final List<String> srcs;
+
   /// Per-place distance, filled in by the situation logic.
   final double? pdist;
 
@@ -45,6 +49,8 @@ class MapTarget {
     this.trail = const [],
     this.approx = false,
     this.pdist,
+    this.sources = 0,
+    this.srcs = const [],
   });
 
   MapTarget withPdist(double? d) => MapTarget(
@@ -52,6 +58,7 @@ class MapTarget {
         heading: heading, amount: amount, place: place, dir: dir,
         stageLabel: stageLabel, icon: icon, distKm: distKm, etaMin: etaMin,
         seenMs: seenMs, trail: trail, pdist: d, approx: approx,
+        sources: sources, srcs: srcs,
       );
 
   factory MapTarget.fromMap(Map<dynamic, dynamic> m) {
@@ -73,6 +80,8 @@ class MapTarget {
       etaMin: d(m['eta']),
       seenMs: (m['seen'] as num?)?.toInt() ?? 0,
       approx: m['approx'] == true,
+      sources: (m['src'] as num?)?.toInt() ?? 0,
+      srcs: (m['srcs'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
       trail: (m['trail'] as List<dynamic>? ?? [])
           .map((e) => [
                 ((e as List)[0] as num).toDouble(),

@@ -40,7 +40,7 @@ public static class ThreatParser
     // шахед · герань(geran) · гербера-пастка · бандероль · мопед · FPV · молнія · шаболда ·
     // ланцет · мавік · орлан · зала · supercam.
     public const string DroneRe =
-        @"бпла|дрон|шахед|шахід|shahed|геран|geran|гербер|бандерол|мопед|\bfpv\b|молні|шаболд|ланцет|мавік|mavic|орлан|\bзала\b|supercam|суперкам";
+        @"бпла|дрон|шахед|шахід|shahed|італмас|italmas|геран|geran|гербер|бандерол|мопед|\bfpv\b|молні|шаболд|ланцет|мавік|mavic|орлан|\bзала\b|supercam|суперкам";
 
     // Строки-шум: подписки, ссылки, донаты, комментарии к фото, новости о прошлых ударах.
     static readonly string[] Noise =
@@ -49,10 +49,20 @@ public static class ThreatParser
         "ситуація по", "видно вам", "буду вдячний", "monobank", "попередньо", "завдали удару"
     };
 
-    public static List<ThreatEvent> Parse(string post)
+    // Заголовок-місто замість області («Київ:», «Харків:») — контекст його області.
+    static readonly Dictionary<string, string> CityHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["київ"] = "Київська", ["харків"] = "Харківська", ["одеса"] = "Одеська", ["дніпро"] = "Дніпропетровська",
+        ["запоріжжя"] = "Запорізька", ["миколаїв"] = "Миколаївська", ["суми"] = "Сумська", ["чернігів"] = "Чернігівська",
+        ["полтава"] = "Полтавська", ["херсон"] = "Херсонська", ["черкаси"] = "Черкаська", ["львів"] = "Львівська",
+    };
+
+    /// <param name="defaultOblast">Контекст області каналу (регіональний монітор пише
+    /// «на Бровари» без заголовка) — стартове значення, заголовки в пості його міняють.</param>
+    public static List<ThreatEvent> Parse(string post, string? defaultOblast = null)
     {
         var events = new List<ThreatEvent>();
-        string? oblast = null; // текущий контекст области (из заголовка "Xщина:")
+        string? oblast = defaultOblast; // текущий контекст области (из заголовка "Xщина:")
 
         foreach (var raw in post.Replace("\r", "").Split('\n'))
         {
@@ -85,6 +95,10 @@ public static class ThreatParser
                 events.Add(new(ThreatKind.Aviation, null, null, 0, m.Value, line));
                 continue;
             }
+            // Заголовок-місто з двокрапкою: «Київ:» → область міста.
+            if (Regex.Match(line, @"^([А-ЯІЇЄҐа-яіїєґ'ʼ’-]+)\s*:\s*$") is { Success: true } hc
+                && CityHeaders.TryGetValue(hc.Groups[1].Value, out var hob))
+            { oblast = hob; continue; }
             // Заголовок области: "Сумщина:" ИЛИ просто "Сумщина" (без двоеточия, как в реальных постах).
             if (!Regex.IsMatch(low, @"\bна\b"))
             {
@@ -153,10 +167,19 @@ public static class ThreatParser
         string? extra = Regex.IsMatch(line, @"реактивн|рбпла", RegexOptions.IgnoreCase) ? "реакт. шахед" : null;
 
         var mn = Regex.Match(line, @"\bна\s+(.+)$", RegexOptions.IgnoreCase);
-        string? city = mn.Success ? mn.Groups[1].Value.Trim().TrimEnd('.', ' ') : null;
-        // Отсекаем «хвост» после названия: «на Васильків повз Борову», «на X у напрямку Y»…
+        // Інші звороти регіональних моніторів: «курс Куликівка», «в районі Ірпеня»,
+        // «над Борисполем», «у бік Білої Церкви», «через Ананьїв».
+        if (!mn.Success)
+            mn = Regex.Match(line,
+                @"\b(?:курсом|курс|над|біля|поблизу|в\s+районі|у\s+районі|в\s+напрямку|у\s+напрямку|напрямок|в\s+бік|у\s+бік|в\s+сторону|через|повз)\s+(.+)$",
+                RegexOptions.IgnoreCase);
+        string? city = mn.Success ? mn.Groups[1].Value.Trim().TrimEnd('.', ' ', '!') : null;
+        // Отсекаем «хвост» после названия: «на Васильків повз Борову», «на X у напрямку Y»,
+        // «на Бровари з півночі», «на Вишгород/Київ»…
         if (city != null)
-            city = Regex.Split(city, @"\s+(повз|через|у напрямку|в напрямку|курс|напрямок)\b", RegexOptions.IgnoreCase)[0].Trim();
+            city = Regex.Split(city,
+                @"\s+(?:повз|через|у напрямку|в напрямку|курс|напрямок|з півночі|з півдня|зі сходу|із заходу|низько|приблизно|знову)\b|/",
+                RegexOptions.IgnoreCase)[0].Trim();
 
         if (city == null && kind == ThreatKind.Unknown) return null; // не похоже на цель
         return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, oblast, city, count, extra, line);

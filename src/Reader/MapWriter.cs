@@ -36,6 +36,8 @@ public static class MapWriter
     public static string AirJson = "";
     // 🌙 Підсумок ночі (останній згенерований) для застосунку.
     public static string NightJson = "";
+    // 📡 Хаб джерел: {"catalog":82,"active":N,"pending":N,"confirmed":N,"top":[…],"ts":ms}
+    public static string SourcesJson = "";
 
     static string N(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
 
@@ -115,6 +117,10 @@ public static class MapWriter
             // approx = ціль лише на рівні області (без точної точки/курсу). Для таких НЕ малюємо
             // вигаданий напрямок і прогноз «→ місто?» — це виглядало як фейк під час масового нальоту.
             sb.Append(",\"approx\":").Append(t.LastPlace.EndsWith("(обл.)") ? "true" : "false");
+            // Скільки незалежних каналів бачили ціль (хаб джерел) + перші з них.
+            string[] srcs; lock (t.Srcs) srcs = t.Srcs.Take(4).ToArray();
+            sb.Append(",\"src\":").Append(t.Srcs.Count);
+            sb.Append(",\"srcs\":[").Append(string.Join(",", srcs.Select(s => "\"" + Esc(s) + "\""))).Append(']');
             sb.Append(",\"trail\":[");
             bool first = true;
             foreach (var seg in t.Trail)
@@ -167,6 +173,7 @@ public static class MapWriter
         // 🚀 Пуски / оцінка «у повітрі» від моніторів.
         sb.Append(",\"air\":").Append(AirJson.Length > 0 ? AirJson : "{}");
         sb.Append(",\"night\":").Append(NightJson.Length > 0 ? NightJson : "{}");
+        sb.Append(",\"sources\":").Append(SourcesJson.Length > 0 ? SourcesJson : "{}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.
         sb.Append(",\"aiText\":\"").Append(Esc(AiText)).Append('"');
         sb.Append(",\"aiAt\":").Append(AiAt is { } aa ? ((DateTimeOffset)aa.ToUniversalTime()).ToUnixTimeMilliseconds().ToString() : "null");

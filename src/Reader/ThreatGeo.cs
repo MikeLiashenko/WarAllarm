@@ -193,13 +193,22 @@ public static class ThreatGeo
     public static (string name, double lat, double lon)? ResolveOblast(string? oblast)
     {
         if (oblast is null) return null;
-        if (OblastCenter.TryGetValue(oblast.Trim(), out var c) && P.TryGetValue(c, out var p))
+        if (OblastCenter.TryGetValue(oblast.Trim(), out var c) && Of(c) is { } p)
             return (c, p.lat, p.lon);
         return null;
     }
 
-    public static (double lat, double lon)? Of(string place) =>
-        P.TryGetValue(place, out var c) ? c : (P.TryGetValue(place.Trim(), out var c2) ? c2 : null);
+    public static (double lat, double lon)? Of(string place)
+    {
+        lock (P) return P.TryGetValue(place, out var c) ? c : (P.TryGetValue(place.Trim(), out var c2) ? c2 : null);
+    }
+
+    /// Запам'ятати місце, знайдене SourceHub у повному довіднику (Cities), щоб
+    /// трекер (IngestUa → Resolve) далі знаходив його точно за назвою.
+    public static void Learn(string name, double lat, double lon)
+    {
+        lock (P) P.TryAdd(name, (lat, lon));
+    }
 
     // Ищет координаты по названию из поста (винительный падеж: «на Полтаву», «на Українку»).
     // Сначала точное имя, затем по основе (учёт -а→-у и т.п.). Берём самое длинное совпадение.
@@ -210,6 +219,7 @@ public static class ThreatGeo
         if (c.Length < 3) return null;
         (string name, double lat, double lon)? best = null;
         int bestLen = 0;
+        lock (P)
         foreach (var kv in P)
         {
             var k = kv.Key.ToLowerInvariant();

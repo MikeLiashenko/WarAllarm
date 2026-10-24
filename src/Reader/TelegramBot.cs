@@ -16,7 +16,8 @@ public sealed record BotFeatures(
     Func<Task<string>> Ai,
     Func<string> Stats,
     Func<Task<string>> Alerts,
-    Func<Task<(byte[] png, string caption)>>? Night = null); // 🌙 підсумок ночі
+    Func<Task<(byte[] png, string caption)>>? Night = null, // 🌙 підсумок ночі
+    Func<string>? Sources = null); // 📡 які канали що дали (SourceHub)
 
 public sealed class TelegramBot
 {
@@ -141,7 +142,7 @@ public sealed class TelegramBot
                     + "📊 Статус — цілі + ймовірність по твоєму місту\n"
                     + "🎯 Ризик — детально по типах\n🏠 Укриття — найближчі укриття/метро\n🗺 Карта — карта України\n"
                     + "🚨 Тривоги — офіційні по областях\n📈 Аналітика — статистика\n"
-                    + "🤖 ШІ — розумний аналіз\n/stop — відписатися",
+                    + "🤖 ШІ — розумний аналіз\n📡 Джерела — що дали канали моніторингу\n/stop — відписатися",
                     withKeyboard: true);
                 return;
         }
@@ -166,6 +167,7 @@ public sealed class TelegramBot
             return;
         }
         if (Match(text, cmd, "/stats", "📈", "аналітика")) { await Send(chat, _f.Stats()); return; }
+        if (_f.Sources is { } srcs && Match(text, cmd, "/sources", "📡", "джерела")) { await Send(chat, srcs()); return; }
         if (Match(text, cmd, "/alerts", "🚨", "тривоги")) { await Send(chat, "🚨 Перевіряю…"); await Send(chat, await _f.Alerts()); return; }
         if (Match(text, cmd, "/ai", "🤖", "ші", "ии")) { await Send(chat, "🤖 Аналізую…"); await Send(chat, await _f.Ai()); return; }
         if (Match(text, cmd, "/place", "📍", "моє місто", "мое место", "місто", "город"))
