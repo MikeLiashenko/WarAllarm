@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:vibration/vibration.dart';
@@ -36,7 +38,7 @@ class AlarmService {
   /// Live-adjust the alarm loudness (also updates an in-progress siren).
   Future<void> setVolume(double v) async {
     _volume = v.clamp(0.0, 1.0);
-    if (_sirenOn) {
+    if (_sirenOn && !(_fade?.isActive ?? false)) {
       try {
         await _siren.setVolume(_volume);
       } catch (_) {}
@@ -57,16 +59,41 @@ class AlarmService {
     if (sound && !_sirenOn) {
       _sirenOn = true;
       try {
-        await _siren.setVolume(_volume);
+        // Fade in instead of a full blast out of silence (it frightened Mike half
+        // to death over his music): quiet start, full loudness in ~3 s; a strike
+        // nearby ramps faster (~1 s) — there every second counts.
+        final start = _volume * 0.08;
+        await _siren.setVolume(start);
         await _siren.setReleaseMode(ReleaseMode.loop);
-        await _siren.play(AssetSource('siren_${_norm(cat)}.wav'),
-            volume: _volume);
+        await _siren.play(AssetSource('siren_${_norm(cat)}.wav'), volume: start);
+        _fadeIn(Duration(milliseconds: impact ? 1000 : 3000));
       } catch (e) {
         _sirenOn = false;
         debugPrint('siren play failed: $e');
       }
     }
     if (vibrate) await _startVibration(impact: impact);
+  }
+
+  Timer? _fade;
+
+  /// Ramp the siren from quiet to [_volume] over [d] (eased, so the first
+  /// second stays gentle). [setVolume] during the ramp just changes the goal.
+  void _fadeIn(Duration d) {
+    _fade?.cancel();
+    const step = Duration(milliseconds: 100);
+    final n = (d.inMilliseconds / step.inMilliseconds).ceil();
+    var i = 0;
+    _fade = Timer.periodic(step, (tm) {
+      i++;
+      if (!_sirenOn) return tm.cancel();
+      final p = (i / n).clamp(0.0, 1.0);
+      final v = _volume * (0.08 + 0.92 * p * p);
+      try {
+        _siren.setVolume(v);
+      } catch (_) {}
+      if (p >= 1) tm.cancel();
+    });
   }
 
   /// One short "approaching" blip (used to pulse while a threat is on the way).
@@ -81,6 +108,7 @@ class AlarmService {
 
   /// Stop everything: siren, vibration, wakelock.
   Future<void> stopAll() async {
+    _fade?.cancel();
     if (_sirenOn) {
       _sirenOn = false;
       try {
