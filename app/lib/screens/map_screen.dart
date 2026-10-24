@@ -16,6 +16,8 @@ import '../controllers/settings_controller.dart';
 import '../theme/app_colors.dart';
 import '../widgets/glass.dart';
 import '../widgets/responsive.dart';
+import '../services/local_store.dart';
+import '../widgets/map3d.dart';
 import '../widgets/ukraine_map.dart';
 import 'now_screen.dart';
 
@@ -30,7 +32,16 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   final _mapKey = GlobalKey<UkraineMapState>();
+  final _map3dKey = GlobalKey<Map3DState>();
   final _shotKey = GlobalKey();
+
+  /// 3D view on/off (remembered between launches).
+  late bool _is3d = context.read<LocalStore>().getBool('map_3d', fallback: false);
+
+  void _toggle3d() {
+    setState(() => _is3d = !_is3d);
+    context.read<LocalStore>().setBool('map_3d', _is3d);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +69,20 @@ class _MapScreenState extends State<MapScreen> {
             key: _shotKey,
             child: ColoredBox(
               color: AppColors.mapSea,
-              child: UkraineMap(
+              child: _is3d
+                  ? Map3D(
+                      key: _map3dKey,
+                      targets: data.targets,
+                      home: (lat: s.place.lat, lon: s.place.lon),
+                      homeName: s.place.name,
+                      oblastWhole: alerts.oblastWhole,
+                      oblastLevels: alerts.levels,
+                      dimTargets: s.stale,
+                      insets: EdgeInsets.fromLTRB(
+                          pad.left, pad.top + (phone ? 90 : 60), phone ? 0 : 60,
+                          pad.bottom + cardH + (phone ? 12 : 24)),
+                    )
+                  : UkraineMap(
                 key: _mapKey,
                 targets: data.targets,
                 home: (lat: s.place.lat, lon: s.place.lon),
@@ -108,17 +132,39 @@ class _MapScreenState extends State<MapScreen> {
         GlassIconButton(
             icon: Icons.add_rounded,
             tooltip: 'Наблизити',
-            onTap: () => _mapKey.currentState?.zoomIn()),
+            onTap: () => _is3d ? _map3dKey.currentState?.zoomIn() : _mapKey.currentState?.zoomIn()),
         const SizedBox(height: 8),
         GlassIconButton(
             icon: Icons.remove_rounded,
             tooltip: 'Віддалити',
-            onTap: () => _mapKey.currentState?.zoomOut()),
+            onTap: () => _is3d ? _map3dKey.currentState?.zoomOut() : _mapKey.currentState?.zoomOut()),
         const SizedBox(height: 8),
         GlassIconButton(
             icon: Icons.center_focus_strong_outlined,
             tooltip: 'Уся Україна',
-            onTap: () => _mapKey.currentState?.resetView()),
+            onTap: () => _is3d ? _map3dKey.currentState?.resetView() : _mapKey.currentState?.resetView()),
+        const SizedBox(height: 8),
+        // 2D ↔ 3D.
+        Tooltip(
+          message: _is3d ? 'Плоска карта' : '3D-карта',
+          child: Glass(
+            padding: EdgeInsets.zero,
+            radius: 22,
+            onTap: _toggle3d,
+            color: _is3d ? AppColors.primary.withValues(alpha: 0.85) : null,
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: Center(
+                child: Text(_is3d ? '2D' : '3D',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        color: _is3d ? Colors.white : AppColors.textPrimary)),
+              ),
+            ),
+          ),
+        ),
         const SizedBox(height: 8),
         GlassIconButton(
             icon: Icons.ios_share_rounded,

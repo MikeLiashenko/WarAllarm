@@ -167,3 +167,17 @@ class _GlyphPainter extends CustomPainter {
   bool shouldRepaint(_GlyphPainter old) =>
       old.color != color || old.cat != cat || old.heading != heading;
 }
+
+/// Paint a target silhouette centred at [c], [size] px across, rotated to a
+/// compass [headingDeg] — the same artwork as [ThreatGlyph] (3D map badges).
+void paintThreatGlyph(Canvas canvas, Offset c, double size, String cat,
+    Color color, double headingDeg) {
+  final known = const ['shahed', 'missile', 'balist', 'kab', 'avia'].contains(cat)
+      ? cat
+      : 'other';
+  canvas.save();
+  canvas.translate(c.dx - size / 2, c.dy - size / 2);
+  _GlyphPainter(ThreatGlyph._parts(known), known, color, headingDeg)
+      .paint(canvas, Size(size, size));
+  canvas.restore();
+}
