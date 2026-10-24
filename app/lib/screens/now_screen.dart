@@ -733,6 +733,9 @@ class _TargetRow extends StatelessWidget {
                   Text(
                     [
                       if (t.stageLabel.isNotEmpty) t.stageLabel,
+                      // Звідки летить («?» — район пуску оцінений, канал не назвав).
+                      if (t.fromName.isNotEmpty && !t.launch)
+                        'з ${t.fromName}${t.fromGuess ? '?' : ''}',
                       if (t.dir.isNotEmpty) 'напрям ${t.dir}',
                       if (t.place.isNotEmpty) t.place,
                     ].join(' · '),

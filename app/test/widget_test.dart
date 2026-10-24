@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:waralarm/models/api_key.dart';
 import 'package:waralarm/models/map_target.dart';
 import 'package:waralarm/models/monitored_place.dart';
+import 'package:waralarm/domain/motion.dart';
 import 'package:waralarm/domain/situation.dart';
 import 'package:waralarm/widgets/section_header.dart';
 
@@ -60,5 +61,39 @@ void main() {
     expect(key.masked.startsWith('wa_live_ab'), isTrue);
     expect(key.masked.contains('•'), isTrue);
     expect(key.masked.endsWith('7890'), isTrue);
+  });
+
+  test('ballistic flies From→To at its real speed, then lands', () {
+    // Kursk → Kharkiv (~194 km) at 4000 km/h ≈ 2.9 min.
+    final t0 = DateTime(2026, 10, 24, 12).millisecondsSinceEpoch;
+    final t = MapTarget(
+        label: 'Балістика', cat: 'balist', lat: 49.98, lon: 36.25,
+        kmh: 4000, from: const [51.73, 36.19], to: const [49.98, 36.25], t0: t0);
+    final half = motionOf(t, t0 + 87 * 1000);
+    expect(half.isFlight, isTrue);
+    expect(half.progress!, closeTo(0.5, 0.05));
+    expect(half.lat, closeTo((51.73 + 49.98) / 2, 0.1));
+    expect(half.landed, isFalse);
+    expect(motionOf(t, t0 + 4 * 60 * 1000).landed, isTrue);
+  });
+
+  test('launch without a target grows a reach ring', () {
+    final t0 = DateTime(2026, 10, 24, 12).millisecondsSinceEpoch;
+    final t = MapTarget(
+        label: 'Балістика', cat: 'balist', lat: 53.24, lon: 34.37,
+        kmh: 4000, from: const [53.24, 34.37], t0: t0, launch: true);
+    final m = motionOf(t, t0 + 60 * 1000);
+    expect(m.launch, isTrue);
+    expect(m.reachKm, closeTo(4000 / 60, 1));
+  });
+
+  test('drone dead-reckons along its heading at weapon speed', () {
+    final seen = DateTime(2026, 10, 24, 12).millisecondsSinceEpoch;
+    final t = MapTarget(
+        label: 'Шахед', cat: 'shahed', lat: 50.0, lon: 30.0,
+        heading: 0, kmh: 180, seenMs: seen);
+    final m = motionOf(t, seen + 10 * 60 * 1000); // 10 min → 30 km north
+    expect(kmBetween(50.0, 30.0, m.lat, m.lon), closeTo(30, 1));
+    expect(m.lat, greaterThan(50.0));
   });
 }

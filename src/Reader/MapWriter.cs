@@ -111,6 +111,18 @@ public static class MapWriter
             sb.Append(",\"eta\":").Append(t.EtaMin is { } e ? N(e) : "null");
             // Швидкість засобу (словник: Х-101 750, Іскандер-М 7000…) — для руху маркера між постами.
             sb.Append(",\"kmh\":").Append(N(ThreatGeo.SpeedKmh(t.Kind, t.Ammo)));
+            // Траєкторія: звідки → куди і коли почався політ (застосунок рухає маркер From→To).
+            if (t.From is { } fr)
+            {
+                sb.Append(",\"from\":[").Append(N(fr.lat)).Append(',').Append(N(fr.lon)).Append(']');
+                sb.Append(",\"fromName\":\"").Append(Esc(t.FromName ?? "")).Append('"');
+                sb.Append(",\"fromGuess\":").Append(t.FromGuess ? "true" : "false");
+            }
+            if (t.To is { } to)
+                sb.Append(",\"to\":[").Append(N(to.lat)).Append(',').Append(N(to.lon)).Append(']');
+            if (t.LaunchAt != default)
+                sb.Append(",\"t0\":").Append(((DateTimeOffset)t.LaunchAt).ToUnixTimeMilliseconds());
+            if (t.Launch) sb.Append(",\"launch\":true");
             sb.Append(",\"dir\":\"").Append(Esc(t.Dir)).Append('"');
             sb.Append(",\"n\":").Append(amount);
             sb.Append(",\"heading\":").Append(t.Heading is { } h ? N(h) : "null");

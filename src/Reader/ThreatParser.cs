@@ -8,7 +8,8 @@ public enum ThreatKind { Drone, Kab, Ballistic, Missile, Aviation, Target, AllCl
 
 public enum RelLevel { None, Oblast, City }
 
-public record ThreatEvent(ThreatKind Kind, string? Oblast, string? City, int Count, string? Extra, string Raw);
+/// <param name="From">Звідки летить («з Курська», «з Чернігівщини»), якщо названо.</param>
+public record ThreatEvent(ThreatKind Kind, string? Oblast, string? City, int Count, string? Extra, string Raw, string? From = null);
 
 public static class Geo
 {
@@ -82,10 +83,13 @@ public static class ThreatParser
                 continue;
             }
             // Балистическая угроза (по направлению, без города)
+            // Балістика: «з Курська» — район пуску, «на Харків» — ціль (якщо названо).
             if (low.Contains("балісти"))
             {
-                var mz = Regex.Match(line, @"\bз\s+(.+)$", RegexOptions.IgnoreCase);
-                events.Add(new(ThreatKind.Ballistic, null, null, 0, mz.Success ? mz.Groups[1].Value.Trim() : null, line));
+                var tl = ParseTargetLine(line, oblast);
+                var bw = WeaponCatalog.Match(line);
+                events.Add(new(ThreatKind.Ballistic, oblast, tl?.City, tl?.Count ?? 0,
+                    bw is { } bww ? WeaponCatalog.DisplayName(bww) : null, line, FromOf(line)));
                 continue;
             }
             // Авиация
@@ -184,7 +188,16 @@ public static class ThreatParser
                 RegexOptions.IgnoreCase)[0].Trim();
 
         if (city == null && kind == ThreatKind.Unknown) return null; // не похоже на цель
-        return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, oblast, city, count, extra, line);
+        return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, oblast, city, count, extra, line, FromOf(line));
+    }
+
+    /// Звідки летить: «з Курська», «із Чернігівщини», «від Куликівки», «з акваторії Чорного моря».
+    /// Напрямки з малої («з півночі») — не місце, тому пропускаємо.
+    public static string? FromOf(string line)
+    {
+        var m = Regex.Match(line, @"(?:^|[\s(])(?:з|із|зі|від)\s+((?-i:[А-ЯІЇЄҐ])[\w'ʼ’-]+(?:\s+(?-i:[А-ЯІЇЄҐ])[\w'ʼ’-]+)?)", RegexOptions.IgnoreCase);
+        if (m.Success) return m.Groups[1].Value;
+        return LaunchSites.FromText(line) is { } site && Regex.IsMatch(line, @"\b(?:з|із)\s+\w", RegexOptions.IgnoreCase) ? site.name : null;
     }
 
     static ThreatKind DetectKind(string line)

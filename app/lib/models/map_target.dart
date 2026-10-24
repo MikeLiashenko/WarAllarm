@@ -30,6 +30,17 @@ class MapTarget {
   /// Швидкість засобу, км/год (словник Reader: Х-101 750, Іскандер-М 7000…); 0 — невідома.
   final double kmh;
 
+  /// Траєкторія: звідки ([lat, lon]) → куди, і коли почався політ (мс). Для балістики/КАБ —
+  /// політ From→To з реальною швидкістю; для дронів — звідки йде курс.
+  final List<double>? from;
+  final List<double>? to;
+  final String fromName;
+  /// Район пуску / точку скиду оцінив Reader (канал не назвав).
+  final bool fromGuess;
+  final int t0;
+  /// Лише пуск, ціль ще невідома (коло досяжності з точки пуску).
+  final bool launch;
+
   /// Per-place distance, filled in by the situation logic.
   final double? pdist;
 
@@ -55,6 +66,12 @@ class MapTarget {
     this.sources = 0,
     this.srcs = const [],
     this.kmh = 0,
+    this.from,
+    this.to,
+    this.fromName = '',
+    this.fromGuess = false,
+    this.t0 = 0,
+    this.launch = false,
   });
 
   MapTarget withPdist(double? d) => MapTarget(
@@ -63,7 +80,12 @@ class MapTarget {
         stageLabel: stageLabel, icon: icon, distKm: distKm, etaMin: etaMin,
         seenMs: seenMs, trail: trail, pdist: d, approx: approx,
         sources: sources, srcs: srcs, kmh: kmh,
+        from: from, to: to, fromName: fromName, fromGuess: fromGuess,
+        t0: t0, launch: launch,
       );
+
+  static List<double>? _pair(dynamic v) =>
+      v is List && v.length == 2 ? [(v[0] as num).toDouble(), (v[1] as num).toDouble()] : null;
 
   factory MapTarget.fromMap(Map<dynamic, dynamic> m) {
     double? d(dynamic v) => v == null ? null : (v as num).toDouble();
@@ -87,6 +109,12 @@ class MapTarget {
       sources: (m['src'] as num?)?.toInt() ?? 0,
       srcs: (m['srcs'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
       kmh: d(m['kmh']) ?? 0,
+      from: _pair(m['from']),
+      to: _pair(m['to']),
+      fromName: (m['fromName'] ?? '').toString(),
+      fromGuess: m['fromGuess'] == true,
+      t0: (m['t0'] as num?)?.toInt() ?? 0,
+      launch: m['launch'] == true,
       trail: (m['trail'] as List<dynamic>? ?? [])
           .map((e) => [
                 ((e as List)[0] as num).toDouble(),

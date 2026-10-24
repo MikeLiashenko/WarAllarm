@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../data/ukraine_geo.dart';
 import '../data/ukraine_oblasts.dart';
 import '../data/ukraine_raions.dart';
+import '../domain/motion.dart';
 import '../models/map_target.dart';
 import '../theme/app_colors.dart';
 import '../utils/svg_path.dart';
@@ -649,20 +650,64 @@ class _MapPainter extends CustomPainter {
     for (final t in targets) {
       final cat = figs.containsKey(t.cat) ? t.cat : 'other';
       final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
-      final known = t.heading != null;
-      // Speed from the Reader's weapon catalog when known, else a per-type guess.
-      final spd = t.kmh > 0 ? t.kmh / 60 : speedKmMin(t.cat, t.label);
-
-      // Dead-reckoning: extrapolate along heading from last observed position.
-      double lon = t.lon, lat = t.lat;
-      if (known && !dimTargets) {
-        final em = math.max(0, (nowMs - (t.seenMs == 0 ? nowMs : t.seenMs)) / 60000);
-        final d = math.min(60.0, spd * em);
-        final m = _moveKm(t.lon, t.lat, t.heading!, d);
-        lon = m.dx;
-        lat = m.dy;
-      }
+      // Where it is now: flight From→To (ballistic/КАБ), launch ring, or
+      // dead-reckoning along the heading — all at the weapon's real speed.
+      final mo = motionOf(t, nowMs, frozen: dimTargets);
+      final known = t.heading != null && !mo.isFlight && !mo.launch;
+      final spd = speedKmPerMin(t);
+      final double lon = mo.lon, lat = mo.lat;
       final scr = _toScreen(fit.project(lon, lat));
+
+      if (mo.launch) {
+        // Launch, target unknown: ring of how far it could have flown by now.
+        final edge = _toScreen(fit.project(lon, lat + mo.reachKm / 111));
+        final rPx = (scr - edge).distance;
+        if (rPx > 2) {
+          canvas.drawCircle(scr, rPx, Paint()..color = color.withValues(alpha: 0.06));
+          _dashedCircle(canvas, scr, rPx,
+              Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 1.4
+                ..color = color.withValues(alpha: 0.7));
+        }
+        _text(canvas, 'пуск: ${t.fromName}', scr + Offset(0, badgeR + 14), 10.5,
+            color, center: true, stroke: true, bold: true);
+      }
+
+      if (mo.isFlight) {
+        final a = _toScreen(fit.project(t.from![1], t.from![0]));
+        final b = _toScreen(fit.project(t.to![1], t.to![0]));
+        // Whole route (dashed), the part already flown (solid), the aim point.
+        _dashedLine(canvas, a, b,
+            Paint()
+              ..color = color.withValues(alpha: 0.45)
+              ..strokeWidth = 1.2
+              ..strokeCap = StrokeCap.round);
+        canvas.drawLine(
+            a,
+            scr,
+            Paint()
+              ..color = color.withValues(alpha: 0.85)
+              ..strokeWidth = 2
+              ..strokeCap = StrokeCap.round);
+        canvas.drawCircle(a, 3, Paint()..color = color.withValues(alpha: 0.7));
+        final aim = 7 + 5 * (math.sin(pulse * 2 * math.pi).abs());
+        canvas.drawCircle(
+            b,
+            mo.landed ? 14 + 22 * pulse : aim,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.6
+              ..color = (mo.landed ? const Color(0xFFFF453A) : color)
+                  .withValues(alpha: mo.landed ? 1 - pulse : 0.9));
+        canvas.drawLine(b - const Offset(5, 0), b + const Offset(5, 0), Paint()..color = color..strokeWidth = 1.2);
+        canvas.drawLine(b - const Offset(0, 5), b + const Offset(0, 5), Paint()..color = color..strokeWidth = 1.2);
+        if (!mo.landed && mo.flightMin != null) {
+          final left = (mo.flightMin! * (1 - mo.progress!)).clamp(0, 99);
+          _text(canvas, left < 1 ? '<1 хв' : '${left.round()} хв', scr + Offset(badgeR + 4, -badgeR),
+              11, color, stroke: true, bold: true);
+        }
+      }
 
       // Trail.
       if (t.trail.length > 1) {
@@ -713,7 +758,7 @@ class _MapPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.8
             ..color = color);
-      _drawFig(canvas, scr, t.heading ?? 0, cat, color, badgeR / 12.5);
+      _drawFig(canvas, scr, mo.heading, cat, color, badgeR / 12.5);
 
       // ×N cluster label above the badge.
       if (t.amount > 1) {
@@ -758,6 +803,14 @@ class _MapPainter extends CustomPainter {
       }
     }
     canvas.restore();
+  }
+
+  void _dashedCircle(Canvas canvas, Offset c, double r, Paint paint) {
+    const n = 64;
+    for (var i = 0; i < n; i += 2) {
+      canvas.drawArc(Rect.fromCircle(center: c, radius: r), i * 2 * math.pi / n,
+          2 * math.pi / n, false, paint);
+    }
   }
 
   void _dashedLine(Canvas canvas, Offset a, Offset b, Paint paint) {

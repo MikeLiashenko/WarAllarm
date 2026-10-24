@@ -231,7 +231,9 @@ public static class ThreatGeo
                     || (k.Contains(' ') && c.Contains(k[..Math.Min(k.Length, 6)]));
             // Точное совпадение бьёт любое частичное — иначе «на Київ» цеплялся за
             // «Київський» (район Харкова, 417 км!). Среди частичных — самое длинное.
-            int score = exact ? 1000 : stem.Length;
+            // Запит = назва + відмінкове закінчення («Одесу» → Одеса) важить більше, ніж
+            // назва, що лише ПОЧИНАЄТЬСЯ із запиту («Одеська» — станція в Харкові!).
+            int score = exact ? 1000 : c.StartsWith(stem) ? stem.Length * 2 : cstem.Length;
             if (hit && score > bestLen)
             {
                 best = (kv.Key, kv.Value.lat, kv.Value.lon);
@@ -281,7 +283,7 @@ public static class ThreatGeo
         {
             ThreatKind.Ballistic => 4000,             // баллистика — секунды
             ThreatKind.Missile   => a.Contains("циркон") ? 6000 : 800, // крылатая ~800, Циркон гиперзвук
-            ThreatKind.Kab       => 900,              // планирующая авиабомба
+            ThreatKind.Kab       => 600,              // планирующая авиабомба (~600 км/ч)
             ThreatKind.Aviation  => 900,              // носитель уже пускает КАБ
             ThreatKind.Drone     => a.Contains("реакт") || a.Contains("молн") ? 500 : 180, // шахед 180, реактивный ~500
             _                    => 250,

@@ -219,6 +219,31 @@ if (args.Length >= 1 && args[0].Equals("weapons", StringComparison.OrdinalIgnore
     return;
 }
 
+// ── Тест траєкторій (оффлайн, окремий трекер, без Firebase):  dotnet run -- traj
+if (args.Length >= 1 && args[0].Equals("traj", StringComparison.OrdinalIgnoreCase))
+{
+    var tt = new ThreatTracker((HomeLat, HomeLon));
+    var now0 = DateTime.Now;
+    foreach (var post in new[] {
+        "Балістика з Курська на Харків", "Іскандер-М на Дніпро", "Балістика з Брянська", "Швидкісна ціль на Київ",
+        "КАБ на Святогірськ", "КАБи на Куп'янськ", "ФАБ-1500 по Запоріжжю",
+        "Харківщина:\n3 БпЛА з Бєлгородщини на Чугуїв", "5 Реактивів з Чернігівщини на Вишгород",
+        "Калібр з акваторії Чорного моря на Одесу", "Х-101 на Вінницю" })
+    {
+        foreach (var ev in ThreatParser.Parse(post))
+        {
+            var up = tt.IngestUa(ev, now0) ?? (ev.Kind == ThreatKind.Ballistic && ev.City == null ? tt.IngestLaunch(ev, now0) : null);
+            if (up is not { } u) { Console.WriteLine($"{post.Replace("\n", " ⏎ "),-48} → (не на карту)"); continue; }
+            var t = u.Threat;
+            var from = t.From is { } f ? $"{t.FromName}{(t.FromGuess ? "*" : "")} ({f.lat:0.00},{f.lon:0.00})" : "—";
+            var fl = t.FlightMin is { } m ? $"{m:0.0} хв" : (t.Launch ? "пуск, ціль невідома" : "—");
+            Console.WriteLine($"{post.Replace("\n", " ⏎ "),-48} → {ThreatTracker.Label(t)} · {ThreatGeo.SpeedKmh(t.Kind, t.Ammo):0} км/год · з {from} → {t.LastPlace} · політ {fl} · курс {t.Heading:0}°");
+        }
+    }
+    Console.WriteLine("\n* — район пуску / точка скиду оцінені (канал не назвав)");
+    return;
+}
+
 // ── Тест хаба джерел (оффлайн, без Telegram і без запису в Firebase):
 //    dotnet run -- sources <файл>   формат: «##### @канал» + пости через «---»
 if (args.Length >= 2 && args[0].Equals("sources", StringComparison.OrdinalIgnoreCase))
@@ -1714,10 +1739,13 @@ async Task OnUpdate(Update update)
         bool drew = false;
         foreach (var ev in events)
         {
-            if (tracker.IngestUa(ev, DateTime.Now) is { } uu) // на карту — вся країна
+            var uu = tracker.IngestUa(ev, DateTime.Now) // на карту — вся країна
+                     // «балістика з Курська» без цілі — пуск: коло досяжності з району пуску
+                     ?? (ev.Kind == ThreatKind.Ballistic && ev.City == null ? tracker.IngestLaunch(ev, DateTime.Now) : null);
+            if (uu is { } u0)
             {
                 drew = true;
-                lock (uu.Threat.Srcs) uu.Threat.Srcs.Add(src.TrimStart('@'));
+                lock (u0.Threat.Srcs) u0.Threat.Srcs.Add(src.TrimStart('@'));
             }
             var rel = ThreatParser.Relevance(ev, MyOblast, MyCity);
             if (rel == RelLevel.None) continue;
@@ -1769,6 +1797,14 @@ async Task HandleHub(SourceInfo si, string text, string src, string time)
 
         case HubVerdict.Ballistic:
             Ui.Line(ConsoleColor.Red, $"☄ [{time}] {src} · {r.Note}");
+            // Названо район пуску («з Курська») — на карту коло досяжності з точки пуску.
+            if (ThreatParser.FromOf(text) is { } bFrom
+                && tracker.IngestLaunch(new ThreatEvent(ThreatKind.Ballistic, null, null, 1,
+                       WeaponCatalog.Match(text) is { } bw ? WeaponCatalog.DisplayName(bw) : null, text, bFrom), now) is { } lu)
+            {
+                lock (lu.Threat.Srcs) lu.Threat.Srcs.Add(si.User);
+                MapWriter.Write(MapPath, tracker, MyDistrict, now);
+            }
             // Пуш лише коли стосується тебе: місцевий канал твоєї області або назване твоє місто.
             bool mine = si.Oblasts.Contains(MyOblast, StringComparer.OrdinalIgnoreCase)
                         || text.Contains(MyCity[..Math.Min(MyCity.Length, 4)], StringComparison.OrdinalIgnoreCase);

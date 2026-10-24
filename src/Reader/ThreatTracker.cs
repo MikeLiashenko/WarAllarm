@@ -43,6 +43,16 @@ public sealed class Threat
     public int Count;                     // явная к-сть из текста поста («2 БпЛА»)
     public HashSet<string> Srcs = new(StringComparer.OrdinalIgnoreCase); // канали, що бачили ціль (хаб джерел)
     public List<(string place, double? dist, DateTime t)> Trail = new();
+    // ── Траєкторія (балістика / КАБ / «з X на Y»): звідки → куди, коли пуск ──
+    public (double lat, double lon)? From;  // район пуску / точка скиду КАБ / звідки летить
+    public string? FromName;
+    public (double lat, double lon)? To;    // ціль польоту (для балістики/КАБ)
+    public DateTime LaunchAt;               // коли почався політ (перше повідомлення)
+    public bool Launch;                     // лише пуск (ціль невідома): коло досяжності з точки пуску
+    public bool FromGuess;                  // звідки — наша оцінка, а не з тексту
+    /// Тривалість польоту від From до To з швидкістю засобу, хв.
+    public double? FlightMin => From is { } f && To is { } to
+        ? ThreatGeo.Km(f, to) / ThreatGeo.SpeedKmh(Kind, Ammo) * 60 : null;
     // ×N = число целей строго из текста поста («2 БпЛА»), не раздувая по числу упомянутых мест
     public int Amount => Math.Max(1, Count);
 }
@@ -156,7 +166,9 @@ public sealed class ThreatTracker
     {
         if (ev.Kind == ThreatKind.AllClear) return null;
         // Точный город; если нет в справочнике — фолбэк в центр области (по заголовку поста).
-        var g = ThreatGeo.Resolve(ev.City);
+        // Курований довідник, далі повний (~5300 н.п., з відмінками) у межах області поста.
+        var g = ThreatGeo.Resolve(ev.City)
+                ?? (ev.City is { } cc ? PlaceFinder.Find(cc, ev.Oblast is { } eo ? new[] { eo } : Array.Empty<string>()) : null);
         bool approx = false;
         if (g is null) { g = ThreatGeo.ResolveOblast(ev.Oblast); approx = true; }
         if (g is not { } gp) return null; // ни города, ни области — не ставим
@@ -185,8 +197,60 @@ public sealed class ThreatTracker
             if (t.Trail.Count == 0 || t.Trail[^1].place != gp.name) t.Trail.Add((gp.name, t.DistKm, now));
             t.Heading = t.Trail.Count >= 2 && ThreatGeo.Of(t.Trail[^2].place) is { } pp
                 ? ThreatGeo.Bearing(pp, pos) : ThreatGeo.Bearing(pos, ThreatGeo.UACenter);
+            ApplyCourse(t, ev, pos, isNew, now);
             var prev = t.Stage; t.Stage = Classify(t);
             return new TrackUpdate(t, t.Stage != prev || isNew, TrackSound.None, Note(t));
+        }
+    }
+
+    // Траєкторія: «з X на Y» дає курс; балістика й КАБ летять від точки пуску/скиду до
+    // цілі з реальною швидкістю засобу (застосунок рухає маркер уздовж From→To).
+    static void ApplyCourse(Threat t, ThreatEvent ev, (double lat, double lon) pos, bool isNew, DateTime now)
+    {
+        if (LaunchSites.Resolve(ev.From) is { } f && ThreatGeo.Km((f.lat, f.lon), pos) > 3)
+        {
+            t.From = (f.lat, f.lon); t.FromName = f.name; t.FromGuess = false;
+        }
+        if (t.Kind is ThreatKind.Ballistic or ThreatKind.Kab)
+        {
+            t.To = pos;
+            if (t.From is null)
+            {
+                if (t.Kind == ThreatKind.Ballistic)
+                {
+                    var o = LaunchSites.BallisticOrigin(pos);
+                    t.From = (o.lat, o.lon); t.FromName = o.name;
+                }
+                else { t.From = LaunchSites.KabRelease(pos); t.FromName = "скид КАБ"; }
+                t.FromGuess = true;
+            }
+            if (isNew) t.LaunchAt = now;
+        }
+        // Відомо, звідки летить, а траєкторії з місць ще нема — курс від From до цілі.
+        if (t.From is { } fr && t.Trail.Count < 2) t.Heading = ThreatGeo.Bearing(fr, pos);
+    }
+
+    // ── лише пуск (ціль ще невідома): «балістика з Курська» → коло досяжності ──────
+    public TrackUpdate? IngestLaunch(ThreatEvent ev, DateTime now)
+    {
+        if (LaunchSites.Resolve(ev.From) is not { } f) return null;
+        var pos = (f.lat, f.lon);
+        lock (_gate)
+        {
+            var key = $"LAUNCH:{f.name}:{ev.Kind}";
+            bool isNew = !_active.TryGetValue(key, out var t);
+            if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now, LaunchAt = now }; _active[key] = t; }
+            t!.Ammo ??= ev.Extra;
+            t.Launch = true;
+            t.LastUpdate = now;
+            t.Count = Math.Max(t.Count, Math.Max(1, ev.Count));
+            t.Pos = pos; t.From = pos; t.FromName = f.name;
+            t.LastPlace = $"пуск: {f.name}";
+            t.DistKm = ThreatGeo.Km(pos, _home);
+            t.Dir = ThreatGeo.Compass(ThreatGeo.Bearing(_home, pos));
+            t.Heading = ThreatGeo.Bearing(pos, _home);
+            t.EtaMin = null; // ціль невідома
+            return new TrackUpdate(t, isNew, TrackSound.None, $"{Label(t)} — пуск з {f.name}");
         }
     }
 
@@ -213,8 +277,14 @@ public sealed class ThreatTracker
             var areaWide = t.Zone == "UA" || t.LastPlace.EndsWith("(обл.)");
             var goneAfter = areaWide ? TimeSpan.FromMinutes(15) : TimeSpan.FromMinutes(4);
             var age = now - t.LastUpdate;
+            // Балістика / КАБ: політ триває лічені хвилини — знімаємо через ~3 хв після
+            // розрахункового прильоту; «лише пуск» без цілі — через 8 хв.
+            var flown = now - t.LaunchAt;
+            bool landed = t.Kind is ThreatKind.Ballistic or ThreatKind.Kab && !t.Launch
+                          && t.FlightMin is { } fm && flown > TimeSpan.FromMinutes(fm + 3);
+            bool launchOver = t.Launch && flown > TimeSpan.FromMinutes(8);
             if ((t.Stage is TrackStage.Impact or TrackStage.Passed && age > TimeSpan.FromSeconds(90))
-                || age > goneAfter)
+                || age > goneAfter || landed || launchOver)
             {
                 t.Stage = TrackStage.Gone;
                 _active.Remove(t.Id);

@@ -421,7 +421,7 @@ public sealed class SourceHub
                 // «Ціль» + відомо, що це (реакт.) шахед → це дрон.
                 if (bestKind == ThreatKind.Target && (extra ?? c.Ev?.Extra ?? "").Contains("шахед", StringComparison.OrdinalIgnoreCase))
                     bestKind = ThreatKind.Drone;
-                c.Ev = new ThreatEvent(bestKind, placeObl ?? ev.Oblast, gp.name, c.MaxCount, extra ?? c.Ev?.Extra, ev.Raw);
+                c.Ev = new ThreatEvent(bestKind, placeObl ?? ev.Oblast, gp.name, c.MaxCount, extra ?? c.Ev?.Extra, ev.Raw, ev.From ?? c.Ev?.From);
 
                 bool nowConfirmed = c.Score >= 0.8 || c.Votes.Count >= 2;
                 if (nowConfirmed)
