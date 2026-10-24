@@ -157,6 +157,7 @@ class MapDataController extends ChangeNotifier {
         sub: (p['region'] ?? '').toString(),
         lat: (p['lat'] as num).toDouble(),
         lon: (p['lng'] ?? p['lon'] as num).toDouble(),
+        notify: p['notify'] != false,
       ));
     }
     return list;
@@ -169,6 +170,10 @@ class MapDataController extends ChangeNotifier {
     // A stale selection (e.g. an old 'home'/'kyiv' id) falls back to all.
     return picked.isEmpty ? all : picked;
   }
+
+  /// Places whose bell is on — only these may sound the siren, whichever
+  /// place is being viewed (the selector is a view filter, the bell is sound).
+  List<MonitoredPlace> get alarmPlaces => places.where((p) => p.notify).toList();
 
   static const _rank = {
     'Impact': 5, 'Overhead': 4, 'Imminent': 3, 'Approaching': 2, 'Passed': 1,

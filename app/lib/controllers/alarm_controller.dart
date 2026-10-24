@@ -12,9 +12,9 @@ import 'settings_controller.dart';
 ///
 /// It watches the live threat data ([MapDataController]) and the user's settings
 /// and reacts on its own — no screen has to be open for the logic to run. The
-/// severity is measured by distance to the user's **selected** places (via
-/// [riskOf]), so it works wherever the user actually is (Kharkiv *or* Kyiv), not
-/// only relative to the fixed home the monitor was started with.
+/// severity is measured by distance to the places whose **bell is on** (via
+/// [riskOf]) — a muted place never sounds, whichever place is being viewed —
+/// not only relative to the fixed home the monitor was started with.
 class AlarmController extends ChangeNotifier {
   AlarmController(this._map, this._settings, {AlarmService? service})
       : _svc = service ?? AlarmService() {
@@ -226,7 +226,7 @@ class AlarmController extends ChangeNotifier {
 
   /// Приліт/над районом (стадія Impact/Overhead) за ≤7 км від обраного місця.
   bool _impactNearHome() {
-    for (final pl in _map.selectedPlaces) {
+    for (final pl in _map.alarmPlaces) {
       for (final t in placeThreats(pl, _map.alarmTargets)) {
         final d = t.pdist ?? double.infinity;
         if (d <= 7 && (t.stage == 'Impact' || t.stage == 'Overhead')) return true;
@@ -237,7 +237,7 @@ class AlarmController extends ChangeNotifier {
 
   /// Рядок опису для сильного сигналу «приліт поруч».
   String _impactDetail() {
-    for (final pl in _map.selectedPlaces) {
+    for (final pl in _map.alarmPlaces) {
       for (final t in placeThreats(pl, _map.alarmTargets)) {
         final d = t.pdist ?? double.infinity;
         if (d <= 7 && (t.stage == 'Impact' || t.stage == 'Overhead')) {
@@ -252,7 +252,7 @@ class AlarmController extends ChangeNotifier {
   /// Nearest target distance (km) to any selected place, or infinity.
   double _nearestKm() {
     var best = double.infinity;
-    for (final pl in _map.selectedPlaces) {
+    for (final pl in _map.alarmPlaces) {
       for (final t in placeThreats(pl, _map.alarmTargets)) {
         final d = t.pdist ?? double.infinity;
         if (d < best) best = d;
@@ -264,7 +264,7 @@ class AlarmController extends ChangeNotifier {
   /// Worst per-place risk across the currently selected places.
   RiskResult? _worstRisk() {
     RiskResult? worst;
-    for (final pl in _map.selectedPlaces) {
+    for (final pl in _map.alarmPlaces) {
       final r = riskOf(pl, _map.alarmTargets);
       if (worst == null || r.score > worst.score) worst = r;
     }

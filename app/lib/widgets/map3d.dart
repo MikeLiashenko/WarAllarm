@@ -621,27 +621,23 @@ class _Map3DPainter extends CustomPainter {
       }
     }
 
-    // Alarm slabs — same picture as the 2D map: whole oblasts, else the raions.
-    final hs = cam.hScale;
-    final slabs = <(double, List<Offset>, double, Color)>[];
+    // Alarm slabs — same picture as the 2D map: whole oblasts, else the raions
+    // (never both: a raion inside a whole-oblast alarm would stack a second slab).
+    final slabs = <(List<List<Offset>>, Color)>[];
+    final wholeObs = <_Poly>[];
     for (final ob in obs) {
       final whole = oblastWhole[ob.name];
       if (whole == null) continue;
-      for (final r in ob.rings) {
-        slabs.add((_depthOf(ob), r, (whole == 'red' ? 24.0 : 14.0) * hs, whole == 'red' ? _red : _yellow));
-      }
+      wholeObs.add(ob);
+      slabs.add((ob.rings, whole == 'red' ? _red : _yellow));
     }
     for (final r in raions) {
       final lvl = raionLevels[_napo(r.name)];
       if (lvl == null || !_visible(r)) continue;
-      for (final ring in r.rings) {
-        slabs.add((_depthOf(r), ring, (lvl == 'red' ? 12.0 : 8.0) * hs, lvl == 'red' ? _red : _yellow));
-      }
+      if (wholeObs.any((ob) => _inside(ob, r.centroid))) continue;
+      slabs.add((r.rings, lvl == 'red' ? _red : _yellow));
     }
-    slabs.sort((a, b) => b.$1.compareTo(a.$1));
-    for (final s in slabs) {
-      _slab(canvas, s.$2, s.$3, s.$4);
-    }
+    _slabs(canvas, slabs, 9.0 * cam.hScale);
 
     _cities(canvas, size);
     _home(canvas);
@@ -684,39 +680,78 @@ class _Map3DPainter extends CustomPainter {
     }
   }
 
-  void _slab(Canvas canvas, List<Offset> ring, double h, Color base) {
-    final side = Paint()..color = Color.lerp(base, Colors.black, 0.35)!.withValues(alpha: 0.75);
-    final sideEdge = Paint()
+  /// Point-in-polygon (lon/lat) against a polygon's outer rings.
+  static bool _inside(_Poly poly, Offset pt) {
+    final b = poly.bbox;
+    if (pt.dy < b.minLat || pt.dy > b.maxLat || pt.dx < b.minLon || pt.dx > b.maxLon) return false;
+    for (final ring in poly.rings) {
+      var inside = false;
+      for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        final a = ring[i], c = ring[j];
+        if ((a.dy > pt.dy) != (c.dy > pt.dy) &&
+            pt.dx < (c.dx - a.dx) * (pt.dy - a.dy) / (c.dy - a.dy) + a.dx) {
+          inside = !inside;
+        }
+      }
+      if (inside) return true;
+    }
+    return false;
+  }
+
+  /// All alarm slabs as ONE extruded surface of equal height: every wall of
+  /// every slab far → near first, then the solid tops. Tops are opaque and all
+  /// at the same height, so walls between neighbouring raions and the back
+  /// walls are hidden — no jagged walls poking through (colour tells red/yellow).
+  /// A region's rings (islands and holes, e.g. Київ inside Київська) at
+  /// height [z] as one even-odd path, so holes stay open.
+  Path _rings(List<List<Offset>> rings, double z) {
+    final p = Path()..fillType = PathFillType.evenOdd;
+    for (final r in rings) {
+      p.addPath(_ring(r, z), Offset.zero);
+    }
+    return p;
+  }
+
+  void _slabs(Canvas canvas, List<(List<List<Offset>>, Color)> slabs, double h) {
+    if (slabs.isEmpty) return;
+    final land = AppColors.mapLand;
+    final walls = <(double, Path, Color)>[];
+    for (final (rings, base) in slabs) {
+      final side = Color.alphaBlend(Color.lerp(base, Colors.black, 0.4)!.withValues(alpha: 0.85), land);
+      for (final ring in rings) {
+        final n = ring.length;
+        for (var i = 0; i < n; i++) {
+          final p0 = ring[i], p1 = ring[(i + 1) % n];
+          if (p0 == p1) continue;
+          final a = cam.proj(p0.dy, p0.dx), b = cam.proj(p1.dy, p1.dx);
+          final at = cam.proj(p0.dy, p0.dx, h), bt = cam.proj(p1.dy, p1.dx, h);
+          walls.add(((a.depth + b.depth) / 2,
+              Path()
+                ..moveTo(a.o.dx, a.o.dy)
+                ..lineTo(b.o.dx, b.o.dy)
+                ..lineTo(bt.o.dx, bt.o.dy)
+                ..lineTo(at.o.dx, at.o.dy)
+                ..close(),
+              side));
+        }
+      }
+    }
+    walls.sort((x, y) => y.$1.compareTo(x.$1));
+    final wp = Paint()..isAntiAlias = true;
+    for (final w in walls) {
+      canvas.drawPath(w.$2, wp..color = w.$3);
+    }
+    final top = Paint();
+    final rim = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.5
-      ..color = base.withValues(alpha: 0.5);
-    final faces = <(double, Path)>[];
-    for (var i = 0; i < ring.length - 1; i++) {
-      final a = cam.proj(ring[i].dy, ring[i].dx), b = cam.proj(ring[i + 1].dy, ring[i + 1].dx);
-      final at = cam.proj(ring[i].dy, ring[i].dx, h), bt = cam.proj(ring[i + 1].dy, ring[i + 1].dx, h);
-      final cross = (b.o.dx - a.o.dx) * (at.o.dy - a.o.dy) - (b.o.dy - a.o.dy) * (at.o.dx - a.o.dx);
-      if (cross > 0) continue; // back face
-      faces.add(((a.depth + b.depth) / 2,
-          Path()
-            ..moveTo(a.o.dx, a.o.dy)
-            ..lineTo(b.o.dx, b.o.dy)
-            ..lineTo(bt.o.dx, bt.o.dy)
-            ..lineTo(at.o.dx, at.o.dy)
-            ..close()));
+      ..strokeWidth = 0.8
+      ..strokeJoin = StrokeJoin.round;
+    for (final (rings, base) in slabs) {
+      canvas.drawPath(_rings(rings, h), top..color = Color.alphaBlend(base.withValues(alpha: 0.62), land));
     }
-    faces.sort((x, y) => y.$1.compareTo(x.$1));
-    for (final f in faces) {
-      canvas.drawPath(f.$2, side);
-      canvas.drawPath(f.$2, sideEdge);
+    for (final (rings, base) in slabs) {
+      canvas.drawPath(_rings(rings, h), rim..color = Color.lerp(base, Colors.white, 0.3)!.withValues(alpha: 0.55));
     }
-    final top = _ring(ring, h);
-    canvas.drawPath(top, Paint()..color = base.withValues(alpha: 0.6));
-    canvas.drawPath(
-        top,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2
-          ..color = Color.lerp(base, Colors.white, 0.35)!);
   }
 
   static final Set<MapCity> _big = kBigCities.toSet();

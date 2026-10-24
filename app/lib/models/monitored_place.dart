@@ -10,6 +10,9 @@ class MonitoredPlace {
   final String? zone;
   final bool paused;
 
+  /// The bell in «Мої місця»: off → this place never sounds the siren.
+  final bool notify;
+
   const MonitoredPlace({
     required this.id,
     required this.icon,
@@ -19,6 +22,7 @@ class MonitoredPlace {
     this.sub = '',
     this.zone,
     this.paused = false,
+    this.notify = true,
   });
 
   MonitoredPlace copyWith({bool? paused}) => MonitoredPlace(
@@ -30,5 +34,6 @@ class MonitoredPlace {
         lon: lon,
         zone: zone,
         paused: paused ?? this.paused,
+        notify: notify,
       );
 }
