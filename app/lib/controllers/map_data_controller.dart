@@ -18,6 +18,16 @@ import '../services/rtdb_service.dart';
 class MapDataController extends ChangeNotifier {
   MapDataController(this._rtdb, this._store) {
     _selectedId = _store.getString('sel_place', fallback: 'all');
+    // Old builds remembered the place by its POSITION ('u0', 'u1'…): adding or
+    // removing a place made the selection jump to a neighbour (to a muted one).
+    // Convert that to the place's own id once.
+    final old = RegExp(r'^u(\d+)$').firstMatch(_selectedId);
+    if (old != null) {
+      final saved = _store.readJsonList('saved_places');
+      final i = int.parse(old.group(1)!);
+      _selectedId = i < saved.length && saved[i]['id'] != null ? saved[i]['id'].toString() : 'all';
+      _store.setString('sel_place', _selectedId);
+    }
     // Demo is OFF by default: an alarm app must never show sample threats that
     // could be mistaken for real ones. It can be turned on in Settings.
     _showDemo = _store.getBool('show_demo', fallback: false);
@@ -151,7 +161,7 @@ class MapDataController extends ChangeNotifier {
     for (var i = 0; i < saved.length; i++) {
       final p = saved[i];
       list.add(MonitoredPlace(
-        id: 'u$i',
+        id: (p['id'] ?? 'u$i').toString(), // the place's own id — stable when the list changes
         icon: '📍',
         name: (p['name'] ?? 'Місце').toString(),
         sub: (p['region'] ?? '').toString(),
