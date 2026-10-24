@@ -115,7 +115,9 @@ class NowScreen extends StatefulWidget {
   /// The places the screen reports on: the selection, or home when the user
   /// hasn't saved any places yet (otherwise everything would read "calm").
   static List<MonitoredPlace> scopeOf(MapDataController d) {
-    final sel = d.selectedPlaces;
+    // «Всі місця» shows the most endangered place — only among places whose bell
+    // is on, so a muted place (603-й) never takes over the screen by itself.
+    final sel = d.selectedId == 'all' && d.alarmPlaces.isNotEmpty ? d.alarmPlaces : d.selectedPlaces;
     if (sel.isNotEmpty) return sel;
     return [
       MonitoredPlace(
