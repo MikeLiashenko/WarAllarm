@@ -27,6 +27,7 @@ double HomeLon = double.TryParse(cfg.GetValueOrDefault("my_lon", ""), NumberStyl
 var tracker = new ThreatTracker((HomeLat, HomeLon));
 // 📡 Хаб усіх каналів моніторингу (neptun.in.ua/dzherela): розбір, звірка, статистика.
 var hub = new SourceHub();
+MapWriter.SourcesJson = hub.Json(DateTime.Now); // каталог видно в застосунку одразу після старту
 const string MapPath = "map.html";
 // Доп. места для карты: строка settings  places=Назва@широта,довгота;Назва2@...  (необязательно).
 List<(string name, double lat, double lon)> ParsePlaces(string raw)
@@ -1725,6 +1726,7 @@ async Task HandleHub(SourceInfo si, string text, string src, string time)
 {
     var now = DateTime.Now;
     var r = hub.Process(si, text, now);
+    MapWriter.SourcesJson = hub.Json(now); // статистика джерел свіжа з кожним повідомленням (піде з найближчим Write)
     var oneLine = text.Replace("\n", " ").Trim();
     if (oneLine.Length > 90) oneLine = oneLine[..90] + "…";
     switch (r.Verdict)
@@ -1767,6 +1769,9 @@ async Task HandleHub(SourceInfo si, string text, string src, string time)
     bool drew = false;
     foreach (var he in r.Confirmed)
     {
+        // Уточнили тип («Ціль» → шахед): прибираємо стару «Ціль» у цьому місці, щоб не двоїлась.
+        if (he.Ev.Kind != ThreatKind.Target)
+            tracker.SweepWhere(t => t.Zone == "UA" && t.Kind == ThreatKind.Target && t.LastPlace == he.Place);
         if (tracker.IngestUa(he.Ev, now) is not { } up) continue;
         drew = true;
         lock (up.Threat.Srcs) foreach (var s in he.Sources) up.Threat.Srcs.Add(s);
