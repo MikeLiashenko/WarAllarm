@@ -1018,11 +1018,11 @@ class _Legend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const items = [
-      ('Шахед', Color(0xFFFF9F45)),
+      ('Шахед', Color(0xFFFFE14D)),
       ('Крилата', Color(0xFFFF7A3C)),
       ('Балістика', Color(0xFFFF3B30)),
       ('КАБ', Color(0xFFC77DFF)),
-      ('Авіація', Color(0xFFF4C550)),
+      ('Авіація', Color(0xFF7DD3FC)),
     ];
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),

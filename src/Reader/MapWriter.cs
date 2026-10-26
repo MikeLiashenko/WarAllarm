@@ -314,7 +314,7 @@ public static class MapWriter
   --line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.12);
   --tx:#E8ECF4;--mut:#8792A6;--dim:#5C6780;--sky:#5AA9FF;--wheat:#F4C550;
   --calm:#34D399;--calm-glow:rgba(52,211,153,.30);--alarm:#FF3B30;--alarm-glow:rgba(255,59,48,.34);
-  --balist:#FF3B30;--missile:#FF7A3C;--shahed:#FF9F45;--kab:#C77DFF;--avia:#F4C550;--other:#9AA6B2;
+  --balist:#FF3B30;--missile:#FF7A3C;--shahed:#FFE14D;--kab:#C77DFF;--avia:#7DD3FC;--other:#9AA6B2;
   --sans:"Segoe UI Variable","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
   --mono:ui-monospace,"Cascadia Code","Consolas",monospace;color-scheme:dark;
 }
@@ -515,7 +515,7 @@ const RAIONS = /*__RAIONS__*/;
 const ICON="/*__ICON__*/";
 if(ICON){var mk=document.getElementById('mark');if(mk){mk.style.background='none';mk.innerHTML='<img src="'+ICON+'" alt="WarAlarm" style="width:100%;height:100%;object-fit:cover;border-radius:9px;display:block">';}}
 const NS='http://www.w3.org/2000/svg';
-const C={balist:'#FF3B30',missile:'#FF7A3C',shahed:'#FF9F45',kab:'#C77DFF',avia:'#F4C550',other:'#9AA6B2'};
+const C={balist:'#FF3B30',missile:'#FF7A3C',shahed:'#FFE14D',kab:'#C77DFF',avia:'#7DD3FC',other:'#9AA6B2'};
 function el(n,at,txt){var e=document.createElementNS(NS,n);for(var k in at)e.setAttribute(k,at[k]);if(txt!=null)e.textContent=txt;document.getElementById('ua-overlay').appendChild(e);return e;}
 // Детальні силуети цілей (ніс дивиться вгору, 0°=Пн; поворот по heading). Кілька частин на фігуру:
 // s:'dark' — темніша деталь (ніс/фюзеляж), s:'light' — світлий акцент (гвинт/кабіна), інакше — колір типу.
@@ -790,8 +790,8 @@ function renderSelectors(){
 function setSel(v){SEL=v;try{localStorage.setItem('wa_sel',v);}catch(e){}render();renderAnalytics();}
 // ── Аналітика: дашборд з графіками з журналу alarms.csv (S.rows) ──────────────
 var PERIOD='30';
-var KIND={Drone:{n:'Шахед/БпЛА',c:'#FF9F45'},Ballistic:{n:'Балістика',c:'#FF3B30'},
-  Missile:{n:'Ракета',c:'#FF5A3C'},Kab:{n:'КАБ',c:'#FF6B4A'},Aviation:{n:'Авіація',c:'#F4C550'},
+var KIND={Drone:{n:'Шахед/БпЛА',c:'#FFE14D'},Ballistic:{n:'Балістика',c:'#FF3B30'},
+  Missile:{n:'Ракета',c:'#FF5A3C'},Kab:{n:'КАБ',c:'#FF6B4A'},Aviation:{n:'Авіація',c:'#7DD3FC'},
   Target:{n:'Ціль',c:'#8792A6'},Unknown:{n:'Інше',c:'#8792A6'}};
 function dayAgo(n){return new Date(Date.now()-n*86400000).toISOString().slice(0,10);}
 function rowsIn(p){var r=S.rows||[]; if(p==='all')return r; var cut=dayAgo(+p); return r.filter(function(x){return x.d>=cut;});}

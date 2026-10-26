@@ -7,11 +7,11 @@ import '../models/analytics_row.dart';
 
 /// Threat-kind display metadata (name + colour).
 const Map<String, ({String name, Color color})> kKindMeta = {
-  'Drone': (name: 'Шахед/БпЛА', color: Color(0xFFFF9F45)),
+  'Drone': (name: 'Шахед/БпЛА', color: Color(0xFFFFE14D)),
   'Ballistic': (name: 'Балістика', color: Color(0xFFFF3B30)),
   'Missile': (name: 'Ракета', color: Color(0xFFFF5A3C)),
   'Kab': (name: 'КАБ', color: Color(0xFFFF6B4A)),
-  'Aviation': (name: 'Авіація', color: Color(0xFFF4C550)),
+  'Aviation': (name: 'Авіація', color: Color(0xFF7DD3FC)),
   'Target': (name: 'Ціль', color: Color(0xFF8792A6)),
   'Unknown': (name: 'Інше', color: Color(0xFF8792A6)),
 };

@@ -5355,10 +5355,10 @@ const Map<String, Color> kThreatColors = {
   'balist': Color(0xFFFF3B30),
   'missile': Color(0xFFFF7A3C),
   'banderol': Color(0xFFFF5FA2), // «бандероль» — крилата, але своя іконка (летить часто)
-  'shahed': Color(0xFFFF9F45),
-  'shahed_jet': Color(0xFF3EA8FF), // реактивний шахед — електрично-синій, щоб не плутати зі звичайним
+  'shahed': Color(0xFFFFE14D), // звичайний шахед — лимонно-жовтий
+  'shahed_jet': Color(0xFFFF9124), // реактивний шахед — помаранчевий
   'kab': Color(0xFFC77DFF),
-  'avia': Color(0xFFF4C550),
+  'avia': Color(0xFF7DD3FC), // авіація — небесно-блакитна (жовтий тепер у шахеда)
   'fpv': Color(0xFF2DD4BF), // ФПВ / Ланцет / Молнія біля фронту
   'other': Color(0xFF9AA6B2),
 };
