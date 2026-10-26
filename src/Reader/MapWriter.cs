@@ -104,7 +104,7 @@ public static class MapWriter
             sb.Append("{\"label\":\"").Append(Esc(ThreatTracker.Label(t))).Append('"');
             sb.Append(",\"id\":\"").Append(Esc(t.Id)).Append('"'); // стабільний ідентифікатор (вибір / стеження в застосунку)
             sb.Append(",\"zone\":\"").Append(Esc(t.Zone)).Append('"');
-            sb.Append(",\"cat\":\"").Append(Cat(t.Kind)).Append('"');
+            sb.Append(",\"cat\":\"").Append(CatOf(t)).Append('"');
             sb.Append(",\"stage\":\"").Append(t.Stage).Append('"');
             sb.Append(",\"stageLabel\":\"").Append(Esc(ThreatTracker.StageLabel(t.Stage))).Append('"');
             sb.Append(",\"icon\":\"").Append(Esc(ThreatParser.Icon(t.Kind))).Append('"');
@@ -213,6 +213,10 @@ public static class MapWriter
     }
 
     // Категория для цвета/формы блипа (как в концепте).
+    // «Бандероль» — та сама крилата ракета, але на карті окремо (своя іконка): летить часто.
+    static string CatOf(Threat t) =>
+        t.Kind == ThreatKind.Missile && (t.Ammo ?? "").Contains("бандерол", StringComparison.OrdinalIgnoreCase) ? "banderol" : Cat(t.Kind);
+
     static string Cat(ThreatKind k) => k switch
     {
         ThreatKind.Ballistic => "balist",

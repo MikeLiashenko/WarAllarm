@@ -202,6 +202,7 @@ class ProbabilityGauge extends StatelessWidget {
   String _kindName(String cat) => switch (cat) {
         'shahed' => 'Шахед',
         'missile' => 'Ракета',
+        'banderol' => 'Бандероль',
         'balist' => 'Балістика',
         'kab' => 'КАБ',
         'avia' => 'Авіація',

@@ -90,6 +90,7 @@ double _perTarget(MapTarget t, MonitoredPlace pl) {
   base *= switch (t.cat) {
     'balist' => 1.12,
     'missile' => 1.05,
+    'banderol' => 1.05,
     'kab' => 1.0,
     'avia' => 0.8,
     'shahed' => 0.9,

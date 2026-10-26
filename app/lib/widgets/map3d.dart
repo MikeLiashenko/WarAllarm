@@ -10,6 +10,7 @@ import '../data/ukraine_geo.dart';
 import '../data/ukraine_oblasts.dart';
 import '../data/ukraine_raions.dart';
 import '../domain/motion.dart';
+import '../domain/situation.dart';
 import '../models/map_target.dart';
 import '../theme/app_colors.dart';
 import 'glass.dart';
@@ -117,6 +118,7 @@ double targetHeight3d(MapTarget t, TargetMotion m, double hs) {
   final double base = switch (t.cat) {
     'shahed' => 12,
     'missile' => 9,
+    'banderol' => 9,
     'avia' => 30,
     'fpv' => 3, // ФПВ літають низько
     'kab' => 40,
@@ -909,23 +911,59 @@ class _Map3DPainter extends CustomPainter {
     final faded = m.quietMin >= 6 || t.down || t.forecast;
     if (faded) canvas.saveLayer(null, Paint()..color = Colors.white.withValues(alpha: 0.5));
 
-    canvas.drawOval(Rect.fromCenter(center: ground.o, width: 14, height: 14 * (1 - 0.6 * cam.st)),
-        Paint()..color = Colors.black.withValues(alpha: 0.35));
-    _dashed(canvas, ground.o, air.o, Paint()
-      ..strokeWidth = 1
-      ..color = color.withValues(alpha: 0.45));
+    // A target in 3D: a pool of light on the ground with a slow «sonar» ripple, a light
+    // beam up to the target, a comet tail along its course, and the glowing icon itself.
     final r = (12.0 * (_Cam.d / air.depth)).clamp(9.0, 16.0);
-    canvas.drawCircle(air.o, r + 3,
+    final picked = selectedId != null && t.id == selectedId;
+    final near = (kRank[t.stage] ?? 0) >= 3 && !dim;
+    final glowC = picked ? AppColors.highlight : near ? const Color(0xFFFF453A) : color;
+    final squash = 1 - 0.65 * cam.st;
+    final pool = Rect.fromCenter(center: ground.o, width: r * 3.4, height: r * 3.4 * squash);
+    canvas.drawOval(
+        pool,
         Paint()
-          ..color = color.withValues(alpha: 0.25)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
-    canvas.drawCircle(air.o, r, Paint()..color = const Color(0xF0101419));
-    canvas.drawCircle(air.o, r,
+          ..shader = RadialGradient(colors: [glowC.withValues(alpha: 0.5), glowC.withValues(alpha: 0)])
+              .createShader(pool));
+    if (!dim) {
+      final ripple = (pulse + (t.id.hashCode % 100) / 100) % 1; // targets ripple out of step
+      final rw = r * (1.2 + 3.2 * ripple);
+      canvas.drawOval(
+          Rect.fromCenter(center: ground.o, width: rw, height: rw * squash),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.2
+            ..color = glowC.withValues(alpha: 0.55 * (1 - ripple)));
+    }
+    canvas.drawLine(
+        ground.o,
+        air.o,
         Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.8
-          ..color = color);
-    paintThreatGlyph(canvas, air.o, r * 1.7, t.cat, color, m.heading - cam.yaw);
+          ..strokeWidth = 5
+          ..strokeCap = StrokeCap.round
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3)
+          ..shader = ui.Gradient.linear(ground.o, air.o, [glowC.withValues(alpha: 0.05), glowC.withValues(alpha: 0.35)]));
+    canvas.drawLine(
+        ground.o,
+        air.o,
+        Paint()
+          ..strokeWidth = 1.3
+          ..strokeCap = StrokeCap.round
+          ..shader = ui.Gradient.linear(ground.o, air.o, [glowC.withValues(alpha: 0.1), glowC.withValues(alpha: 0.9)]));
+    if (!m.isFlight && !m.launch && !dim && !t.forecast) {
+      final tailKm = math.min(28.0, speedKmPerMin(t) * 2.5);
+      final back = moveKm(m.lat, m.lon, m.heading + 180, tailKm);
+      final b = cam.proj(back.lat, back.lon, z).o;
+      canvas.drawLine(
+          air.o,
+          b,
+          Paint()
+            ..strokeWidth = r * 0.55
+            ..strokeCap = StrokeCap.round
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5)
+            ..shader = ui.Gradient.linear(air.o, b, [color.withValues(alpha: 0.55), color.withValues(alpha: 0)]));
+    }
+    paintThreatIcon(canvas, air.o, r * 2.15, t.cat, color, m.heading - cam.yaw,
+        glow: glowC, glowStrength: picked ? 1.0 : near ? 0.55 + 0.45 * pulse : 0.6);
     if (faded) canvas.restore();
     final alt = altitudeShort(t);
     if (t.forecast) {
@@ -934,18 +972,6 @@ class _Map3DPainter extends CustomPainter {
       _text(canvas, alt.isEmpty ? 'падає' : alt, air.o + Offset(0, r + 12), 10.5, const Color(0xFFFF6B5E), bold: true);
     } else if (alt.isNotEmpty && cam.zoom >= 2) {
       _text(canvas, alt, air.o + Offset(r + 5, 6), 10, AppColors.textPrimary, bold: true);
-    }
-    if (selectedId != null && t.id == selectedId) {
-      canvas.drawCircle(air.o, r + 6 + 7 * pulse,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.2
-            ..color = AppColors.highlight.withValues(alpha: 1 - 0.7 * pulse));
-      canvas.drawCircle(air.o, r + 3,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5
-            ..color = AppColors.highlight);
     }
     if (t.amount > 1) {
       _text(canvas, '×${t.amount}', air.o + Offset(0, -r - 9), 12, AppColors.textPrimary, bold: true);

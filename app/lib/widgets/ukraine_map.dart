@@ -9,6 +9,7 @@ import '../data/ukraine_geo.dart';
 import '../data/ukraine_oblasts.dart';
 import '../data/ukraine_raions.dart';
 import '../domain/motion.dart';
+import '../domain/situation.dart';
 import '../models/map_target.dart';
 import '../theme/app_colors.dart';
 import '../utils/svg_path.dart';
@@ -217,7 +218,7 @@ class UkraineMapState extends State<UkraineMap>
   }
 
   Map<String, List<_FigPathPart>> _buildFigs() {
-    final cats = ['shahed', 'missile', 'balist', 'kab', 'avia', 'fpv', 'other'];
+    final cats = ['shahed', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv', 'other'];
     final out = <String, List<_FigPathPart>>{};
     for (final c in cats) {
       out[c] = figParts(c)
@@ -865,19 +866,12 @@ class _MapPainter extends CustomPainter {
       // Badge — faded once nothing new was heard for a while.
       final faded = mo.quietMin >= 6 || t.down || t.forecast;
       if (faded) canvas.saveLayer(Rect.fromCircle(center: scr, radius: badgeR + 8), Paint()..color = Colors.white.withValues(alpha: 0.5));
-      canvas.drawCircle(scr, badgeR + 3,
-          Paint()
-            ..color = Colors.black.withValues(alpha: 0.35)
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4));
-      canvas.drawCircle(scr, badgeR, Paint()..color = const Color(0xF0101419));
-      canvas.drawCircle(
-          scr,
-          badgeR,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.8
-            ..color = color);
-      _drawFig(canvas, scr, mo.heading, cat, color, badgeR / 12.5);
+      // No disc / ring — just the silhouette with a glow (Mike: «просто красиві іконки»).
+      final picked = selectedId != null && t.id == selectedId;
+      final near = (kRank[t.stage] ?? 0) >= 3 && !dimTargets;
+      _drawIcon(canvas, scr, mo.heading, cat, color, badgeR / 7.8,
+          glow: picked ? AppColors.highlight : near ? const Color(0xFFFF453A) : color,
+          glowStrength: picked ? 1.0 : near ? 0.55 + 0.45 * pulse : 0.55);
       if (faded) canvas.restore();
       if (t.forecast) {
         _text(canvas, 'прогноз', scr + Offset(0, badgeR + 11), 9.5, color.withValues(alpha: 0.85),
@@ -888,19 +882,6 @@ class _MapPainter extends CustomPainter {
             const Color(0xFFFF6B5E), center: true, stroke: true, bold: true);
       }
 
-      // Picked target: pulsing ring.
-      if (selectedId != null && t.id == selectedId) {
-        canvas.drawCircle(scr, badgeR + 6 + 6 * pulse,
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 2.2
-              ..color = AppColors.highlight.withValues(alpha: 1 - 0.7 * pulse));
-        canvas.drawCircle(scr, badgeR + 3,
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 1.5
-              ..color = AppColors.highlight);
-      }
       // ×N cluster label above the badge.
       if (t.amount > 1) {
         _text(canvas, '×${t.amount}', scr + Offset(0, -badgeR - 2), 12.5,
@@ -918,31 +899,39 @@ class _MapPainter extends CustomPainter {
 
   _Fit _fit(Size size) => _geoFit(size, insets);
 
-  void _drawFig(Canvas canvas, Offset at, double headingDeg, String cat,
-      Color color, double ppu,
-      {bool ghost = false}) {
+  /// A target as a glowing icon: soft halo in [glow], a dark outline for contrast on
+  /// any map colour, then the silhouette with a light-nose gradient and its details.
+  void _drawIcon(Canvas canvas, Offset at, double headingDeg, String cat, Color color, double ppu,
+      {required Color glow, double glowStrength = 0.55}) {
+    final parts = figs[cat]!;
+    final k = figScale(cat) * ppu;
     canvas.save();
     canvas.translate(at.dx, at.dy);
     canvas.rotate(headingDeg * math.pi / 180);
-    canvas.scale(figScale(cat) * ppu); // fig coords are ~±10 units → px
-    final parts = figs[cat]!;
-    for (final part in parts) {
-      if (ghost && !part.body) continue;
-      final paint = Paint()
-        ..style = PaintingStyle.fill
-        ..color = ghost
-            ? color.withValues(alpha: 0.3)
-            : (part.overrideColor ?? color);
-      canvas.drawPath(part.path, paint);
-      if (!ghost && part.body) {
-        canvas.drawPath(
-          part.path,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 0.35
-            ..color = const Color(0x990A0F19),
-        );
-      }
+    canvas.scale(k);
+    final halo = Paint()
+      ..color = glow.withValues(alpha: 0.75 * glowStrength)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 7 / k);
+    final outline = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2 / k
+      ..strokeJoin = StrokeJoin.round
+      ..color = const Color(0xE60A0F19);
+    final fill = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Color.lerp(color, Colors.white, 0.45)!, color, Color.lerp(color, Colors.black, 0.15)!],
+        stops: const [0, 0.45, 1],
+      ).createShader(const Rect.fromLTRB(-11, -12, 11, 11));
+    for (final p in parts.where((p) => p.body)) {
+      canvas.drawPath(p.path, halo);
+    }
+    for (final p in parts.where((p) => p.body)) {
+      canvas.drawPath(p.path, outline);
+    }
+    for (final p in parts) {
+      canvas.drawPath(p.path, p.body ? fill : (Paint()..color = p.overrideColor ?? color));
     }
     canvas.restore();
   }

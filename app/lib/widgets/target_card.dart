@@ -24,7 +24,7 @@ String typicalAltitude(MapTarget t) {
     'shahed' => '0,1–2 км',
     'missile' when l.contains('циркон') || l.contains('онікс') || l.contains('х-22') || l.contains('х-32') =>
       'висока, пікірує на ціль',
-    'missile' => '30–200 м над землею',
+    'missile' || 'banderol' => '30–200 м над землею',
     'balist' => 'апогей до ~50 км',
     'kab' => 'скид з 10–14 км, планує',
     'avia' => '5–12 км',

@@ -552,6 +552,7 @@ public sealed class ThreatTracker
             ThreatKind.Aviation  => "Авіація",
             _                    => "Ціль",
         };
+        if (t.Ammo is { } b0 && b0.Contains("бандерол", StringComparison.OrdinalIgnoreCase)) return "Бандероль";
         return t.Ammo is { Length: > 0 } a ? $"{name} ({a})" : name;
     }
 

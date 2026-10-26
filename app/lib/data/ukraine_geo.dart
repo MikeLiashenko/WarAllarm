@@ -5354,6 +5354,7 @@ const List<MapCity> kCities = [
 const Map<String, Color> kThreatColors = {
   'balist': Color(0xFFFF3B30),
   'missile': Color(0xFFFF7A3C),
+  'banderol': Color(0xFFFF5FA2), // «бандероль» — крилата, але своя іконка (летить часто)
   'shahed': Color(0xFFFF9F45),
   'kab': Color(0xFFC77DFF),
   'avia': Color(0xFFF4C550),
@@ -5380,6 +5381,14 @@ bool figPartIsBody(FigPart p) => p.style == FigStyle.body;
 /// Ported from `figParts()` in MapWriter.cs.
 List<FigPart> figParts(String cat) {
   switch (cat) {
+    case 'banderol': // «бандероль»: slim cruise missile, swept-back wings and tail
+      return const [
+        FigPart('M0,-12 C1,-10 1,-7 1,8 C1,9 -1,9 -1,8 C-1,-7 -1,-10 0,-12 Z'),
+        FigPart('M-1,-1 L-7.5,4.2 L-7.5,5.2 L-1,2.4 L1,2.4 L7.5,5.2 L7.5,4.2 L1,-1 Z'),
+        FigPart('M-1,6.2 L-3.6,8.8 L-3.6,9.6 L-1,8.3 L1,8.3 L3.6,9.6 L3.6,8.8 L1,6.2 Z'),
+        FigPart('M0,-12 C0.6,-10.8 0.6,-9.8 0,-9.3 C-0.6,-9.8 -0.6,-10.8 0,-12 Z', FigStyle.dark),
+        FigPart('M-0.6,8.4 L0.6,8.4 L0.5,9.6 L-0.5,9.6 Z', FigStyle.light),
+      ];
     case 'missile': // cruise missile: long body, straight mid wings, cross tail
       return const [
         FigPart('M0,-11 C1.2,-8.8 1.2,-6 1.2,7.5 C1.2,8.6 -1.2,8.6 -1.2,7.5 C-1.2,-6 -1.2,-8.8 0,-11 Z'),
@@ -5434,6 +5443,7 @@ List<FigPart> figParts(String cat) {
 double figScale(String cat) => switch (cat) {
       'balist' => 1.12,
       'missile' => 1.0,
+      'banderol' => 1.0,
       'avia' => 1.0,
       'fpv' => 0.85,
       'kab' => 0.98,
@@ -5445,6 +5455,7 @@ double figScale(String cat) => switch (cat) {
 double speedKmMin(String cat, String label) {
   final a = label.toLowerCase();
   if (cat == 'balist') return 67;
+  if (cat == 'banderol') return 13;
   if (cat == 'missile') return a.contains('циркон') ? 100 : 13;
   if (cat == 'kab') return 15;
   if (cat == 'fpv') return 1.7; // ФПВ ~100 км/год

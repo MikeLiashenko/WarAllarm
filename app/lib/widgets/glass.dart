@@ -122,7 +122,7 @@ class ThreatGlyph extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = cat;
-    final known = const ['shahed', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(c)
+    final known = const ['shahed', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(c)
         ? c
         : 'other';
     return SizedBox(
@@ -168,11 +168,54 @@ class _GlyphPainter extends CustomPainter {
       old.color != color || old.cat != cat || old.heading != heading;
 }
 
+/// A target as a glowing icon, no disc: a soft halo in [glow], a dark outline for
+/// contrast on any background, the silhouette with a light-nose gradient, details.
+/// Same look as the 2D map icons.
+void paintThreatIcon(Canvas canvas, Offset c, double size, String cat, Color color, double headingDeg,
+    {Color? glow, double glowStrength = 0.6}) {
+  final known = const ['shahed', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(cat) ? cat : 'other';
+  final parts = ThreatGlyph._parts(known);
+  final k = size / 15 * figScale(known).clamp(0.8, 1.1);
+  canvas.save();
+  canvas.translate(c.dx, c.dy);
+  canvas.rotate(headingDeg * 3.141592653589793 / 180);
+  canvas.scale(k);
+  final halo = Paint()
+    ..color = (glow ?? color).withValues(alpha: 0.75 * glowStrength)
+    ..maskFilter = MaskFilter.blur(BlurStyle.normal, 7 / k);
+  final outline = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.2 / k
+    ..strokeJoin = StrokeJoin.round
+    ..color = const Color(0xE60A0F19);
+  final fill = Paint()
+    ..shader = LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [Color.lerp(color, Colors.white, 0.45)!, color, Color.lerp(color, Colors.black, 0.15)!],
+      stops: const [0, 0.45, 1],
+    ).createShader(const Rect.fromLTRB(-11, -12, 11, 11));
+  for (final (path, style) in parts) {
+    if (style == FigStyle.body) canvas.drawPath(path, halo);
+  }
+  for (final (path, style) in parts) {
+    if (style == FigStyle.body) canvas.drawPath(path, outline);
+  }
+  for (final (path, style) in parts) {
+    canvas.drawPath(
+        path,
+        style == FigStyle.body
+            ? fill
+            : (Paint()..color = style == FigStyle.dark ? const Color(0x800C101A) : const Color(0xB8FFFFFF)));
+  }
+  canvas.restore();
+}
+
 /// Paint a target silhouette centred at [c], [size] px across, rotated to a
 /// compass [headingDeg] — the same artwork as [ThreatGlyph] (3D map badges).
 void paintThreatGlyph(Canvas canvas, Offset c, double size, String cat,
     Color color, double headingDeg) {
-  final known = const ['shahed', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(cat)
+  final known = const ['shahed', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(cat)
       ? cat
       : 'other';
   canvas.save();

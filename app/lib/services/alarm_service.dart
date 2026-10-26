@@ -23,7 +23,7 @@ class AlarmService {
   // 'impact' — приліт над домом (siren_impact.wav); 'nuclear' — радіаційна небезпека.
   static const _special = {'impact', 'nuclear'};
   static String _norm(String? cat) =>
-      (_special.contains(cat) || _kinds.contains(cat)) ? cat! : 'other';
+      cat == 'banderol' ? 'missile' : (_special.contains(cat) || _kinds.contains(cat)) ? cat! : 'other';
 
   bool _sirenOn = false;
   bool _vibrating = false;
