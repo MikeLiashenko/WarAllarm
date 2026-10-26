@@ -27,3 +27,9 @@ site/serve.js
 !site/index.html
 boom_feedback.csv
 src/Reader/sources_missing.txt
+
+# Reader runtime output (night summary)
+src/Reader/night.log
+src/Reader/night.png
+src/Reader/night.txt
+src/Reader/night_ball.log
