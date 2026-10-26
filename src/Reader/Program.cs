@@ -111,6 +111,8 @@ bool IsLaunchTitle(string? t) => t is { Length: > 0 } && launchTitles.Any(x => t
 int airReported = 0;                         // 🚀 «у повітрі» за оцінкою моніторів (@ukraine_pyxx)
 DateTime airReportedAt = DateTime.MinValue;
 LaunchBatch? lastBatch = null;               // остання хвиля пусків
+// Області з офіційною тривогою зараз (цикл офіційних тривог) — для «⏰ коли тривога тут».
+var ActiveAlarmOblasts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 DateTime lastBatchAt = DateTime.MinValue;
 // Скільки «у повітрі» показувати: свіжа оцінка моніторів (≤45 хв) або сума цілей на карті — що більше.
 int AirborneNow(int onMap) =>
@@ -275,6 +277,7 @@ if (args.Length >= 1 && args[0].Equals("launches", StringComparison.OrdinalIgnor
     var t0 = DateTime.Now;
     var b = LaunchFeed.ParseLaunch("18:35 по пусках шахедів:\n8 штук реактивних з Орла\n12 штук з Криму\n6 штук Курськ")!;
     LaunchGroups.Add(b, t0);
+    Console.WriteLine($"Бот, дім ({HomeLat:0.00},{HomeLon:0.00}):\n{AlarmEtaText(HomeLat, HomeLon) ?? "(нічого не летить сюди)"}\n");
     Console.WriteLine("Бот:\n" + string.Join("\n", b.Items.Select(i => $"• {i.Origin} — {i.N}{(i.Reactive ? " (реакт.)" : "")}{LaunchRouteHint(i)}")) + "\n");
     foreach (var h in new[] { 0.0, 1.0, 2.0, 3.0 })
         foreach (var g in LaunchGroups.Active)
@@ -789,6 +792,7 @@ async Task RunAlertsLoop(ChannelPoster? channel)
                 }
             }
             prevActive = nowActive;
+            ActiveAlarmOblasts.Clear(); ActiveAlarmOblasts.UnionWith(nowActive);
             activeSeeded = true;
             // 1) API: покласти тривоги у state → публікується у Firebase (state/alerts).
             MapWriter.AlertsJson = BuildAlertsJson(snap);
@@ -1148,7 +1152,55 @@ string StatusAt(double lat, double lon)
             sb.AppendLine($"• {ThreatTracker.Label(t)} — {km:0} км, {ThreatTracker.StageLabel(t.Stage)}"
                 + (t.LastPlace.Length > 0 ? $", біля {t.LastPlace}" : ""));
     }
+    if (AlarmEtaText(lat, lon) is { } eta) sb.AppendLine("\n" + eta);
     return sb.ToString();
+}
+
+// ⏰ «Коли орієнтовно тривога тут»: найраніше, коли ціль або група пуску, летячи типовим
+// маршрутом, зайде в область місця або підійде ближче 50 км (тоді її зазвичай і оголошують).
+// Той самий розрахунок, що в застосунку (alarm_forecast.dart). null — нічого не летить сюди
+// або тривога в області вже триває.
+string? AlarmEtaText(double lat, double lon)
+{
+    var place = (lat, lon);
+    var obl = OblastGeo.PolyName(lat, lon);
+    if (obl is not null && ActiveAlarmOblasts.Contains(obl)) return null;
+    var now = DateTime.Now;
+    var cands = new List<(List<(double lat, double lon)> route, double kmh, string via, bool forecast)>();
+    foreach (var g in LaunchGroups.Active)
+    {
+        var p = g.PosAt(now);
+        var gone = ThreatGeo.Km(g.Route[0], p);
+        var ahead = new List<(double lat, double lon)> { p };
+        ahead.AddRange(g.Route.Skip(1).Where(w => ThreatGeo.Km(g.Route[0], w) > gone + 1));
+        cands.Add((ahead, g.Kmh * 0.85, $"пуск з {g.Origin}{(g.Reactive ? " (реакт.)" : "")} ×{g.Left}", true));
+    }
+    foreach (var t in tracker.Active)
+        if (t.Pos is { } tp && t.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target
+            && !t.Launch && !t.Down && !t.Approx && TypicalRoutes.FromPosition(tp, t.Heading, t.HeadingKnown) is { } r)
+            cands.Add((r, ThreatGeo.SpeedKmh(t.Kind, t.Ammo) * 0.85, $"{ThreatTracker.Label(t)} · зараз: {t.LastPlace}", false));
+
+    (double min, string via, bool forecast)? best = null;
+    foreach (var (route, kmh, via, forecast) in cands)
+    {
+        if (route.Count < 2 || kmh <= 0) continue;
+        double total = TypicalRoutes.LengthKm(route);
+        for (double d = 0; d <= total; d += 4)
+        {
+            var p = TypicalRoutes.At(route, d);
+            double km = ThreatGeo.Km(p, place);
+            if (km <= 50 || (km < 250 && obl is not null && OblastGeo.PolyName(p.lat, p.lon) == obl))
+            {
+                double min = d / kmh * 60;
+                if (min <= 8 * 60 && (best is null || min < best.Value.min)) best = (min, via, forecast);
+                break;
+            }
+        }
+    }
+    if (best is not { } b) return null;
+    var at = now.AddMinutes(b.min);
+    var inStr = b.min < 3 ? "будь-якої хвилини" : b.min < 60 ? $"~{b.min:0} хв" : $"~{(int)(b.min / 60)} год {b.min % 60:0} хв";
+    return $"⏰ Тривога тут орієнтовно о {at:HH:mm} ({inStr}) — {b.via}{(b.forecast ? " (прогноз)" : "")}.\nОцінка за типовими маршрутами шахедів.";
 }
 
 // Малює поточну карту загроз у PNG: області за ОФІЦІЙНОЮ тривогою (red/yellow),
@@ -1706,7 +1758,9 @@ async Task OnUpdate(Update update)
             int react = lb.Items.Where(i => i.Reactive).Sum(i => i.N);
             var head = $"🚀 Пуск ~{lb.Total} шахедів{at}" + (react > 0 ? $" (з них реактивних {react})" : "");
             Ui.Line(ConsoleColor.Red, $"🚀 [{time}] {src} · {head}");
-            await Alert(new AlarmInfo(time, src, head, string.Join("\n", rows) + "\nЛетять на Україну — стежте за картою.",
+            var etaHome = AlarmEtaText(tracker.Home.lat, tracker.Home.lon);
+            await Alert(new AlarmInfo(time, src, head, string.Join("\n", rows) + "\nЛетять на Україну — стежте за картою."
+                                      + (etaHome is null ? "" : "\n\n" + etaHome),
                                       ThreatKind.Drone, Urgent: false, Info: true));
             if (channelPoster is not null)
                 await channelPoster.Post($"🚀 <b>{H(head)}</b>\n{H(string.Join("\n", rows))}\n\n⚠️ Летять на Україну — стежте за картою.\n🤖 WarAlarm", null);

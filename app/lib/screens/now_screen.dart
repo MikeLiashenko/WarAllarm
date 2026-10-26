@@ -8,6 +8,7 @@ import '../controllers/nav_controller.dart';
 import '../controllers/settings_controller.dart';
 import '../controllers/target_focus_controller.dart';
 import '../data/ukraine_geo.dart';
+import '../domain/alarm_forecast.dart';
 import '../domain/probability.dart';
 import '../domain/situation.dart';
 import '../models/map_target.dart';
@@ -295,8 +296,11 @@ class _NowScreenState extends State<NowScreen> {
   }
 
   /// Night summary, power outages and the latest launch wave.
+  static String _hhmm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
   List<Widget> _eventNotices(Situation s) {
     final data = s.data;
+    final eta = data.isDemo ? null : forecastAlarm(s.place, [...data.targets, ...data.launches]);
     final list = <Widget>[
       if (data.isDemo)
         Notice(
@@ -304,6 +308,15 @@ class _NowScreenState extends State<NowScreen> {
           icon: Icons.science_outlined,
           title: 'Демо-дані — це приклад, а не реальні загрози',
           body: 'Монітор не підключено.',
+        ),
+      // ⏰ Коли орієнтовно тривога тут (цілі й групи пуску типовими маршрутами).
+      if (eta != null && !eta.already && !s.stale)
+        Notice(
+          color: eta.minutes < 30 ? AppColors.threat : AppColors.warn,
+          emoji: '⏰',
+          title: 'Тривога орієнтовно о ${_hhmm(eta.at)} · ${s.place.name}',
+          body: '${fmtMinutes(eta.minutes)} — ${eta.via}'
+              '${eta.forecast ? ' (прогноз пуску)' : ''}. Оцінка за типовими маршрутами шахедів.',
         ),
       // 🚀 Остання хвиля пусків (з каналу моніторів через бота).
       if (data.hasRecentLaunch)

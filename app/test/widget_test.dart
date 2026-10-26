@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:waralarm/data/oblast_lookup.dart';
+import 'package:waralarm/domain/alarm_forecast.dart';
 import 'package:waralarm/models/api_key.dart';
 import 'package:waralarm/models/map_target.dart';
 import 'package:waralarm/models/monitored_place.dart';
@@ -14,6 +15,7 @@ import 'package:waralarm/domain/situation.dart';
 import 'package:waralarm/widgets/section_header.dart';
 
 void main() {
+  alarmForecastTests();
   testWidgets('SectionHeader renders title and subtitle', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
@@ -150,6 +152,43 @@ void main() {
           kmh: 185, seenMs: seen, forecast: true, route: const [[52.97, 36.06], [51.87, 33.48], [50.45, 30.52]]);
       final m = motionOf(g, seen + 90 * 60000);
       expect(kmBetween(52.97, 36.06, m.lat, m.lon), greaterThan(185 / 60 * 0.85 * 60)); // > an hour of flight
+    });
+  });
+}
+
+void alarmForecastTests() {
+  group('alarm forecast', () {
+    const teremky = MonitoredPlace(id: 'a', icon: '📍', name: 'Теремки', lat: 50.370, lon: 30.459);
+    final now = DateTime(2026, 10, 26, 3).millisecondsSinceEpoch;
+    MapTarget orel({int ago = 0}) => MapTarget(
+        id: 'launch:L1', label: 'Пуск з Орел', cat: 'shahed', lat: 52.97, lon: 36.06, amount: 8,
+        kmh: 185, seenMs: now - ago * 60000, forecast: true,
+        route: const [[52.97, 36.06], [51.87, 33.48], [51.05, 31.89], [50.51, 30.79], [50.45, 30.52]]);
+
+    tearDown(() => setMotionAlarmOblasts(null));
+
+    test('a launch group from Орел → alarm in Kyiv in ~2.5 h', () {
+      final f = forecastAlarm(teremky, [orel()], nowMs: now)!;
+      expect(f.forecast, isTrue);
+      expect(f.minutes, inInclusiveRange(130, 190));
+      expect(f.via, contains('×8'));
+    });
+
+    test('an hour later the alarm is an hour closer', () {
+      final a = forecastAlarm(teremky, [orel()], nowMs: now)!.minutes;
+      final b = forecastAlarm(teremky, [orel(ago: 60)], nowMs: now)!.minutes;
+      expect(a - b, closeTo(60, 3));
+    });
+
+    test('already an alarm in the place\'s oblast → «already»', () {
+      setMotionAlarmOblasts({'Kiev City'});
+      expect(forecastAlarm(teremky, [orel()], nowMs: now)!.already, isTrue);
+    });
+
+    test('nothing heading this way → no forecast', () {
+      final west = MapTarget(id: 'w', label: 'Шахед', cat: 'shahed', lat: 46.97, lon: 32.0, kmh: 185, seenMs: now,
+          route: const [[46.97, 32.0], [48.75, 30.22], [49.23, 28.47]]);
+      expect(forecastAlarm(teremky, [west], nowMs: now), isNull);
     });
   });
 }

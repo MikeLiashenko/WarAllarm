@@ -32,6 +32,24 @@ class OblastLookup {
     return OblastLookup._(polys);
   }
 
+  /// Is [lat],[lon] inside the oblast polygon called [name]? (One polygon only —
+  /// cheap enough to call along a whole route.)
+  bool contains(String name, double lat, double lon) {
+    for (final poly in _polys) {
+      if (poly.name != name) continue;
+      var inside = false;
+      for (final ring in poly.rings) {
+        for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          final xi = ring[i][0], yi = ring[i][1];
+          final xj = ring[j][0], yj = ring[j][1];
+          if (((yi > lat) != (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+        }
+      }
+      return inside;
+    }
+    return false;
+  }
+
   /// English polygon name of the oblast containing [lat],[lon], or null.
   /// Even-odd across all rings handles the Kyiv-oblast hole automatically.
   String? nameAt(double lat, double lon) {
