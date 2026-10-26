@@ -270,6 +270,13 @@ if (args.Length >= 1 && args[0].Equals("move", StringComparison.OrdinalIgnoreCas
     return;
 }
 
+// ── 📒 Звіт журналу постів:   dotnet run -- journal [РРРР-ММ-ДД]
+if (args.Length >= 1 && args[0].Equals("journal", StringComparison.OrdinalIgnoreCase))
+{
+    Journal.Report(args.Length >= 2 ? args[1] : null);
+    return;
+}
+
 // ── Тест «де ціль, а куди летить» (оффлайн):   dotnet run -- course
 if (args.Length >= 1 && args[0].Equals("course", StringComparison.OrdinalIgnoreCase))
 {
@@ -1728,6 +1735,7 @@ async Task OnUpdate(Update update)
     var src = uname is { Length: > 0 } ? "@" + uname : title ?? "?";
     var time = m.date.ToString("HH:mm:ss");
     var oneLine = m.message.Replace("\n", " ").Trim();
+    if (chId != 0) Journal.Post(uname ?? title ?? chId.ToString(), m.id, m.date.ToLocalTime(), m.message); // 📒 кожен пост — у журнал
 
     // Канал лише з каталогу джерел (не з наших спец-парсерів) — хабу ПОТРІБНІ повтори
     // з різних каналів: саме так він підтверджує ціль. Дедуп для нього не робимо.
@@ -1949,7 +1957,7 @@ async Task OnUpdate(Update update)
     // ── 📡 Усі інші канали моніторингу з каталогу → хаб (розбір + звірка джерел) ──
     if (hubOnly)
     {
-        await HandleHub(hubSrc!, m.message, src, time);
+        await HandleHub(hubSrc!, m.message, src, time, m.id);
         return;
     }
 
@@ -1957,10 +1965,11 @@ async Task OnUpdate(Update update)
 }
 
 // ── 📡 Хаб джерел: розбір повідомлення каталогу → звірка → карта/сповіщення ─────
-async Task HandleHub(SourceInfo si, string text, string src, string time)
+async Task HandleHub(SourceInfo si, string text, string src, string time, int msgId = 0)
 {
     var now = DateTime.Now;
     var r = hub.Process(si, text, now);
+    Journal.Hub(si.User, msgId, r); // 📒 що зрозуміли з поста (для розбору помилок)
     MapWriter.SourcesJson = hub.Json(now); // статистика джерел свіжа з кожним повідомленням (піде з найближчим Write)
     var oneLine = text.Replace("\n", " ").Trim();
     if (oneLine.Length > 90) oneLine = oneLine[..90] + "…";
