@@ -554,7 +554,7 @@ class _Map3DPainter extends CustomPainter {
   final bool dim;
 
   static const _red = Color(0xFFC0303F);
-  static const _yellow = Color(0xFFD9B21F);
+  static const _yellow = Color(0xFFF2B705); // warm amber, not muddy olive over the dark land
   late Rect _view;
 
   /// Roughly on screen (bbox corners projected) — skips far-away polygons when zoomed.
@@ -984,7 +984,7 @@ class _Map3DPainter extends CustomPainter {
             ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5)
             ..shader = ui.Gradient.linear(air.o, b, [color.withValues(alpha: 0.55), color.withValues(alpha: 0)]));
     }
-    paintThreatIcon(canvas, air.o, r * 2.15, t.cat, color, m.heading - cam.yaw,
+    paintThreatIcon(canvas, air.o, r * 2.15, iconKey(t.cat, t.label), color, m.heading - cam.yaw,
         glow: glowC, glowStrength: picked ? 1.0 : near ? 0.55 + 0.45 * pulse : 0.6);
     if (faded) canvas.restore();
     final alt = altitudeShort(t);

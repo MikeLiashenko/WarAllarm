@@ -12,6 +12,7 @@ class MapLegend extends StatelessWidget {
 
   static const _kinds = [
     ('shahed', 'Шахед / БпЛА'),
+    ('shahed_jet', 'Реактивний шахед'),
     ('banderol', 'Бандероль'),
     ('missile', 'Крилата ракета («ціль»)'),
     ('balist', 'Балістика'),

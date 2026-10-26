@@ -812,7 +812,7 @@ class _TargetRow extends StatelessWidget {
                     width: 1.6,
                   ),
                 ),
-                child: ThreatGlyph(t.cat, size: 20, heading: t.heading ?? 0),
+                child: ThreatGlyph(iconKey(t.cat, t.label), size: 20, heading: t.heading ?? 0, color: kThreatColors[t.cat]),
               ),
               const SizedBox(width: 12),
               Expanded(

@@ -43,6 +43,7 @@ void main() {
             home: (lat: 50.362, lon: 30.446),
             homeName: 'Київ',
             selectedId: 'p',
+            oblastWhole: const {'Chernihiv': 'yellow', 'Sumy': 'red', 'Poltava': 'yellow'},
             showControls: false,
             showLegend: false,
           ),

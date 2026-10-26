@@ -19,7 +19,8 @@ const double _lon0 = 22.14, _lonSpan = 18.09, _lat1 = 52.38, _latSpan = 7.99;
 
 // Official-alert fills: a deep burgundy and a muted gold read well over imagery.
 const Color _alarmRed = Color(0xFFC0303F);
-const Color _alarmYellow = Color(0xFFD9B21F);
+// Warm amber: over the dark-blue land a pale yellow at low opacity turned muddy olive.
+const Color _alarmYellow = Color(0xFFF2B705);
 
 /// Fit the geographic bounds into [size] preserving the lon/lat aspect, so the
 /// projection matches the oblast polygons exactly (the country is drawn from
@@ -218,7 +219,7 @@ class UkraineMapState extends State<UkraineMap>
   }
 
   Map<String, List<_FigPathPart>> _buildFigs() {
-    final cats = ['shahed', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv', 'other'];
+    final cats = ['shahed', 'shahed_jet', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv', 'other'];
     final out = <String, List<_FigPathPart>>{};
     for (final c in cats) {
       out[c] = figParts(c)
@@ -555,7 +556,7 @@ class _MapPainter extends CustomPainter {
           Paint()
             ..style = PaintingStyle.fill
             ..color = (red ? _alarmRed : _alarmYellow)
-                .withValues(alpha: red ? 0.5 : 0.4));
+                .withValues(alpha: red ? 0.5 : 0.6));
     }
     // --- Raion split: fill alarmed raions individually + faint raion borders,
     //     so partially-alarmed oblasts show WHICH raions (official-style). ---
@@ -583,7 +584,7 @@ class _MapPainter extends CustomPainter {
               Paint()
                 ..style = PaintingStyle.fill
                 ..color = (red ? _alarmRed : _alarmYellow)
-                    .withValues(alpha: red ? 0.5 : 0.42));
+                    .withValues(alpha: red ? 0.5 : 0.6));
         }
       }
       canvas.drawPath(
@@ -736,7 +737,8 @@ class _MapPainter extends CustomPainter {
     }
     final badgeR = (ppu * 4.6).clamp(10.0, 15.0);
     for (final t in targets) {
-      final cat = figs.containsKey(t.cat) ? t.cat : 'other';
+      final key = iconKey(t.cat, t.label); // reactive shahed has its own silhouette
+      final cat = figs.containsKey(key) ? key : figs.containsKey(t.cat) ? t.cat : 'other';
       final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
       // Where it is now: flight From→To (ballistic/КАБ), launch ring, or
       // dead-reckoning along the heading — all at the weapon's real speed.

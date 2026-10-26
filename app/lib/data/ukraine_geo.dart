@@ -5356,6 +5356,7 @@ const Map<String, Color> kThreatColors = {
   'missile': Color(0xFFFF7A3C),
   'banderol': Color(0xFFFF5FA2), // «бандероль» — крилата, але своя іконка (летить часто)
   'shahed': Color(0xFFFF9F45),
+  'shahed_jet': Color(0xFFFF9F45), // реактивний шахед — та сама гама, своя форма
   'kab': Color(0xFFC77DFF),
   'avia': Color(0xFFF4C550),
   'fpv': Color(0xFF2DD4BF), // ФПВ / Ланцет / Молнія біля фронту
@@ -5381,34 +5382,68 @@ bool figPartIsBody(FigPart p) => p.style == FigStyle.body;
 /// Ported from `figParts()` in MapWriter.cs.
 List<FigPart> figParts(String cat) {
   switch (cat) {
+    case 'shahed': // Shahed-136 / Герань-2: cranked delta, wingtip fins, pusher prop
+      return const [
+        FigPart('M0,-10 L1.2,-8.6 L1.4,-4 L9.6,4.6 L9.6,6.2 L1.4,5.2 L1.2,7.2 L-1.2,7.2 L-1.4,5.2 L-9.6,6.2 L-9.6,4.6 L-1.4,-4 L-1.2,-8.6 Z'),
+        FigPart('M-0.45,-8.8 L0.45,-8.8 L0.45,6.8 L-0.45,6.8 Z', FigStyle.dark),
+        FigPart('M8.8,3.4 L10.3,3.4 L10.3,6.9 L8.8,6.9 Z', FigStyle.dark),
+        FigPart('M-10.3,3.4 L-8.8,3.4 L-8.8,6.9 L-10.3,6.9 Z', FigStyle.dark),
+        FigPart('M1.4,-3.4 L6.2,1.4 L5.6,1.9 L1.4,-2.2 Z', FigStyle.light),
+        FigPart('M-1.4,-3.4 L-6.2,1.4 L-5.6,1.9 L-1.4,-2.2 Z', FigStyle.light),
+        FigPart('M-3.2,7.6 L3.2,7.6 L3.2,8.3 L-3.2,8.3 Z', FigStyle.light),
+      ];
+    case 'shahed_jet': // Герань-3 (реактивний): more swept, jet engine on top, flame, no prop
+      return const [
+        FigPart('M0,-10.8 L1.3,-8.4 L1.5,-3.2 L8.6,5.2 L8.6,6.6 L1.5,5.4 L1.3,7.4 L-1.3,7.4 L-1.5,5.4 L-8.6,6.6 L-8.6,5.2 L-1.5,-3.2 L-1.3,-8.4 Z'),
+        FigPart('M7.9,4 L9.3,4 L9.3,7.2 L7.9,7.2 Z', FigStyle.dark),
+        FigPart('M-9.3,4 L-7.9,4 L-7.9,7.2 L-9.3,7.2 Z', FigStyle.dark),
+        FigPart('M-1.7,1.6 C-1.7,0.6 1.7,0.6 1.7,1.6 L1.7,8.4 L-1.7,8.4 Z', FigStyle.dark),
+        FigPart('M-1.1,8.4 L1.1,8.4 L0,11.4 Z', FigStyle.light),
+        FigPart('M1.5,-2.6 L5.8,2.4 L5.2,2.9 L1.5,-1.4 Z', FigStyle.light),
+        FigPart('M-1.5,-2.6 L-5.8,2.4 L-5.2,2.9 L-1.5,-1.4 Z', FigStyle.light),
+      ];
+    case 'missile': // cruise missile (Х-101 / Калібр): long body, mid wings, cross tail, engine
+      return const [
+        FigPart('M0,-11.5 C1.1,-9.8 1.2,-7 1.2,8 L0.9,9.4 L-0.9,9.4 L-1.2,8 C-1.2,-7 -1.1,-9.8 0,-11.5 Z'),
+        FigPart('M-1.2,0.4 L-8,2.4 L-8,3.5 L-1.2,2.5 L1.2,2.5 L8,3.5 L8,2.4 L1.2,0.4 Z'),
+        FigPart('M-1.1,6.6 L-3.9,8.4 L-3.9,9.2 L-1.1,8.2 L1.1,8.2 L3.9,9.2 L3.9,8.4 L1.1,6.6 Z'),
+        FigPart('M0,-11.5 C0.7,-10.2 0.75,-9 0,-8.5 C-0.75,-9 -0.7,-10.2 0,-11.5 Z', FigStyle.dark),
+        FigPart('M-0.75,4.4 L0.75,4.4 L0.75,7.4 L-0.75,7.4 Z', FigStyle.dark),
+        FigPart('M-0.22,-8 L0.22,-8 L0.22,3.6 L-0.22,3.6 Z', FigStyle.light),
+      ];
     case 'banderol': // «бандероль»: slim cruise missile, swept-back wings and tail
       return const [
         FigPart('M0,-12 C1,-10 1,-7 1,8 C1,9 -1,9 -1,8 C-1,-7 -1,-10 0,-12 Z'),
         FigPart('M-1,-1 L-7.5,4.2 L-7.5,5.2 L-1,2.4 L1,2.4 L7.5,5.2 L7.5,4.2 L1,-1 Z'),
         FigPart('M-1,6.2 L-3.6,8.8 L-3.6,9.6 L-1,8.3 L1,8.3 L3.6,9.6 L3.6,8.8 L1,6.2 Z'),
         FigPart('M0,-12 C0.6,-10.8 0.6,-9.8 0,-9.3 C-0.6,-9.8 -0.6,-10.8 0,-12 Z', FigStyle.dark),
+        FigPart('M-0.2,-8.6 L0.2,-8.6 L0.2,2 L-0.2,2 Z', FigStyle.light),
         FigPart('M-0.6,8.4 L0.6,8.4 L0.5,9.6 L-0.5,9.6 Z', FigStyle.light),
       ];
-    case 'missile': // cruise missile: long body, straight mid wings, cross tail
+    case 'balist': // ballistic (Іскандер): slender, sharp dark nose, rear fins, exhaust flame
       return const [
-        FigPart('M0,-11 C1.2,-8.8 1.2,-6 1.2,7.5 C1.2,8.6 -1.2,8.6 -1.2,7.5 C-1.2,-6 -1.2,-8.8 0,-11 Z'),
-        FigPart('M-8,0.2 L8,0.2 L8,1.5 L-8,1.5 Z'),
-        FigPart('M-3.4,5.4 L3.4,5.4 L3.4,6.8 L-3.4,6.8 Z'),
-        FigPart('M0,-11 C0.7,-9.6 0.7,-8.3 0,-7.9 C-0.7,-8.3 -0.7,-9.6 0,-11 Z', FigStyle.dark),
-        FigPart('M-0.9,6.6 L0.9,6.6 L0.7,8.7 L-0.7,8.7 Z', FigStyle.dark),
+        FigPart('M0,-12.5 C0.9,-10 1.15,-6 1.15,7.5 L1.15,9.6 L-1.15,9.6 L-1.15,7.5 C-1.15,-6 -0.9,-10 0,-12.5 Z'),
+        FigPart('M1.15,6.2 L3.1,9.9 L1.15,9.6 Z'),
+        FigPart('M-1.15,6.2 L-3.1,9.9 L-1.15,9.6 Z'),
+        FigPart('M0,-12.5 C0.7,-10.6 0.75,-9.2 0,-8.6 C-0.75,-9.2 -0.7,-10.6 0,-12.5 Z', FigStyle.dark),
+        FigPart('M-1.15,-3 L1.15,-3 L1.15,-2.3 L-1.15,-2.3 Z', FigStyle.dark),
+        FigPart('M-0.9,9.6 L0.9,9.6 L0,12.8 Z', FigStyle.light),
       ];
-    case 'balist': // ballistic: very long, sharp nose, no wings, small fins
+    case 'kab': // КАБ (ФАБ-500 + УМПК): fat bomb, long unfolded wings, X tail
       return const [
-        FigPart('M0,-12.5 C0.9,-9 1,-4 1,7 L2.7,10.6 L0.9,9 L0.9,10.7 L-0.9,10.7 L-0.9,9 L-2.7,10.6 L-1,7 C-1,-4 -0.9,-9 0,-12.5 Z'),
-        FigPart('M0,-12.5 C0.7,-10.6 0.7,-8.7 0,-8.1 C-0.7,-8.7 -0.7,-10.6 0,-12.5 Z', FigStyle.dark),
-        FigPart('M-0.28,-8 L0.28,-8 L0.28,7 L-0.28,7 Z', FigStyle.dark),
+        FigPart('M0,-7.2 C2.3,-6.6 2.4,-2 2,3 L1.4,5.6 L-1.4,5.6 L-2,3 C-2.4,-2 -2.3,-6.6 0,-7.2 Z'),
+        FigPart('M-0.6,-2.2 L-9.5,-0.6 L-9.5,0.4 L-0.6,-0.6 L0.6,-0.6 L9.5,0.4 L9.5,-0.6 L0.6,-2.2 Z'),
+        FigPart('M-1.3,5 L-3.8,7.6 L-2.8,8.2 L0,6.3 L2.8,8.2 L3.8,7.6 L1.3,5 Z'),
+        FigPart('M0,-7.2 C1.1,-6.4 1.1,-5.2 0,-4.8 C-1.1,-5.2 -1.1,-6.4 0,-7.2 Z', FigStyle.dark),
+        FigPart('M-2.05,0.8 L2.05,0.8 L2,1.5 L-2,1.5 Z', FigStyle.light),
       ];
-    case 'kab': // KAB (UMPK): short thick body, mid wings, boxy tail
+    case 'avia': // fighter-bomber (Су-34/35): long nose, swept wings, twin tails, tailplanes
       return const [
-        FigPart('M0,-6.6 C2.2,-6 2.2,-1 1.8,3.2 L1.8,5.2 L-1.8,5.2 L-1.8,3.2 C-2.2,-1 -2.2,-6 0,-6.6 Z'),
-        FigPart('M-5.6,-0.4 L5.6,-0.4 L5.6,0.9 L-5.6,0.9 Z'),
-        FigPart('M-2.8,4.6 L2.8,4.6 L2.3,7.1 L-2.3,7.1 Z'),
-        FigPart('M0,-6.6 C1,-5.6 1,-4.4 0,-4 C-1,-4.4 -1,-5.6 0,-6.6 Z', FigStyle.dark),
+        FigPart('M0,-11 L0.9,-8 L1.3,-4.5 L2.6,-2.5 L9.5,2.8 L9.5,4 L3,3.4 L2.6,6 L5.4,8.6 L5.4,9.4 L1.6,8.6 L1.2,9.6 L-1.2,9.6 L-1.6,8.6 L-5.4,9.4 L-5.4,8.6 L-2.6,6 L-3,3.4 L-9.5,4 L-9.5,2.8 L-2.6,-2.5 L-1.3,-4.5 L-0.9,-8 Z'),
+        FigPart('M1.6,4.4 L2.3,4.4 L2.6,7.6 L1.9,7.6 Z', FigStyle.dark),
+        FigPart('M-2.3,4.4 L-1.6,4.4 L-1.9,7.6 L-2.6,7.6 Z', FigStyle.dark),
+        FigPart('M-1.2,7.8 L1.2,7.8 L1.2,9.6 L-1.2,9.6 Z', FigStyle.dark),
+        FigPart('M0,-7.4 C0.7,-7.2 0.75,-5.4 0,-4.8 C-0.75,-5.4 -0.7,-7.2 0,-7.4 Z', FigStyle.light),
       ];
     case 'fpv': // FPV / quadcopter from above: body, X arms, four rotors, nose mark
       return const [
@@ -5421,23 +5456,19 @@ List<FigPart> figParts(String cat) {
         FigPart('M-4.1,7.5 L-5.5,8.9 L-7.5,8.9 L-8.9,7.5 L-8.9,5.5 L-7.5,4.1 L-5.5,4.1 L-4.1,5.5 Z', FigStyle.light),
         FigPart('M0,-4.6 L1.4,-2.6 L-1.4,-2.6 Z', FigStyle.dark),
       ];
-    case 'avia': // aircraft: fuselage, swept wings, tailplane, canopy
+    default: // unknown «ціль»: a marker diamond with a dark core
       return const [
-        FigPart('M0,-10.5 L1,-4.5 L1.3,6 L2.1,9.2 L0,8.2 L-2.1,9.2 L-1.3,6 L-1,-4.5 Z'),
-        FigPart('M-1.1,-1 L-9,5 L-9,6.3 L-1.1,3.1 L1.1,3.1 L9,6.3 L9,5 L1.1,-1 Z'),
-        FigPart('M-1,5.6 L-4.3,7.7 L-4.3,8.4 L-1,6.9 L1,6.9 L4.3,8.4 L4.3,7.7 L1,5.6 Z'),
-        FigPart('M0,-6 C0.8,-6 0.9,-3.6 0,-3.2 C-0.9,-3.6 -0.8,-6 0,-6 Z', FigStyle.light),
-      ];
-    default: // Shahed-136 / target: delta wing, fuselage, twin fins, pusher prop
-      return const [
-        FigPart('M0,-9.5 L1.6,-7.5 L9.5,5.2 L1.3,4.2 L1.3,5.4 L-1.3,5.4 L-1.3,4.2 L-9.5,5.2 L-1.6,-7.5 Z'),
-        FigPart('M-0.7,-8.6 L0.7,-8.6 L0.9,6.6 L-0.9,6.6 Z', FigStyle.dark),
-        FigPart('M1.3,4.4 L3.2,6.7 L1.3,5.4 Z'),
-        FigPart('M-1.3,4.4 L-3.2,6.7 L-1.3,5.4 Z'),
-        FigPart('M-2.5,6.9 L2.5,6.9 L2.5,7.35 L-2.5,7.35 Z', FigStyle.light),
+        FigPart('M0,-8.5 L7,0 L0,8.5 L-7,0 Z'),
+        FigPart('M0,-4.2 L3.5,0 L0,4.2 L-3.5,0 Z', FigStyle.dark),
+        FigPart('M0,-8.5 L1.4,-6.8 L-1.4,-6.8 Z', FigStyle.light),
       ];
   }
 }
+
+/// Which silhouette to draw for a target: the reactive shahed (Герань-3) has its
+/// own shape; everything else by category.
+String iconKey(String cat, String label) =>
+    cat == 'shahed' && label.toLowerCase().contains('реакт') ? 'shahed_jet' : cat;
 
 /// Fixed on-screen scale per category (ported from figScale()).
 double figScale(String cat) => switch (cat) {
@@ -5448,6 +5479,7 @@ double figScale(String cat) => switch (cat) {
       'fpv' => 0.85,
       'kab' => 0.98,
       'shahed' => 0.9,
+      'shahed_jet' => 0.92,
       _ => 0.8,
     };
 

@@ -122,7 +122,7 @@ class ThreatGlyph extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = cat;
-    final known = const ['shahed', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(c)
+    final known = const ['shahed', 'shahed_jet', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(c)
         ? c
         : 'other';
     return SizedBox(
@@ -173,7 +173,7 @@ class _GlyphPainter extends CustomPainter {
 /// Same look as the 2D map icons.
 void paintThreatIcon(Canvas canvas, Offset c, double size, String cat, Color color, double headingDeg,
     {Color? glow, double glowStrength = 0.6}) {
-  final known = const ['shahed', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(cat) ? cat : 'other';
+  final known = const ['shahed', 'shahed_jet', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(cat) ? cat : 'other';
   final parts = ThreatGlyph._parts(known);
   final k = size / 15 * figScale(known).clamp(0.8, 1.1);
   canvas.save();
@@ -215,7 +215,7 @@ void paintThreatIcon(Canvas canvas, Offset c, double size, String cat, Color col
 /// compass [headingDeg] — the same artwork as [ThreatGlyph] (3D map badges).
 void paintThreatGlyph(Canvas canvas, Offset c, double size, String cat,
     Color color, double headingDeg) {
-  final known = const ['shahed', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(cat)
+  final known = const ['shahed', 'shahed_jet', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(cat)
       ? cat
       : 'other';
   canvas.save();

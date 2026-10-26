@@ -137,7 +137,7 @@ class TargetCard extends StatelessWidget {
                   shape: BoxShape.circle,
                   border: Border.all(color: threat ? AppColors.threat : color, width: 2),
                 ),
-                child: ThreatGlyph(t.cat, size: 24, heading: m.heading),
+                child: ThreatGlyph(iconKey(t.cat, t.label), size: 24, heading: m.heading, color: color),
               ),
               const SizedBox(width: 12),
               Expanded(
