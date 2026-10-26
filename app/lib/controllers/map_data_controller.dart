@@ -53,6 +53,10 @@ class MapDataController extends ChangeNotifier {
   List<MapTarget> _launches = const [];
   List<MapTarget> get launches => _launches;
 
+  /// ✈ Зони тактичної авіації / загрози КАБ над областями — лише для карти й «Зараз».
+  List<MapTarget> _aviation = const [];
+  List<MapTarget> get aviation => _aviation;
+
   List<AnalyticsRow> _rows = const [];
   List<AnalyticsRow> get rows => _rows;
 
@@ -283,6 +287,30 @@ class MapDataController extends ChangeNotifier {
   String get launchedAt => _launchedAt;
   String get launchOrigins => _launchOrigins;
 
+  /// state.aviation → zone markers: a plane circling over the part of the oblast,
+  /// KAB range ring (~60 km) when a KAB threat was reported.
+  static List<MapTarget> _parseAviation(dynamic raw) {
+    if (raw is! List) return const [];
+    return [
+      for (final z in raw.whereType<Map>())
+        if (z['lat'] is num && z['lon'] is num)
+          MapTarget(
+            id: 'avia:${z['obl']}',
+            label: z['kab'] == true
+                ? (z['planes'] == true ? 'Тактична авіація · загроза КАБ' : 'Загроза КАБ')
+                : 'Тактична авіація',
+            cat: 'avia',
+            lat: (z['lat'] as num).toDouble(),
+            lon: (z['lon'] as num).toDouble(),
+            place: (z['name'] ?? '').toString(),
+            stageLabel: 'зона авіації',
+            seenMs: (z['ts'] as num?)?.toInt() ?? 0,
+            sources: (z['src'] as num?)?.toInt() ?? 0,
+            areaKm: z['kab'] == true ? 60 : 35,
+          ),
+    ];
+  }
+
   /// state.launches → forecast markers that fly the typical route from the launch site.
   static List<MapTarget> _parseLaunches(dynamic raw) {
     if (raw is! List) return const [];
@@ -349,6 +377,7 @@ class MapDataController extends ChangeNotifier {
     }
     _targets = t;
     _launches = _parseLaunches(data['launches']);
+    _aviation = _parseAviation(data['aviation']);
 
     final rawR = data['rows'];
     _rows = rawR is List

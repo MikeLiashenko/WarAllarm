@@ -63,6 +63,10 @@ class MapTarget {
   /// ціль): блідо на карті, не вмикає тривогу й не рахується в лічильниках.
   final bool forecast;
 
+  /// Зона (тактична авіація / загроза КАБ над областю): радіус, км. 0 — звичайна ціль.
+  /// Літак кружляє навколо точки; на карті — коло зони.
+  final double areaKm;
+
   /// Per-place distance, filled in by the situation logic.
   final double? pdist;
 
@@ -101,6 +105,7 @@ class MapTarget {
     this.down = false,
     this.route = const [],
     this.forecast = false,
+    this.areaKm = 0,
   });
 
   MapTarget withPdist(double? d) => MapTarget(
@@ -111,7 +116,7 @@ class MapTarget {
         sources: sources, srcs: srcs, kmh: kmh,
         from: from, to: to, fromName: fromName, fromGuess: fromGuess,
         t0: t0, launch: launch,
-        headingKnown: headingKnown, altM: altM, altNote: altNote, down: down, route: route, forecast: forecast,
+        headingKnown: headingKnown, altM: altM, altNote: altNote, down: down, route: route, forecast: forecast, areaKm: areaKm,
       );
 
   static List<List<double>> _route(dynamic v) => v is List

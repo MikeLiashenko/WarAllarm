@@ -25,6 +25,11 @@ void main() {
       MapTarget(id: 'a', label: 'Авіація', cat: 'avia', lat: 50.5, lon: 36.9, heading: 250, seenMs: now),
       MapTarget(id: 'f', label: 'ФПВ', cat: 'fpv', lat: 47.64, lon: 34.63, seenMs: now),
       MapTarget(id: 'p', label: 'Шахед', cat: 'shahed', lat: 50.45, lon: 31.5, heading: 260, kmh: 185, seenMs: now),
+      // Aviation zones: KAB threat over north Харківщина, aviation only over Сумщина.
+      MapTarget(id: 'avia:Kharkiv', label: 'Тактична авіація · загроза КАБ', cat: 'avia', lat: 50.08, lon: 36.48,
+          place: 'Харківщина', seenMs: now, areaKm: 60),
+      MapTarget(id: 'avia:Donets\'k', label: 'Загроза КАБ', cat: 'avia', lat: 48.73, lon: 37.56,
+          place: 'Донеччина', seenMs: now, areaKm: 60),
     ];
     final key = GlobalKey();
     await tester.binding.setSurfaceSize(const Size(1100, 760));

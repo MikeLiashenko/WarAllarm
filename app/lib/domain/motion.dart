@@ -176,6 +176,13 @@ TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
     );
   }
 
+  // Aviation zone: the plane circles ~15 km around the point (one lap ≈ 2 min).
+  if (t.areaKm > 0) {
+    final ang = frozen ? 0.0 : (nowMs / 333) % 360;
+    final p = moveKm(t.lat, t.lon, ang, 15);
+    return TargetMotion(lat: p.lat, lon: p.lon, heading: (ang + 90) % 360);
+  }
+
   var lat = t.lat, lon = t.lon;
   final quiet = math.max(0, nowMs - (t.seenMs == 0 ? nowMs : t.seenMs)) / 60000;
   final route = t.route;

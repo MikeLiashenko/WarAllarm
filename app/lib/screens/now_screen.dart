@@ -7,6 +7,7 @@ import '../controllers/map_data_controller.dart';
 import '../controllers/nav_controller.dart';
 import '../controllers/settings_controller.dart';
 import '../controllers/target_focus_controller.dart';
+import '../data/oblast_lookup.dart';
 import '../data/ukraine_geo.dart';
 import '../domain/alarm_forecast.dart';
 import '../domain/probability.dart';
@@ -301,6 +302,8 @@ class _NowScreenState extends State<NowScreen> {
   List<Widget> _eventNotices(Situation s) {
     final data = s.data;
     final eta = data.isDemo ? null : forecastAlarm(s.place, [...data.targets, ...data.launches]);
+    final myObls = {for (final p in s.scope) OblastLookup.instance.nameAt(p.lat, p.lon)};
+    final avZones = data.aviation.where((z) => myObls.contains(z.id.replaceFirst('avia:', ''))).toList();
     final list = <Widget>[
       if (data.isDemo)
         Notice(
@@ -317,6 +320,16 @@ class _NowScreenState extends State<NowScreen> {
           title: 'Тривога орієнтовно о ${_hhmm(eta.at)} · ${s.place.name}',
           body: '${fmtMinutes(eta.minutes)} — ${eta.via}'
               '${eta.forecast ? ' (прогноз пуску)' : ''}. Оцінка за типовими маршрутами шахедів.',
+        ),
+      // ✈ Тактична авіація / загроза КАБ над областю одного з моїх місць.
+      for (final z in avZones)
+        Notice(
+          color: z.label.contains('КАБ') ? kThreatColors['kab']! : kThreatColors['avia']!,
+          emoji: '✈',
+          title: '${z.label} — ${z.place}',
+          body: '${z.label.contains('КАБ') ? 'КАБ летить на 40–70 км від літака. ' : ''}'
+              'Будь ближче до укриття. Каналів: ${z.sources}'
+              '${z.seenMs > 0 ? ', оновлено ${_hhmm(DateTime.fromMillisecondsSinceEpoch(z.seenMs))}' : ''}.',
         ),
       // 🚀 Остання хвиля пусків (з каналу моніторів через бота).
       if (data.hasRecentLaunch)

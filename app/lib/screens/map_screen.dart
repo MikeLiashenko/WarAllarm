@@ -67,7 +67,7 @@ class _MapScreenState extends State<MapScreen> {
     final settings = context.watch<SettingsController>();
     final focus = context.watch<TargetFocusController>();
     // Real targets + launch groups flying their typical route (forecast, map only).
-    final mapTargets = [...data.targets, ...data.launches];
+    final mapTargets = [...data.targets, ...data.launches, ...data.aviation];
     final s = Situation(data, alarm, alerts);
     final selected = focus.id == null
         ? null

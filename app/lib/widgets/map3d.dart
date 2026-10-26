@@ -833,6 +833,28 @@ class _Map3DPainter extends CustomPainter {
       _text(canvas, 'пуск: ${t.fromName}', ground.o + const Offset(0, 16), 10.5, color, bold: true);
     }
 
+    // ✈ Aviation zone: KAB range circle (purple) / aviation (yellow) on the ground.
+    if (t.areaKm > 0) {
+      final kab = t.label.contains('КАБ');
+      final zc = kab ? kThreatColors['kab']! : color;
+      final pts = [
+        for (var a = 0; a <= 72; a++)
+          () {
+            final q = moveKm(t.lat, t.lon, a * 5.0, t.areaKm);
+            return cam.proj(q.lat, q.lon).o;
+          }(),
+      ];
+      final ring = Path()..addPolygon(pts, true);
+      canvas.drawPath(ring, Paint()..color = zc.withValues(alpha: 0.12));
+      for (var i = 0; i < pts.length - 1; i += 2) {
+        canvas.drawLine(pts[i], pts[i + 1], Paint()
+          ..strokeWidth = 1.5
+          ..color = zc.withValues(alpha: 0.85));
+      }
+      final c0 = cam.proj(t.lat, t.lon).o;
+      _text(canvas, kab ? 'загроза КАБ' : 'авіація', c0 + const Offset(0, 14), 10.5, zc, bold: true);
+    }
+
     if (m.isFlight) {
       final from = t.from!, to = t.to!;
       final kab = t.cat == 'kab';

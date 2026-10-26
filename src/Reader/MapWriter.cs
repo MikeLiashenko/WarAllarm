@@ -203,6 +203,8 @@ public static class MapWriter
         sb.Append(",\"air\":").Append(AirJson.Length > 0 ? AirJson : "{}");
         // 🚀 Групи пуску в польоті (оцінка): летять типовим маршрутом, доки канали не покажуть справжні цілі.
         sb.Append(",\"launches\":").Append(LaunchGroups.Json(now));
+        // ✈ Зони тактичної авіації / загрози КАБ над областями.
+        sb.Append(",\"aviation\":").Append(AviationFeed.Json(now));
         sb.Append(",\"night\":").Append(NightJson.Length > 0 ? NightJson : "{}");
         sb.Append(",\"sources\":").Append(SourcesJson.Length > 0 ? SourcesJson : "{}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.

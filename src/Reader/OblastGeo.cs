@@ -59,6 +59,9 @@ public static class OblastGeo
         ["Вінницька"] = "Vinnytsya", ["Волинська"] = "Volyn", ["Запорізька"] = "Zaporizhzhya", ["Житомирська"] = "Zhytomyr",
     };
 
+    /// Канонічна назва («Сумська») → англ. назва полігона («Sumy»), як у ключах тривог.
+    public static string? EnName(string canonOblast) => CanonToEn.TryGetValue(canonOblast.Trim(), out var en) ? en : null;
+
     /// Точка в потрібній ЧАСТИНІ області: «на півночі Сумщини» → північ полігона Сумщини.
     /// [side] — «півночі», «південному сході», «центрі»… (null — середина). null, якщо
     /// область невідома.

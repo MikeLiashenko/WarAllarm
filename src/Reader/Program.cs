@@ -270,6 +270,31 @@ if (args.Length >= 1 && args[0].Equals("move", StringComparison.OrdinalIgnoreCas
     return;
 }
 
+// ── ✈ Тест зон авіації / КАБ (оффлайн):   dotnet run -- aviation
+if (args.Length >= 1 && args[0].Equals("aviation", StringComparison.OrdinalIgnoreCase))
+{
+    var now0 = DateTime.Now;
+    foreach (var (ch, obl, post) in new[] {
+        ("sumyregion", "Сумська", "⚠️Активність СУ-34/35⚠️"),
+        ("monitor1654", "Харківська", "Активність тактичної авіації на північному напрямку⚠️"),
+        ("tlknewsua", "Харківська", "Повторные пуски КАБ на Приколотное/Бурлук⚠️"),
+        ("kpszsu", "", "🚀КАБи на схід Дніпропетровщини."),
+        ("kpszsu", "", "🚀КАБи на Донеччину."),
+        ("times_ukraina", "", "«Fire Point» використовує сало для захисту дронів: кабелі та камери"),
+        ("sumygo", "Сумська", "Сушкі кружляють на рф") })
+    {
+        bool hit = AviationFeed.Ingest(post, obl.Length > 0 ? new[] { obl } : Array.Empty<string>(), ch, now0);
+        Console.WriteLine($"{(hit ? "✈" : "·")} @{ch,-12} {post}");
+    }
+    Console.WriteLine("\nЗони:");
+    foreach (var z in AviationFeed.Active)
+        Console.WriteLine($"  {z.Canon,-16} частина: {z.Side ?? "—",-6} КАБ: {(z.Kab ? "так" : "ні"),-3} літаки: {(z.Planes ? "так" : "ні"),-3} каналів: {z.Srcs.Count}");
+    Console.WriteLine("\nstate.aviation: " + AviationFeed.Json(now0));
+    Console.WriteLine("\nБот, Суми: " + (AviationFeed.At(50.91, 34.80) is { } sz ? $"✈ {sz.Canon} (КАБ: {sz.Kab})" : "—"));
+    Console.WriteLine("Бот, Київ: " + (AviationFeed.At(50.37, 30.46) is { } kz ? $"✈ {kz.Canon}" : "— (нічого)"));
+    return;
+}
+
 // ── 📍 Де хаб поставить місце:   dotnet run -- place <назва> [область]
 if (args.Length >= 2 && args[0].Equals("place", StringComparison.OrdinalIgnoreCase))
 {
@@ -1188,6 +1213,9 @@ string StatusAt(double lat, double lon)
             sb.AppendLine($"• {ThreatTracker.Label(t)} — {km:0} км, {ThreatTracker.StageLabel(t.Stage)}"
                 + (t.LastPlace.Length > 0 ? $", біля {t.LastPlace}" : ""));
     }
+    if (AviationFeed.At(lat, lon) is { } av)
+        sb.AppendLine($"\n✈ {(av.Planes ? "Тактична авіація" : "Авіація")}{(av.Kab ? " · загроза КАБ" : "")} над твоєю областю"
+            + $" (востаннє {av.Last:HH:mm}, каналів: {av.Srcs.Count}). КАБ летить 40–70 км — тримайся укриття.");
     if (AlarmEtaText(lat, lon) is { } eta) sb.AppendLine("\n" + eta);
     return sb.ToString();
 }
@@ -1771,6 +1799,17 @@ async Task OnUpdate(Update update)
     // Канал лише з каталогу джерел (не з наших спец-парсерів) — хабу ПОТРІБНІ повтори
     // з різних каналів: саме так він підтверджує ціль. Дедуп для нього не робимо.
     var hubSrc = SourceCatalog.Get(uname);
+
+    // ✈ Тактична авіація / загроза КАБ → зона над областю (не з нашого ж новинного каналу).
+    if (!string.Equals(uname, channelName?.TrimStart('@'), StringComparison.OrdinalIgnoreCase))
+    {
+        var avFallback = hubSrc is { Tier: not SourceTier.Aggregator } hs ? hs.Oblasts
+            : uname != null && khChannels.Contains(uname) ? new[] { "Харківська" }
+            : uname != null && kyChannels.Contains(uname) ? new[] { "Київська" }
+            : Array.Empty<string>();
+        if (AviationFeed.Ingest(m.message, avFallback, src, DateTime.Now))
+            Ui.Line(ConsoleColor.DarkYellow, $"✈  [{time}] {src} · авіація/КАБ — {string.Join(", ", AviationFeed.Active.Select(z => z.Canon + (z.Kab ? " (КАБ)" : "")))}");
+    }
     bool hubOnly = hubSrc is not null && !isUaPrivate && !(uname != null &&
         ((WatchKharkiv && khChannels.Contains(uname)) || (WatchKyiv && kyChannels.Contains(uname))
          || uaChannels.Contains(uname) || powerChannels.Contains(uname) || launchChannels.Contains(uname)));

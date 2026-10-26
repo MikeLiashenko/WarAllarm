@@ -763,6 +763,30 @@ class _MapPainter extends CustomPainter {
             color, center: true, stroke: true, bold: true);
       }
 
+      // ✈ Aviation zone: KAB range circle (purple) / aviation (yellow) on the ground.
+      if (t.areaKm > 0) {
+        final kab = t.label.contains('КАБ');
+        final zc = kab ? kThreatColors['kab']! : color;
+        final ctr = _toScreen(fit.project(t.lon, t.lat));
+        final rPx = (ctr - _toScreen(fit.project(t.lon, t.lat + t.areaKm / 111))).distance;
+        canvas.drawCircle(
+            ctr,
+            rPx,
+            Paint()
+              ..shader = RadialGradient(colors: [zc.withValues(alpha: 0.18), zc.withValues(alpha: 0.04)])
+                  .createShader(Rect.fromCircle(center: ctr, radius: rPx)));
+        _dashedCircle(
+            canvas,
+            ctr,
+            rPx,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.4
+              ..color = zc.withValues(alpha: 0.8));
+        _text(canvas, kab ? 'загроза КАБ' : 'авіація', ctr + Offset(0, rPx + 10), 10.5, zc,
+            center: true, stroke: true, bold: true);
+      }
+
       if (mo.isFlight) {
         final a = _toScreen(fit.project(t.from![1], t.from![0]));
         final b = _toScreen(fit.project(t.to![1], t.to![0]));
