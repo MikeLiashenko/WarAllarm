@@ -47,6 +47,7 @@ public sealed class Threat
     // Курс із РЕАЛЬНОГО руху (дві точки / «з X на Y»), а не здогадка «вглиб країни».
     // Лише по такому курсу застосунок рухає маркер між постами.
     public bool HeadingKnown;
+    public (string name, double lat, double lon)? CourseTo; // «курсом на Полтаву» — куди летить за текстом
     // ── Висота / падіння з тексту каналу (Altitude.Parse) ──
     public double? AltM;                    // «на висоті ~100 м»
     public string? AltNote;                 // «низько» / «знижується» / «набирає висоту» / «падає» / «збито»
@@ -188,6 +189,9 @@ public sealed class ThreatTracker
         var g = ThreatGeo.Resolve(ev.City)
                 ?? (ev.City is { } cc ? PlaceFinder.Find(cc, ev.Oblast is { } eo ? new[] { eo } : Array.Empty<string>()) : null);
         bool approx = false;
+        // «на півночі Сумщини, курсом на Полтаву» — у тій частині області, а не над містом курсу.
+        if (g is null && ev.Toward is not null && ev.Oblast is not null && OblastGeo.PartPoint(ev.Oblast, ev.Side) is { } part)
+        { g = (OblastGeo.Region(part.lat, part.lon), part.lat, part.lon); approx = true; }
         if (g is null) { g = ThreatGeo.ResolveOblast(ev.Oblast); approx = true; }
         if (g is not { } gp) return null; // ни города, ни области — не ставим
         var pos = (gp.lat, gp.lon);
@@ -236,6 +240,14 @@ public sealed class ThreatTracker
             else if (!t.HeadingKnown)
                 t.Heading = ThreatGeo.Bearing(pos, ThreatGeo.UACenter); // лише для стрілки, не для руху
             ApplyCourse(t, ev, pos, isNew, now);
+            // Курс, названий у пості («курсом на Полтаву»), — справжній напрямок.
+            if (ev.Toward is { } tw && (ThreatGeo.Resolve(tw) ?? PlaceFinder.Find(tw, Array.Empty<string>())) is { } dest
+                && ThreatGeo.Km(pos, (dest.lat, dest.lon)) > 5)
+            {
+                t.Heading = ThreatGeo.Bearing(pos, (dest.lat, dest.lon));
+                t.HeadingKnown = true;
+                t.CourseTo = (dest.name, dest.lat, dest.lon);
+            }
             ApplyAltitude(t, ev.Alt ?? Altitude.Parse(ev.Raw), now);
             var prev = t.Stage; t.Stage = Classify(t);
             return new TrackUpdate(t, t.Stage != prev || isNew, TrackSound.None, Note(t));

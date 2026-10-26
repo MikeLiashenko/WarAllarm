@@ -136,8 +136,8 @@ public static class MapWriter
             // Типовий маршрут далі (на Київ / на захід, або вздовж реального курсу): застосунок веде
             // мітку ним між постами й зупиняє на межі області без тривоги. Новий пост — новий старт.
             if (t.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target && !t.Launch && !t.Down
-                && !t.LastPlace.EndsWith("(обл.)")
-                && TypicalRoutes.FromPosition(t.Pos!.Value, t.Heading, t.HeadingKnown) is { } rt)
+                && (!t.LastPlace.EndsWith("(обл.)") || t.CourseTo is not null)
+                && TypicalRoutes.ForTarget(t) is { } rt)
                 sb.Append(",\"route\":[").Append(string.Join(",", rt.Select(p => $"[{N(p.lat)},{N(p.lon)}]"))).Append(']');
             sb.Append(",\"seen\":").Append(((DateTimeOffset)t.LastUpdate).ToUnixTimeMilliseconds()); // час останнього спостереження позиції (для руху/екстраполяції)
             sb.Append(",\"place\":\"").Append(Esc(t.LastPlace)).Append('"');

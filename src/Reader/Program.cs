@@ -270,6 +270,25 @@ if (args.Length >= 1 && args[0].Equals("move", StringComparison.OrdinalIgnoreCas
     return;
 }
 
+// ── Тест «де ціль, а куди летить» (оффлайн):   dotnet run -- course
+if (args.Length >= 1 && args[0].Equals("course", StringComparison.OrdinalIgnoreCase))
+{
+    var tt = new ThreatTracker((HomeLat, HomeLon));
+    foreach (var post in new[] {
+        "БпЛА на півночі Сумщини, курсом на Полтаву", "Реактивний БпЛА з Сумщини курсом на Полтаву",
+        "БпЛА на південному сході Харківщини курсом на Лозову", "Шахед на Полтаву", "Шахед курсом на Миргород" })
+        foreach (var ev in ThreatParser.Parse(post))
+        {
+            var t = tt.IngestUa(ev, DateTime.Now)?.Threat;
+            if (t is null) { Console.WriteLine($"{post,-56} → (не на карту)"); continue; }
+            var rt = TypicalRoutes.ForTarget(t);
+            Console.WriteLine($"{post,-56} → {t.LastPlace} ({t.Pos!.Value.lat:0.00},{t.Pos!.Value.lon:0.00})"
+                + $" · курс {t.Heading:0}°{(t.HeadingKnown ? " реальний" : " здогадка")}{(t.CourseTo is { } c ? $" на {c.name}" : "")}"
+                + $" · маршрут: {(rt is null ? "—" : string.Join(" → ", rt.Skip(1).Select(NearestCity)))}");
+        }
+    return;
+}
+
 // ── Тест груп пуску (оффлайн): пост про пуск → групи летять типовим маршрутом;
 //    справжні цілі поблизу «забирають» дрони з групи.   dotnet run -- launches
 if (args.Length >= 1 && args[0].Equals("launches", StringComparison.OrdinalIgnoreCase))
@@ -1177,7 +1196,7 @@ string? AlarmEtaText(double lat, double lon)
     }
     foreach (var t in tracker.Active)
         if (t.Pos is { } tp && t.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target
-            && !t.Launch && !t.Down && !t.Approx && TypicalRoutes.FromPosition(tp, t.Heading, t.HeadingKnown) is { } r)
+            && !t.Launch && !t.Down && (!t.Approx || t.CourseTo is not null) && TypicalRoutes.ForTarget(t) is { } r)
             cands.Add((r, ThreatGeo.SpeedKmh(t.Kind, t.Ammo) * 0.85, $"{ThreatTracker.Label(t)} · зараз: {t.LastPlace}", false));
 
     (double min, string via, bool forecast)? best = null;

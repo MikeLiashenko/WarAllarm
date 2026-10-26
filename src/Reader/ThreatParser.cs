@@ -12,6 +12,10 @@ public enum RelLevel { None, Oblast, City }
 public record ThreatEvent(ThreatKind Kind, string? Oblast, string? City, int Count, string? Extra, string Raw, string? From = null)
 {
     public Altitude.Info? Alt { get; init; } // висота / «падає» з рядка поста (Altitude.Parse)
+    // «БпЛА на півночі Сумщини, курсом на Полтаву»: ціль у ЧАСТИНІ області (Oblast + Side),
+    // а Toward — лише куди летить. City тоді null — це не «ціль над Полтавою».
+    public string? Toward { get; init; }
+    public string? Side { get; init; }
 }
 
 public static class Geo
@@ -33,7 +37,10 @@ public static class Geo
     public static string? Canonical(string s)
     {
         s = s.Trim().TrimEnd(':').Trim().ToLowerInvariant();
-        return Oblasts.TryGetValue(s, out var v) ? v : null;
+        if (Oblasts.TryGetValue(s, out var v)) return v;
+        // Відмінки: «Сумщини», «на Сумщині», «Вінниччину» → «сумщина» / «вінниччина».
+        var nom = Regex.Replace(s, @"(щ|чч)(ини|ині|ину|иною)$", "$1ина");
+        return nom != s && Oblasts.TryGetValue(nom, out var v2) ? v2 : null;
     }
 }
 
@@ -151,6 +158,8 @@ public static class ThreatParser
                 body = line[(colon + 1)..].Trim();
                 pref = true;
             }
+            // «на півночі Сумщини, курсом на Полтаву» — одна ціль, кома тут не розділяє цілі.
+            if (ParseTargetLine(body, oblast) is { Toward: not null } whole) { events.Add(whole); continue; }
             if (pref || body.Contains(','))
             {
                 bool any = false;
@@ -192,6 +201,17 @@ public static class ThreatParser
         var weapon = WeaponCatalog.Match(line);
         var kind = weapon?.Kind ?? DetectKind(line);
         string? extra = weapon is { } w ? WeaponCatalog.DisplayName(w) : null;
+
+        // ПС ЗСУ / агрегатори: «БпЛА на півночі Сумщини, курсом на Полтаву», «з Сумщини курсом
+        // на Полтаву». Ціль — у названій частині області; місто після «курсом на» — лише
+        // напрямок. Раніше ціль ставили НА Полтаву, хоча вона ще над Сумщиною.
+        var course = Regex.Match(line, @"курс(?:ом)?\s*(?:на|—|–|-|:)?\s*([А-ЯІЇЄҐ][\w'’ʼ\-]+(?:\s+[А-ЯІЇЄҐ][\w'’ʼ\-]+)?)");
+        var where = Regex.Match(line,
+            @"\b(?:на|в|у|з|із|зі|над)\s+(?:(півночі|півдні|сході|заході|центрі|північному\s+сході|північному\s+заході|південному\s+сході|південному\s+заході|північному-сході|південному-сході)\s+)?([\w'’ʼ\-]+(?:щин|ччин)\w*)",
+            RegexOptions.IgnoreCase);
+        if (course.Success && where.Success && where.Index < course.Index && Geo.Canonical(where.Groups[2].Value) is { } inObl)
+            return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, inObl, null, count, extra, line, FromOf(line))
+            { Toward = course.Groups[1].Value.Trim(), Side = where.Groups[1].Success ? where.Groups[1].Value : null };
 
         var mn = Regex.Match(line, @"\bна\s+(.+)$", RegexOptions.IgnoreCase);
         // Інші звороти регіональних моніторів: «курс Куликівка», «в районі Ірпеня»,

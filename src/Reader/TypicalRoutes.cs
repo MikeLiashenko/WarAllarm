@@ -75,6 +75,20 @@ public static class TypicalRoutes
         return route.Count > 1 ? route : null;
     }
 
+    /// Маршрут цілі: якщо в пості названо, куди вона летить («курсом на Полтаву»), — спершу
+    /// туди, далі типовим шляхом від того міста; інакше — від поточної точки.
+    public static List<(double lat, double lon)>? ForTarget(Threat t)
+    {
+        if (t.Pos is not { } p) return null;
+        if (t.CourseTo is { } c)
+        {
+            var route = new List<(double lat, double lon)> { p, (c.lat, c.lon) };
+            if (FromPosition((c.lat, c.lon), null, false) is { } further) route.AddRange(further.Skip(1));
+            return route;
+        }
+        return FromPosition(p, t.Heading, t.HeadingKnown);
+    }
+
     static (double lat, double lon) Move((double lat, double lon) p, double brg, double km)
     {
         double r = brg * Math.PI / 180;

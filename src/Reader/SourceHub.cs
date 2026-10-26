@@ -374,7 +374,7 @@ public sealed class SourceHub
             if (ballisticText && events.All(e => e.City == null))
                 return new(HubVerdict.Ballistic, [], clean.Replace("\n", " "));
             bool bare = false;
-            if (events.All(e => e.City == null) && src.Oblasts.Length > 0)
+            if (events.All(e => e.City == null && e.Toward == null) && src.Oblasts.Length > 0)
             {
                 var b = BareNames(clean, src, at);
                 if (b.Count > 0) { events = b; bare = true; }
@@ -390,11 +390,20 @@ public sealed class SourceHub
             int placed = 0;
             foreach (var ev in events)
             {
-                if (ev.City is null) continue;
-                var region = ev.Oblast is { } eo ? new[] { eo } : src.Oblasts;
-                // «на Запорізьку область», «на Харківщині» — рівень області, не точка.
-                if (PlaceFinder.OblastWord.IsMatch(ev.City)) { st.Unplaced++; continue; }
-                var g = PlaceFinder.Find(CityCore(ev.City), region, bare ? 160 : 260);
+                (string name, double lat, double lon)? g;
+                if (ev.City is null)
+                {
+                    // «на півночі Сумщини, курсом на Полтаву» — точка в цій частині області.
+                    if (ev.Toward is null || ev.Oblast is null || OblastGeo.PartPoint(ev.Oblast, ev.Side) is not { } part) continue;
+                    g = (OblastGeo.Region(part.lat, part.lon) + " (обл.)", part.lat, part.lon);
+                }
+                else
+                {
+                    var region = ev.Oblast is { } eo ? new[] { eo } : src.Oblasts;
+                    // «на Запорізьку область», «на Харківщині» — рівень області, не точка.
+                    if (PlaceFinder.OblastWord.IsMatch(ev.City)) { st.Unplaced++; continue; }
+                    g = PlaceFinder.Find(CityCore(ev.City), region, bare ? 160 : 260);
+                }
                 if (g is not { } gp) { st.Unplaced++; continue; }
                 placed++;
                 var pos = (gp.lat, gp.lon);

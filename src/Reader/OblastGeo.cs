@@ -47,6 +47,40 @@ public static class OblastGeo
         return en != null && ShortUa.TryGetValue(en, out var s) ? s : "Україна";
     }
 
+    // Канонічна назва з ThreatParser («Сумська») → полігон.
+    static readonly Dictionary<string, string> CanonToEn = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Черкаська"] = "Cherkasy", ["Чернігівська"] = "Chernihiv", ["Чернівецька"] = "Chernivtsi",
+        ["Дніпропетровська"] = "Dnipropetrovs'k", ["Донецька"] = "Donets'k", ["Івано-Франківська"] = "Ivano-Frankivs'k",
+        ["Харківська"] = "Kharkiv", ["Херсонська"] = "Kherson", ["Хмельницька"] = "Khmel'nyts'kyy",
+        ["Київська"] = "Kiev", ["Кіровоградська"] = "Kirovohrad", ["Луганська"] = "Luhans'k", ["Львівська"] = "L'viv",
+        ["Миколаївська"] = "Mykolayiv", ["Одеська"] = "Odessa", ["Полтавська"] = "Poltava", ["Рівненська"] = "Rivne",
+        ["Сумська"] = "Sumy", ["Тернопільська"] = "Ternopil'", ["Закарпатська"] = "Transcarpathia",
+        ["Вінницька"] = "Vinnytsya", ["Волинська"] = "Volyn", ["Запорізька"] = "Zaporizhzhya", ["Житомирська"] = "Zhytomyr",
+    };
+
+    /// Точка в потрібній ЧАСТИНІ області: «на півночі Сумщини» → північ полігона Сумщини.
+    /// [side] — «півночі», «південному сході», «центрі»… (null — середина). null, якщо
+    /// область невідома.
+    public static (double lat, double lon)? PartPoint(string canonOblast, string? side)
+    {
+        if (!CanonToEn.TryGetValue(canonOblast.Trim(), out var en)) return null;
+        var poly = Polys.FirstOrDefault(p => p.en == en);
+        if (poly.rings is null) return null;
+        var outer = poly.rings[0];
+        double minLat = outer.Min(p => p[1]), maxLat = outer.Max(p => p[1]);
+        double minLon = outer.Min(p => p[0]), maxLon = outer.Max(p => p[0]);
+        double fy = 0.5, fx = 0.5;
+        var s = (side ?? "").ToLowerInvariant();
+        if (s.Contains("півн")) fy = 0.8; else if (s.Contains("півд")) fy = 0.2;
+        if (s.Contains("сх")) fx = 0.8; else if (s.Contains("зах")) fx = 0.2;
+        var pt = (lat: minLat + (maxLat - minLat) * fy, lon: minLon + (maxLon - minLon) * fx);
+        // Неопукла область: точка поза полігоном — тягнемо до середини, доки не всередині.
+        for (int i = 0; i < 6 && NameAt(pt.lat, pt.lon) != en; i++)
+            pt = ((pt.lat + (minLat + maxLat) / 2) / 2, (pt.lon + (minLon + maxLon) / 2) / 2);
+        return pt;
+    }
+
     /// Англ. назва полігона області для точки (збіг із ключами OfficialAlerts.ByPolygon),
     /// або null поза межами. Для звірки «чи є офіційна тривога в області цілі».
     public static string? PolyName(double lat, double lon) => NameAt(lat, lon);
