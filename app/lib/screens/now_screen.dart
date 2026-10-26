@@ -783,7 +783,7 @@ class _TargetRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final threat = !stale && (kRank[t.stage] ?? 0) >= 3;
-    final kind = kThreatColors[t.cat] ?? kThreatColors['other']!;
+    final kind = threatColor(t.cat, t.label);
     final dist = t.pdist ?? t.distKm;
     // Tap → open the map riding along with this target.
     return InkWell(
@@ -812,7 +812,7 @@ class _TargetRow extends StatelessWidget {
                     width: 1.6,
                   ),
                 ),
-                child: ThreatGlyph(iconKey(t.cat, t.label), size: 20, heading: t.heading ?? 0, color: kThreatColors[t.cat]),
+                child: ThreatGlyph(iconKey(t.cat, t.label), size: 20, heading: t.heading ?? 0, color: kind),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -927,13 +927,14 @@ class ThreatCounters extends StatelessWidget {
   /// card already shows freshness.
   final bool onSurface;
 
-  static const _order = ['shahed', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv', 'other'];
+  static const _order = ['shahed', 'shahed_jet', 'banderol', 'missile', 'balist', 'kab', 'avia', 'fpv', 'other'];
 
   @override
   Widget build(BuildContext context) {
     final counts = <String, int>{};
     for (final t in data.targets) {
-      final k = _order.contains(t.cat) ? t.cat : 'other';
+      final key = iconKey(t.cat, t.label); // реактивні шахеди — окремий лічильник
+      final k = _order.contains(key) ? key : 'other';
       counts[k] = (counts[k] ?? 0) + t.amount;
     }
     final stale = data.stale;

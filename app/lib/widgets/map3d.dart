@@ -808,7 +808,7 @@ class _Map3DPainter extends CustomPainter {
   double _height(MapTarget t, TargetMotion m) => targetHeight3d(t, m, cam.hScale);
 
   void _target(Canvas canvas, MapTarget t, TargetMotion m) {
-    final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
+    final color = threatColor(t.cat, t.label);
     final z = _height(t, m);
     final ground = cam.proj(m.lat, m.lon);
     final air = cam.proj(m.lat, m.lon, z);

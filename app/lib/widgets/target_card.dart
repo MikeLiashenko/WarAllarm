@@ -76,7 +76,7 @@ class TargetCard extends StatelessWidget {
 
     final now = DateTime.now().millisecondsSinceEpoch;
     final m = motionOf(t, now);
-    final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
+    final color = threatColor(t.cat, t.label);
     final km = kmBetween(m.lat, m.lon, place.lat, place.lon);
     final kmh = speedKmPerMin(t) * 60;
     final threat = (kRank[t.stage] ?? 0) >= 3;

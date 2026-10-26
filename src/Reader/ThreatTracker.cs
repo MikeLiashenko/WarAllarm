@@ -553,6 +553,8 @@ public sealed class ThreatTracker
             _                    => "Ціль",
         };
         if (t.Ammo is { } b0 && b0.Contains("бандерол", StringComparison.OrdinalIgnoreCase)) return "Бандероль";
+        // Реактивний шахед — окремий засіб (500 км/год), а не «Шахед (реакт. шахед)».
+        if (t.Kind == ThreatKind.Drone && (t.Ammo ?? "").Contains("реакт", StringComparison.OrdinalIgnoreCase)) return "Реактивний шахед";
         return t.Ammo is { Length: > 0 } a ? $"{name} ({a})" : name;
     }
 

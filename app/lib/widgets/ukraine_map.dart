@@ -739,7 +739,7 @@ class _MapPainter extends CustomPainter {
     for (final t in targets) {
       final key = iconKey(t.cat, t.label); // reactive shahed has its own silhouette
       final cat = figs.containsKey(key) ? key : figs.containsKey(t.cat) ? t.cat : 'other';
-      final color = kThreatColors[t.cat] ?? kThreatColors['other']!;
+      final color = threatColor(t.cat, t.label);
       // Where it is now: flight From→To (ballistic/КАБ), launch ring, or
       // dead-reckoning along the heading — all at the weapon's real speed.
       final mo = motionOf(t, nowMs, frozen: dimTargets);

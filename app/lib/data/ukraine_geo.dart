@@ -5356,7 +5356,7 @@ const Map<String, Color> kThreatColors = {
   'missile': Color(0xFFFF7A3C),
   'banderol': Color(0xFFFF5FA2), // «бандероль» — крилата, але своя іконка (летить часто)
   'shahed': Color(0xFFFF9F45),
-  'shahed_jet': Color(0xFFFF9F45), // реактивний шахед — та сама гама, своя форма
+  'shahed_jet': Color(0xFF3EA8FF), // реактивний шахед — електрично-синій, щоб не плутати зі звичайним
   'kab': Color(0xFFC77DFF),
   'avia': Color(0xFFF4C550),
   'fpv': Color(0xFF2DD4BF), // ФПВ / Ланцет / Молнія біля фронту
@@ -5469,6 +5469,10 @@ List<FigPart> figParts(String cat) {
 /// own shape; everything else by category.
 String iconKey(String cat, String label) =>
     cat == 'shahed' && label.toLowerCase().contains('реакт') ? 'shahed_jet' : cat;
+
+/// Colour of a target on the maps / cards: by its icon (the reactive shahed is blue).
+Color threatColor(String cat, String label) =>
+    kThreatColors[iconKey(cat, label)] ?? kThreatColors[cat] ?? kThreatColors['other']!;
 
 /// Fixed on-screen scale per category (ported from figScale()).
 double figScale(String cat) => switch (cat) {
