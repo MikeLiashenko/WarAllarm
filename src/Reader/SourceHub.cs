@@ -548,7 +548,9 @@ public sealed class SourceHub
             // «◼️ 12:16 с. Мар'ївка», «◻️ Марганецька ТГ», «🟡 Херсонський район — повітряна тривога»
             seg = Regex.Replace(seg, @"^[^\p{L}\d]+", "");                            // маркери / емодзі
             seg = Regex.Replace(seg, @"^\d{1,2}[:.]\d{2}\s*", "");                   // час
-            seg = Regex.Split(seg, @"\s+[—–-]\s+")[0].Trim();                         // «… — повітряна тривога»
+            // «Херсонський район — повітряна тривога» → до тире; але «Бандероль — Оболонь» — місце ПІСЛЯ тире.
+            if (!Regex.IsMatch(seg, @"^(?:бандерол|ракет|крилат|ціл[ьі]|каб|шахед|реактив|рбпла|бпла)", RegexOptions.IgnoreCase))
+                seg = Regex.Split(seg, @"\s+[—–-]\s+")[0].Trim();
             seg = Regex.Replace(seg, @"^(?:с\.|с-ще|смт\.?|сел\.|м\.|село|селище|місто)\s*", "", RegexOptions.IgnoreCase);
             seg = Regex.Replace(seg, @"\s+(?:тг|громада|територіальна громада)$", "", RegexOptions.IgnoreCase);
             int count = 1;

@@ -158,7 +158,9 @@ TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
       lon: from[1],
       heading: t.heading ?? 0,
       launch: true,
-      reachKm: frozen ? 0 : math.min(1200, spd * mins),
+      // Ballistic «where it could reach» — huge after a few minutes and meaningless:
+      // cap it (the Reader drops the ring once a target is named).
+      reachKm: frozen ? 0 : math.min(t.cat == 'balist' ? 450 : 1200, spd * mins),
     );
   }
 

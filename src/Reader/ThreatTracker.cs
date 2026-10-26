@@ -217,6 +217,10 @@ public sealed class ThreatTracker
                 isNew = false;
             }
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
+            // Балістика з названою ціллю — коло «куди могла долетіти» з місця пуску вже зайве.
+            if (isNew && ev.Kind == ThreatKind.Ballistic && !approx)
+                foreach (var k in _active.Where(a => a.Value.Launch && a.Value.Kind == ThreatKind.Ballistic).Select(a => a.Key).ToList())
+                    _active.Remove(k);
             // Нова справжня ціль-дрон — це, ймовірно, частина групи пуску, що летіла сюди: забираємо з групи.
             if (isNew && !approx && ev.Kind is ThreatKind.Drone or ThreatKind.Target)
                 LaunchGroups.Absorb(pos, Math.Max(1, ev.Count), now);
@@ -277,7 +281,13 @@ public sealed class ThreatTracker
                 else { t.From = LaunchSites.KabRelease(pos); t.FromName = "скид КАБ"; }
                 t.FromGuess = true;
             }
-            if (isNew) t.LaunchAt = now;
+            // Коли канал пише «балістика на Київ», ракета вже на спуску: моніторів чути за
+            // ~1 хв до удару. Тож політ «стартував» раніше — на ~80 % шляху (КАБ — ~50 %).
+            // Інакше мітка вилітала з Брянська в момент поста й «летіла» ще після вибухів.
+            if (isNew)
+                t.LaunchAt = t.FlightMin is { } fm0
+                    ? now - TimeSpan.FromMinutes(fm0 * (t.Kind == ThreatKind.Ballistic ? 0.8 : 0.5))
+                    : now;
         }
         // Відомо, звідки летить, а траєкторії з місць ще нема — курс від From до цілі.
         if (t.From is { } fr && t.Trail.Count < 2)
@@ -396,8 +406,8 @@ public sealed class ThreatTracker
             // розрахункового прильоту; «лише пуск» без цілі — через 8 хв.
             var flown = now - t.LaunchAt;
             bool landed = t.Kind is ThreatKind.Ballistic or ThreatKind.Kab && !t.Launch
-                          && t.FlightMin is { } fm && flown > TimeSpan.FromMinutes(fm + 3);
-            bool launchOver = t.Launch && flown > TimeSpan.FromMinutes(8);
+                          && t.FlightMin is { } fm && flown > TimeSpan.FromMinutes(fm + 1); // долетіла — за хвилину знімаємо
+            bool launchOver = t.Launch && flown > TimeSpan.FromMinutes(t.Kind == ThreatKind.Ballistic ? 4 : 8); // балістика — лічені хвилини
             if ((t.Stage is TrackStage.Impact or TrackStage.Passed && age > TimeSpan.FromSeconds(90))
                 || age > goneAfter || landed || launchOver)
             {
@@ -474,6 +484,20 @@ public sealed class ThreatTracker
         var obl = clears.Select(e => e.Oblast!).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return SweepWhere(t => t.Zone == "UA" && t.Oblast != null && obl.Contains(t.Oblast)).Count;
     }
+
+    // «Чисто по балістиці», «По балістичних ракетах чисто», «по швидкісним чисто»,
+    // «Наразі чисто по швидкісним цілям», «Отбой по баллистике».
+    public static readonly Regex BallisticClear = new(
+        @"(?:чисто|відбій|отбой)\W{0,3}(?:\w+\s+){0,2}?(?:по\s+)?(?:балісти|баллист|швидкісн|скоростн)|(?:балісти|баллист|швидкісн|скоростн)\w*\W{0,3}(?:\w+\s+){0,2}?(?:чисто|відбій|отбой)",
+        RegexOptions.IgnoreCase);
+
+    // «Чисто по балістиці / по швидкісних» — уся балістика (і кола пусків) знімається одразу.
+    public int ClearBallistic() => SweepWhere(t => t.Kind == ThreatKind.Ballistic).Count;
+
+    // «Вибухи у Києві» — балістика, що летіла туди (ціль ≤ 40 км), уже долетіла.
+    public int LandBallistic((double lat, double lon) at, DateTime now) =>
+        SweepWhere(t => t.Kind == ThreatKind.Ballistic && !t.Launch && t.To is { } to && ThreatGeo.Km(to, at) <= 40
+                        && now - t.FirstSeen > TimeSpan.FromSeconds(20)).Count;
 
     // Погасить цели по произвольному условию (например, все цели в области, где офиц. отбой).
     public List<Threat> SweepWhere(Func<Threat, bool> pred)

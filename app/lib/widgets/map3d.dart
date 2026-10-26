@@ -102,7 +102,9 @@ List<_Poly> _parsePolys(String json) {
   ];
 }
 
-double _apogee(double distKm) => math.min(240.0, 40 + distKm * 0.35);
+// Display apogee of a ballistic arc (exaggerated heights): kept moderate — a tall
+// arc towered over the whole north of the map during a real attack.
+double _apogee(double distKm) => math.min(90.0, 25 + distKm * 0.15);
 
 /// Display height of a target (km, exaggerated), shrinking with zoom ([hs]).
 double targetHeight3d(MapTarget t, TargetMotion m, double hs) {

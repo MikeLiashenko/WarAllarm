@@ -195,7 +195,7 @@ public static class ThreatParser
     {
         int count = 1;
         // Кол-во в начале строки: «3 БпЛА» и множитель «2х/2x/2×» (формат @rozvidkaneba).
-        var mc = Regex.Match(line, @"^\s*(\d+)\s*[хx×]?\s*(?=\S)");
+        var mc = Regex.Match(line, @"^\s*(?:(?:і\s+)?ще\s+|\+\s*)?(\d+)\s*[хx×]?\s*(?=\S)", RegexOptions.IgnoreCase); // «Ще 2 балістики», «+3»
         if (mc.Success) int.TryParse(mc.Groups[1].Value, out count);
 
         // Конкретний засіб зі словника («Х-101», «Іскандер-М», «реактивний», «ціль»…) —

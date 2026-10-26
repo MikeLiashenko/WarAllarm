@@ -270,6 +270,27 @@ if (args.Length >= 1 && args[0].Equals("move", StringComparison.OrdinalIgnoreCas
     return;
 }
 
+// ── ☄ Тест балістики (оффлайн): пуск → «на Київ» → вибухи → чисто.   dotnet run -- ballistic
+if (args.Length >= 1 && args[0].Equals("ballistic", StringComparison.OrdinalIgnoreCase))
+{
+    var tt = new ThreatTracker((HomeLat, HomeLon));
+    var t0 = DateTime.Now;
+    void Show(string what) => Console.WriteLine($"{what,-34} → " + (tt.Active.Count == 0 ? "(порожньо)" : string.Join("; ", tt.Active.Select(x =>
+        $"{ThreatTracker.Label(x)} ×{x.Amount}{(x.Launch ? " [коло пуску]" : "")}{(x.FlightMin is { } fm ? $" · політ {fm:0.0} хв, пройдено {Math.Min(1, (t0 - x.LaunchAt).TotalMinutes / fm):P0}" : "")}"))));
+    foreach (var ev in ThreatParser.Parse("Балістика з Брянська")) tt.IngestLaunch(ev, t0);
+    Show("пуск з Брянська");
+    foreach (var ev in ThreatParser.Parse("4х Балістики на Київ")) tt.IngestUa(ev, t0);
+    Show("«4х Балістики на Київ»");
+    t0 = t0.AddSeconds(40);
+    Console.WriteLine($"{"«Вибухи у Києві» (+40 с)",-34} → знято: {tt.LandBallistic(ThreatGeo.Resolve("Києві") is { } kp ? (kp.lat, kp.lon) : TypicalRoutes.Kyiv, t0)}");
+    foreach (var ev in ThreatParser.Parse("Ще 2 балістики на Київ")) tt.IngestUa(ev, t0);
+    Show("«Ще 2 балістики на Київ»");
+    Console.WriteLine($"{"«По балістиці чисто»",-34} → збіг: {ThreatTracker.BallisticClear.IsMatch("По балістиці чисто, ймовірні повторні виходи.")}, знято: {tt.ClearBallistic()}");
+    foreach (var s in new[] { "Чисто по балістиці", "по швидкісним чисто 📡", "Наразі чисто по швидкісним цілям", "По балістичних ракетах чисто.", "Загроза балістики триває", "4х Балістики на Київ" })
+        Console.WriteLine($"   «{s}» → відбій балістики: {ThreatTracker.BallisticClear.IsMatch(s)}");
+    return;
+}
+
 // ── ✈ Тест зон авіації / КАБ (оффлайн):   dotnet run -- aviation
 if (args.Length >= 1 && args[0].Equals("aviation", StringComparison.OrdinalIgnoreCase))
 {
@@ -1809,6 +1830,21 @@ async Task OnUpdate(Update update)
             : Array.Empty<string>();
         if (AviationFeed.Ingest(m.message, avFallback, src, DateTime.Now))
             Ui.Line(ConsoleColor.DarkYellow, $"✈  [{time}] {src} · авіація/КАБ — {string.Join(", ", AviationFeed.Active.Select(z => z.Canon + (z.Kab ? " (КАБ)" : "")))}");
+
+        // ☄ Балістика летить лічені хвилини: «чисто по балістиці» знімає її одразу,
+        // «вибухи у Києві» — та, що летіла туди, уже долетіла (не «летить» після вибухів).
+        int ballGone = 0;
+        if (ThreatTracker.BallisticClear.IsMatch(m.message)) ballGone = tracker.ClearBallistic();
+        else if (Regex.Match(m.message, @"вибух\w*\s+(?:у|в|на)\s+([А-ЯІЇЄҐ][\p{L}'’ʼ\-]+)") is { Success: true } vm
+                 && ThreatGeo.Resolve(vm.Groups[1].Value) is { } vp)
+            ballGone = tracker.LandBallistic((vp.lat, vp.lon), DateTime.Now);
+        else if (Regex.IsMatch(m.message, @"вибух\w*\s+(?:у|в)\s+столиц", RegexOptions.IgnoreCase))
+            ballGone = tracker.LandBallistic(TypicalRoutes.Kyiv, DateTime.Now);
+        if (ballGone > 0)
+        {
+            Ui.Line(ConsoleColor.Green, $"☄  [{time}] {src} · балістику знято з карти: {ballGone}");
+            MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+        }
     }
     bool hubOnly = hubSrc is not null && !isUaPrivate && !(uname != null &&
         ((WatchKharkiv && khChannels.Contains(uname)) || (WatchKyiv && kyChannels.Contains(uname))
