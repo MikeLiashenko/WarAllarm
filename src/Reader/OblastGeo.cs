@@ -127,3 +127,43 @@ public static class OblastGeo
         return outp;
     }
 }
+
+// ── Райони: «Херсонський район — дронова загроза» → центр району ─────────────
+// Назви районів повторюються в різних областях («Дніпровський район»), тож беремо той,
+// що найближче до області каналу.
+public static class RaionGeo
+{
+    static readonly List<(string name, string core, double lat, double lon)> Centres = Parse();
+
+    static string Core(string w) => System.Text.RegularExpressions.Regex.Replace(w.ToLowerInvariant().Replace('’', '\'').Replace('ʼ', '\''), "[аеєиіїоуюяь]+$", "");
+
+    static List<(string, string, double, double)> Parse()
+    {
+        var res = new List<(string, string, double, double)>();
+        using var doc = JsonDocument.Parse(MapRaions.Json);
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            var name = el.GetProperty("n").GetString() ?? "";
+            var ring = el.GetProperty("r")[0];
+            double sx = 0, sy = 0; int n = 0;
+            foreach (var p in ring.EnumerateArray()) { sx += p[0].GetDouble(); sy += p[1].GetDouble(); n++; }
+            if (n == 0) continue;
+            res.Add((name, Core(name.Split(' ')[0]), sy / n, sx / n));
+        }
+        return res;
+    }
+
+    /// «Херсонський район» / «Херсонському районі» → (назва, центр). null — не район / не знайдено.
+    public static (string name, double lat, double lon)? Find(string q, IReadOnlyCollection<string> region)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(q.Trim(), @"^([\p{L}'’ʼ\-]+)\s+район\w*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        var core = Core(m.Groups[1].Value);
+        if (core.Length < 4) return null;
+        // «херсонськ» (називний) vs «херсонськ» (місцевий «Херсонському») — основа однакова.
+        var cands = Centres.Where(c => c.core == core || (core.Length >= 6 && c.core.StartsWith(core[..^1]))).ToList();
+        if (cands.Count == 0) return null;
+        var best = cands.OrderBy(c => PlaceFinder.RegionKm((c.lat, c.lon), region) ?? 0).First();
+        return (best.name, best.lat, best.lon);
+    }
+}

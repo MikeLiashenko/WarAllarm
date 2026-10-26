@@ -59,7 +59,7 @@ public static class SourceCatalog
         ["dnepr_nagladach"] = R("dnepr_nagladach", "Дніпропетровська"),
         ["dnipro_alerts"] = R("dnipro_alerts", "Дніпропетровська"),
         ["Radar_Dnipra"] = R("Radar_Dnipra", "Дніпропетровська"),
-        ["nikalert"] = R("nikalert", "Миколаївська"),
+        ["nikalert"] = R("nikalert", "Дніпропетровська"), // Нікополь (не Миколаїв!): Марганецька, Покровська ТГ, Мар'ївка
         ["shovnebi"] = R("shovnebi"),
         ["kramatorsk_radar"] = R("kramatorsk_radar", "Донецька"),
         ["operatyvnyi_donbas"] = R("operatyvnyi_donbas", "Донецька"),
@@ -256,6 +256,8 @@ public static class PlaceFinder
         if (q.Length < 3) return null;
         // Область замість міста («маневрує на Харківщині») — це не точка.
         if (Geo.Canonical(q) is not null || OblastWord.IsMatch(q)) return null;
+        // «Херсонський район» (офіційні районні тривоги: «дронова загроза») → центр району.
+        if (RaionGeo.Find(q, region) is { } rg) return rg;
         if (Aliases.FirstOrDefault(a => Regex.IsMatch(q, a.re)) is { name: not null } al)
             return (al.name, al.lat, al.lon);
 
@@ -512,6 +514,8 @@ public sealed class SourceHub
     // → «Курисово», «Біла Церква» лишається (до 3 слів з великої літери).
     static string CityCore(string raw)
     {
+        // «Херсонський район» — назва району цілком (інакше лишалось би «Херсонський»).
+        if (Regex.IsMatch(raw.Trim(), @"^\S+\s+район\w*$", RegexOptions.IgnoreCase)) return raw.Trim();
         var s = Regex.Replace(raw.Trim(), @"^(?:сектор|район|напрямок|місто|м\.|смт|село|с\.|сел\.)\s+", "", RegexOptions.IgnoreCase);
         var words = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length <= 1 || !char.IsUpper(words[0][0])) return s;
@@ -529,7 +533,10 @@ public sealed class SourceHub
     List<ThreatEvent> BareNames(string clean, SourceInfo src, DateTime at)
     {
         var res = new List<ThreatEvent>();
-        if (clean.Length > 120) return res; // довгий текст — це не «голий» список місць
+        // Довгий текст — це не «голий» список місць. Крім списків-«маркерів» (@nikalert:
+        // «◼️ 12:16 с. Мар'ївка ⏎ ◻️ 12:16 Марганецька ТГ»).
+        bool bullets = Regex.IsMatch(clean, "[◼◻▪•▫■□]");
+        if (clean.Length > (bullets ? 400 : 120)) return res;
         var kind = ThreatKind.Target; string? extra = null;
         // Тип, названий У САМОМУ пості («Бандероль — Оболонь», «2 бандеролі: Дарниця»), важливіший
         // за тип попереднього поста каналу: раніше бандероль після «реактивні» ставала реактивним дроном.
@@ -538,6 +545,12 @@ public sealed class SourceHub
         foreach (var seg0 in Regex.Split(clean, @"[,;\n]+"))
         {
             var seg = seg0.Trim();
+            // «◼️ 12:16 с. Мар'ївка», «◻️ Марганецька ТГ», «🟡 Херсонський район — повітряна тривога»
+            seg = Regex.Replace(seg, @"^[^\p{L}\d]+", "");                            // маркери / емодзі
+            seg = Regex.Replace(seg, @"^\d{1,2}[:.]\d{2}\s*", "");                   // час
+            seg = Regex.Split(seg, @"\s+[—–-]\s+")[0].Trim();                         // «… — повітряна тривога»
+            seg = Regex.Replace(seg, @"^(?:с\.|с-ще|смт\.?|сел\.|м\.|село|селище|місто)\s*", "", RegexOptions.IgnoreCase);
+            seg = Regex.Replace(seg, @"\s+(?:тг|громада|територіальна громада)$", "", RegexOptions.IgnoreCase);
             int count = 1;
             var m = Regex.Match(seg, @"^(\d+)\s*[хx×]?\s+");
             if (m.Success) { int.TryParse(m.Groups[1].Value, out count); seg = seg[m.Length..]; }

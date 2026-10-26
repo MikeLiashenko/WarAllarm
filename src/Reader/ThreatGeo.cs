@@ -303,7 +303,8 @@ public static class ThreatGeo
             ThreatKind.Missile   => a.Contains("циркон") ? 6000 : 800, // крылатая ~800, Циркон гиперзвук
             ThreatKind.Kab       => 600,              // планирующая авиабомба (~600 км/ч)
             ThreatKind.Aviation  => 900,              // носитель уже пускает КАБ
-            ThreatKind.Drone     => a.Contains("реакт") || a.Contains("молн") ? 500 : 180, // шахед 180, реактивный ~500
+            ThreatKind.Drone     => a.Contains("реакт") ? 500 : 180, // шахед 180, реактивный ~500
+            ThreatKind.Fpv       => 100,                                // ФПВ / Ланцет / Молнія
             _                    => 250,
         };
     }

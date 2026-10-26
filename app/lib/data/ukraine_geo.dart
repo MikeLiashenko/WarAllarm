@@ -5357,6 +5357,7 @@ const Map<String, Color> kThreatColors = {
   'shahed': Color(0xFFFF9F45),
   'kab': Color(0xFFC77DFF),
   'avia': Color(0xFFF4C550),
+  'fpv': Color(0xFF2DD4BF), // ФПВ / Ланцет / Молнія біля фронту
   'other': Color(0xFF9AA6B2),
 };
 
@@ -5400,6 +5401,17 @@ List<FigPart> figParts(String cat) {
         FigPart('M-2.8,4.6 L2.8,4.6 L2.3,7.1 L-2.3,7.1 Z'),
         FigPart('M0,-6.6 C1,-5.6 1,-4.4 0,-4 C-1,-4.4 -1,-5.6 0,-6.6 Z', FigStyle.dark),
       ];
+    case 'fpv': // FPV / quadcopter from above: body, X arms, four rotors, nose mark
+      return const [
+        FigPart('M-7,-6 L-6,-7 L7,6 L6,7 Z'),
+        FigPart('M6,-7 L7,-6 L-6,7 L-7,6 Z'),
+        FigPart('M-2,-2.6 L2,-2.6 L2,2.6 L-2,2.6 Z'),
+        FigPart('M8.9,-5.5 L7.5,-4.1 L5.5,-4.1 L4.1,-5.5 L4.1,-7.5 L5.5,-8.9 L7.5,-8.9 L8.9,-7.5 Z', FigStyle.light),
+        FigPart('M-4.1,-5.5 L-5.5,-4.1 L-7.5,-4.1 L-8.9,-5.5 L-8.9,-7.5 L-7.5,-8.9 L-5.5,-8.9 L-4.1,-7.5 Z', FigStyle.light),
+        FigPart('M8.9,7.5 L7.5,8.9 L5.5,8.9 L4.1,7.5 L4.1,5.5 L5.5,4.1 L7.5,4.1 L8.9,5.5 Z', FigStyle.light),
+        FigPart('M-4.1,7.5 L-5.5,8.9 L-7.5,8.9 L-8.9,7.5 L-8.9,5.5 L-7.5,4.1 L-5.5,4.1 L-4.1,5.5 Z', FigStyle.light),
+        FigPart('M0,-4.6 L1.4,-2.6 L-1.4,-2.6 Z', FigStyle.dark),
+      ];
     case 'avia': // aircraft: fuselage, swept wings, tailplane, canopy
       return const [
         FigPart('M0,-10.5 L1,-4.5 L1.3,6 L2.1,9.2 L0,8.2 L-2.1,9.2 L-1.3,6 L-1,-4.5 Z'),
@@ -5423,6 +5435,7 @@ double figScale(String cat) => switch (cat) {
       'balist' => 1.12,
       'missile' => 1.0,
       'avia' => 1.0,
+      'fpv' => 0.85,
       'kab' => 0.98,
       'shahed' => 0.9,
       _ => 0.8,
@@ -5434,6 +5447,7 @@ double speedKmMin(String cat, String label) {
   if (cat == 'balist') return 67;
   if (cat == 'missile') return a.contains('циркон') ? 100 : 13;
   if (cat == 'kab') return 15;
+  if (cat == 'fpv') return 1.7; // ФПВ ~100 км/год
   return a.contains('реакт') ? 8 : 3; // shahed ~3 km/min
 }
 

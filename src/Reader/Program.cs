@@ -1076,6 +1076,7 @@ static string KindShort(ThreatKind k) => k switch
     ThreatKind.Kab => "КАБ",
     ThreatKind.Aviation => "Авіація",
     ThreatKind.Drone => "БпЛА",
+    ThreatKind.Fpv => "ФПВ",
     _ => "Ціль",
 };
 

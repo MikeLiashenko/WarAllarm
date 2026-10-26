@@ -217,7 +217,7 @@ class UkraineMapState extends State<UkraineMap>
   }
 
   Map<String, List<_FigPathPart>> _buildFigs() {
-    final cats = ['shahed', 'missile', 'balist', 'kab', 'avia', 'other'];
+    final cats = ['shahed', 'missile', 'balist', 'kab', 'avia', 'fpv', 'other'];
     final out = <String, List<_FigPathPart>>{};
     for (final c in cats) {
       out[c] = figParts(c)

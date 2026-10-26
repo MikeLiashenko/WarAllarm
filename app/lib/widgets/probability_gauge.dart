@@ -205,6 +205,7 @@ class ProbabilityGauge extends StatelessWidget {
         'balist' => 'Балістика',
         'kab' => 'КАБ',
         'avia' => 'Авіація',
+        'fpv' => 'ФПВ',
         _ => 'Інше',
       };
 }

@@ -74,15 +74,17 @@ public static class WeaponCatalog
         W("реакт. шахед", ThreatKind.Drone, 500, @"герань[\s-]?3|shahed[\s-]?238|шахед[\s-]?238|реактивн|рбпла|\bреакт(?:ив|\.)|шаболд"),
         W("Shahed-136", ThreatKind.Drone, 185, @"(?:shahed|шахед|шахід)[\s-]?136|(?:герань|geran)[\s-]?2"),
         W("Shahed-131", ThreatKind.Drone, 180, @"(?:shahed|шахед|шахід)[\s-]?131|(?:герань|geran)[\s-]?1(?!\d)"),
-        W("Ланцет", ThreatKind.Drone, 110, @"ланцет|lancet"),
+        W("Ланцет", ThreatKind.Fpv, 110, @"ланцет|lancet"),
         W("КУБ-БЛА", ThreatKind.Drone, 130, @"куб[\s-]?бла|kub[\s-]?bla"),
         W("Гербера (приманка)", ThreatKind.Drone, 160, @"гербер|gerbera", decoy: true),
         W("Пародія (приманка)", ThreatKind.Drone, 160, @"пароді|пароди", decoy: true),
         W("Італмас", ThreatKind.Drone, 180, @"італмас|итальмас|italmas"),
-        W("Молнія", ThreatKind.Drone, 120, @"молні[яї]|молни[яи]"),
+        W("Молнія", ThreatKind.Fpv, 120, @"молні[яї]|молни[яи]"),
+        // ФПВ біля фронту — до загального «шахед», бо «FPV-дрон» містить «дрон».
+        W("~фпв", ThreatKind.Fpv, 90, @"(?<![a-zа-яіїєґ])(?:fpv|фпв)(?![a-zа-яіїєґ])|дронов\w* загроз|дронов\w* небезпек"),
 
         // ── Загальні класи без конкретної назви («~» — на карті лише тип) ──
-        W("~шахед", ThreatKind.Drone, 185, @"шахед|шахід|shahed|геран|geran|мопед|бпла|дрон|\bfpv\b"),
+        W("~шахед", ThreatKind.Drone, 185, @"шахед|шахід|shahed|геран|geran|мопед|бпла|дрон"),
         W("~балістика", ThreatKind.Ballistic, 4000, @"балісти|баллист"),
         W("~каб", ThreatKind.Kab, 600, @"(?<![a-zа-яіїєґ])каб(?:и|ів|ами|ом|а)?(?![a-zа-яіїєґ])|умпк|(?<![a-zа-яіїєґ])фаб"),
         W("~ракета", ThreatKind.Missile, 800, @"ракет"),

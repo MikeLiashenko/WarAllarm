@@ -376,6 +376,7 @@ public static class MapImage
         ThreatKind.Kab => new SKColor(0xC7, 0x7D, 0xFF),
         ThreatKind.Aviation => new SKColor(0xF4, 0xC5, 0x50),
         ThreatKind.Drone => new SKColor(0xFF, 0x9F, 0x45),
+        ThreatKind.Fpv => new SKColor(0x2D, 0xD4, 0xBF),
         _ => new SKColor(0x9A, 0xA6, 0xB2),
     };
 
@@ -386,6 +387,7 @@ public static class MapImage
         ThreatKind.Kab => "kab",
         ThreatKind.Aviation => "avia",
         ThreatKind.Drone => "shahed",
+        ThreatKind.Fpv => "fpv",
         _ => "shahed",
     };
 

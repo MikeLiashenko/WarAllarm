@@ -4,7 +4,9 @@ using System.Text.RegularExpressions;
 // Превращает свободный текст поста в список структурированных угроз (ThreatEvent).
 // Пишется под формат @raketa_trevoga; легко расширяется на другие каналы.
 
-public enum ThreatKind { Drone, Kab, Ballistic, Missile, Aviation, Target, AllClear, Unknown }
+// Fpv — ФПВ / Ланцет / Молнія / «дронова загроза» біля фронту: окремо від шахедів
+// (короткий радіус, не летять на Київ, але небезпечні прифронтовим громадам).
+public enum ThreatKind { Drone, Kab, Ballistic, Missile, Aviation, Target, AllClear, Unknown, Fpv }
 
 public enum RelLevel { None, Oblast, City }
 
@@ -255,6 +257,7 @@ public static class ThreatParser
     public static string Icon(ThreatKind k) => k switch
     {
         ThreatKind.Drone => "🛩",
+        ThreatKind.Fpv => "🪖",
         ThreatKind.Kab => "💣",
         ThreatKind.Ballistic => "🚀",
         ThreatKind.Missile => "🚀",

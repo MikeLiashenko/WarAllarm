@@ -16,6 +16,7 @@ class MapLegend extends StatelessWidget {
     ('balist', 'Балістика'),
     ('kab', 'КАБ'),
     ('avia', 'Авіація'),
+    ('fpv', 'ФПВ / Ланцет біля фронту'),
     ('other', 'Інше / тип невідомий'),
   ];
 

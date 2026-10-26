@@ -35,6 +35,9 @@ void main() {
       MapTarget(id: 'launch:L1', label: 'Пуск з Орел (реакт.)', cat: 'shahed', lat: 52.97, lon: 36.06, amount: 8,
           kmh: 185, seenMs: now - 70 * 60000, forecast: true,
           route: const [[52.97, 36.06], [51.87, 33.48], [51.05, 31.89], [50.51, 30.79], [50.45, 30.52]]),
+      // FPV threats at the front (Нікопольщина, Херсон).
+      MapTarget(id: 'f1', label: 'ФПВ', cat: 'fpv', lat: 47.64, lon: 34.63, seenMs: now),
+      MapTarget(id: 'f2', label: 'ФПВ (Ланцет)', cat: 'fpv', lat: 46.64, lon: 32.61, seenMs: now),
       MapTarget(id: 'd1', label: 'Шахед', cat: 'shahed', lat: 49.59, lon: 34.55, kmh: 185, seenMs: now - 8 * 60000,
           route: const [[49.59, 34.55], [50.45, 30.52]]),
     ];

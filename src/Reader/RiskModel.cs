@@ -26,6 +26,7 @@ public static class RiskModel
         ThreatKind.Kab => "kab",
         ThreatKind.Aviation => "avia",
         ThreatKind.Drone => "shahed",
+        ThreatKind.Fpv => "fpv",
         _ => "other",
     };
 

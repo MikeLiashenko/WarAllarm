@@ -118,6 +118,7 @@ double targetHeight3d(MapTarget t, TargetMotion m, double hs) {
     'shahed' => 12,
     'missile' => 9,
     'avia' => 30,
+    'fpv' => 3, // ФПВ літають низько
     'kab' => 40,
     'balist' => 20,
     _ => 10,

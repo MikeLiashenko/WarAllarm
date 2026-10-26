@@ -384,7 +384,8 @@ public sealed class ThreatTracker
             // нальоту (баг «з'явилось і за хвилину зникло», 12.09).
             // Точне місто з всеукр. каналу — 10 хв (рухома ціль тепер оновлюється сама,
             // а не лишає «примару»); лише «центр області» — 15 хв.
-            var goneAfter = t.LastPlace.EndsWith("(обл.)") ? TimeSpan.FromMinutes(15)
+            var goneAfter = t.Kind == ThreatKind.Fpv ? TimeSpan.FromMinutes(12) // ФПВ-загроза громаді — коротка, канали повторюють
+                          : t.LastPlace.EndsWith("(обл.)") ? TimeSpan.FromMinutes(15)
                           : t.Zone == "UA" ? TimeSpan.FromMinutes(10)
                           : TimeSpan.FromMinutes(4);
             // «Падає» — 3 хв без нових згадок, і ціль знімаємо.
@@ -547,6 +548,7 @@ public sealed class ThreatTracker
             ThreatKind.Missile   => "Ракета",
             ThreatKind.Kab       => "КАБ",
             ThreatKind.Drone     => "Шахед",
+            ThreatKind.Fpv       => "ФПВ",
             ThreatKind.Aviation  => "Авіація",
             _                    => "Ціль",
         };

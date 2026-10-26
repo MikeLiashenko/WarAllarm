@@ -50,6 +50,7 @@ public static class MapWriter
         ThreatKind.Ballistic => 2,
         ThreatKind.Kab => 3,
         ThreatKind.Aviation => 4,
+        ThreatKind.Fpv => 6,
         _ => 5,
     };
 
@@ -219,6 +220,7 @@ public static class MapWriter
         ThreatKind.Kab       => "kab",
         ThreatKind.Aviation  => "avia",
         ThreatKind.Drone     => "shahed",
+        ThreatKind.Fpv       => "fpv",
         _                    => "other",
     };
 

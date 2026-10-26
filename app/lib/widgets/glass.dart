@@ -122,7 +122,7 @@ class ThreatGlyph extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = cat;
-    final known = const ['shahed', 'missile', 'balist', 'kab', 'avia'].contains(c)
+    final known = const ['shahed', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(c)
         ? c
         : 'other';
     return SizedBox(
@@ -172,7 +172,7 @@ class _GlyphPainter extends CustomPainter {
 /// compass [headingDeg] — the same artwork as [ThreatGlyph] (3D map badges).
 void paintThreatGlyph(Canvas canvas, Offset c, double size, String cat,
     Color color, double headingDeg) {
-  final known = const ['shahed', 'missile', 'balist', 'kab', 'avia'].contains(cat)
+  final known = const ['shahed', 'missile', 'balist', 'kab', 'avia', 'fpv'].contains(cat)
       ? cat
       : 'other';
   canvas.save();

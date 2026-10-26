@@ -914,7 +914,7 @@ class ThreatCounters extends StatelessWidget {
   /// card already shows freshness.
   final bool onSurface;
 
-  static const _order = ['shahed', 'missile', 'balist', 'kab', 'avia', 'other'];
+  static const _order = ['shahed', 'missile', 'balist', 'kab', 'avia', 'fpv', 'other'];
 
   @override
   Widget build(BuildContext context) {
