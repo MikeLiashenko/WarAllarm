@@ -681,7 +681,7 @@ async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNi
     List<Channel> ByNames(IEnumerable<string> names)
     {
         var set = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
-        return mine.Where(c => c.username is { Length: > 0 } u && set.Contains(u)).ToList();
+        return mine.Where(c => ChannelNames(c).Any(set.Contains)).ToList();
     }
     var radars = ByNames(uaChannels);
     radars.AddRange(mine.Where(c => privateUaIds.Contains(c.ID)));
@@ -689,7 +689,7 @@ async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNi
     var launch = ByNames(launchChannels);
     launch.AddRange(mine.Where(c => IsLaunchTitle(c.title) && !launch.Contains(c)));
     // Не підписаний (немає в діалогах) — пробуємо разово через ResolveUsername.
-    foreach (var n in launchChannels.Where(n => !launch.Any(c => string.Equals(c.username, n, StringComparison.OrdinalIgnoreCase))))
+    foreach (var n in launchChannels.Where(n => !launch.Any(c => ChannelNames(c).Contains(n, StringComparer.OrdinalIgnoreCase))))
         try { if ((await client.Contacts_ResolveUsername(n)).chats.Values.OfType<Channel>().FirstOrDefault() is { } c) launch.Add(c); }
         catch (Exception ex) { Console.Error.WriteLine($"⚠ night: @{n} — {ex.Message}"); }
     if (launch.Count == 0) Console.Error.WriteLine("⚠ night: канал пусків не знайдено в діалогах — підпишись на @" + string.Join(", @", launchChannels));
@@ -698,7 +698,7 @@ async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNi
     var offNames = cfg.GetValueOrDefault("official_channels", "kpszsu")
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(s => s.TrimStart('@')).ToList();
     var official = ByNames(offNames);
-    foreach (var n in offNames.Where(n => !official.Any(c => string.Equals(c.username, n, StringComparison.OrdinalIgnoreCase))))
+    foreach (var n in offNames.Where(n => !official.Any(c => ChannelNames(c).Contains(n, StringComparer.OrdinalIgnoreCase))))
         try { if ((await client.Contacts_ResolveUsername(n)).chats.Values.OfType<Channel>().FirstOrDefault() is { } c) official.Add(c); }
         catch (Exception ex) { Console.Error.WriteLine($"⚠ night: @{n} — {ex.Message}"); }
     var d = await NightSummary.Collect(client, radars, kyiv, launch, official, from, to);
@@ -1607,8 +1607,7 @@ manager = client.WithUpdateManager(OnUpdate, "updates.state");
 try
 {
     var subscribed = (await client.Messages_GetAllDialogs()).chats.Values
-        .OfType<Channel>().Where(c => c.username is { Length: > 0 })
-        .Select(c => c.username).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        .OfType<Channel>().SelectMany(ChannelNames).ToHashSet(StringComparer.OrdinalIgnoreCase);
     var needed = new List<string>();
     if (WatchKharkiv) needed.AddRange(khChannels);
     if (WatchKyiv) needed.AddRange(kyChannels);
@@ -1628,7 +1627,12 @@ try
         $"📡 Джерела: підписаний на {SourceCatalog.All.Count - hubMissing.Count}/{SourceCatalog.All.Count}"
         + (hubMissing.Count > 0 ? " · без підписки: " + string.Join(", ", hubMissing.Take(12).Select(u => "@" + u)) + (hubMissing.Count > 12 ? "…" : "") : ""));
 }
-catch { /* проверка не критична */ }
+catch (Exception ex)
+{
+    // Не критично, але мовчати не можна: інакше «не підписаний» висить зі старого запуску.
+    Ui.Line(ConsoleColor.DarkYellow, "⚠ Перевірка підписок не вдалась: " + ex.Message);
+    try { File.WriteAllText("sources_check_error.txt", $"{DateTime.Now:HH:mm:ss} {ex}"); } catch { }
+}
 
 Console.WriteLine();
 Ui.Line(ConsoleColor.Cyan, "═══════════ WarAlarm · живий режим ═══════════");
@@ -1718,6 +1722,23 @@ _ = Task.Run(async () =>
 
 await Task.Delay(-1); // работаем, пока не закроют
 
+// Усі @username каналу: основний + додаткові («t.me/kyiv_airdef, also @ua994»). Telegram може
+// віддати основним ІНШЕ ім'я, і тоді канал із каталогу не впізнавався (ні підписка, ні пости).
+static IEnumerable<string> ChannelNames(Channel c)
+{
+    if (c.username is { Length: > 0 } u) yield return u;
+    if (c.usernames is { } all) foreach (var n in all) if (n.username is { Length: > 0 } x && x != c.username) yield return x;
+}
+
+// Ім'я каналу для розбору: те, під яким ми його знаємо (каталог / наші списки), інакше основне.
+string? KnownName(Channel c)
+{
+    var names = ChannelNames(c).ToList();
+    return names.FirstOrDefault(n => SourceCatalog.Get(n) is not null || khChannels.Contains(n) || kyChannels.Contains(n)
+                                     || uaChannels.Contains(n) || powerChannels.Contains(n) || launchChannels.Contains(n))
+           ?? names.FirstOrDefault();
+}
+
 // ── обработка одного обновления ──────────────────────────────────────────────
 async Task OnUpdate(Update update)
 {
@@ -1729,7 +1750,7 @@ async Task OnUpdate(Update update)
     // username + ID канала-источника (ID нужен для приватных каналов без username)
     string? uname = null, title = null;
     long chId = 0;
-    try { if (manager.UserOrChat(m.peer_id) is Channel ch) { uname = ch.username; title = ch.title; chId = ch.ID; } }
+    try { if (manager.UserOrChat(m.peer_id) is Channel ch) { uname = KnownName(ch); title = ch.title; chId = ch.ID; } }
     catch { /* неизвестный peer — пропустим */ }
     bool isUaPrivate = chId != 0 && privateUaIds.Contains(chId); // приватна Розвідка неба тощо
     var src = uname is { Length: > 0 } ? "@" + uname : title ?? "?";
