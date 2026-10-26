@@ -211,6 +211,9 @@ public sealed class ThreatTracker
                 isNew = false;
             }
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
+            // Нова справжня ціль-дрон — це, ймовірно, частина групи пуску, що летіла сюди: забираємо з групи.
+            if (isNew && !approx && ev.Kind is ThreatKind.Drone or ThreatKind.Target)
+                LaunchGroups.Absorb(pos, Math.Max(1, ev.Count), now);
             var prevPos = t!.Pos;
             t!.Ammo ??= ev.Extra;
             t.Oblast = ev.Oblast ?? t.Oblast;

@@ -811,6 +811,21 @@ class _MapPainter extends CustomPainter {
         }
       }
 
+      // Where it is expected to go: launch groups always, the picked target too.
+      if (t.route.length >= 2 && (t.forecast || t.id == selectedId) && !dimTargets) {
+        final ahead = routeAhead(t.route, lat, lon);
+        for (var i = 1; i < ahead.length; i++) {
+          _dashedLine(
+              canvas,
+              _toScreen(fit.project(ahead[i - 1][1], ahead[i - 1][0])),
+              _toScreen(fit.project(ahead[i][1], ahead[i][0])),
+              Paint()
+                ..color = color.withValues(alpha: t.forecast ? 0.35 : 0.55)
+                ..strokeWidth = 1.2
+                ..strokeCap = StrokeCap.round);
+        }
+      }
+
       // Trail.
       if (t.trail.length > 1) {
         final path = Path();
@@ -848,7 +863,7 @@ class _MapPainter extends CustomPainter {
       }
 
       // Badge — faded once nothing new was heard for a while.
-      final faded = mo.quietMin >= 6 || t.down;
+      final faded = mo.quietMin >= 6 || t.down || t.forecast;
       if (faded) canvas.saveLayer(Rect.fromCircle(center: scr, radius: badgeR + 8), Paint()..color = Colors.white.withValues(alpha: 0.5));
       canvas.drawCircle(scr, badgeR + 3,
           Paint()
@@ -864,6 +879,10 @@ class _MapPainter extends CustomPainter {
             ..color = color);
       _drawFig(canvas, scr, mo.heading, cat, color, badgeR / 12.5);
       if (faded) canvas.restore();
+      if (t.forecast) {
+        _text(canvas, 'прогноз', scr + Offset(0, badgeR + 11), 9.5, color.withValues(alpha: 0.85),
+            center: true, stroke: true, bold: true);
+      }
       if (t.down) {
         _text(canvas, t.altNote.isEmpty ? 'падає' : t.altNote, scr + Offset(0, badgeR + 12), 10.5,
             const Color(0xFFFF6B5E), center: true, stroke: true, bold: true);

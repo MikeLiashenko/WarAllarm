@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../domain/motion.dart';
 import '../models/analytics_row.dart';
 import '../models/map_target.dart';
 import '../models/monitored_place.dart';
@@ -47,6 +48,10 @@ class MapDataController extends ChangeNotifier {
 
   List<MapTarget> _targets = const [];
   List<MapTarget> get targets => _targets;
+
+  /// 🚀 Групи пуску в польоті (прогноз типовим маршрутом) — лише для карти.
+  List<MapTarget> _launches = const [];
+  List<MapTarget> get launches => _launches;
 
   List<AnalyticsRow> _rows = const [];
   List<AnalyticsRow> get rows => _rows;
@@ -278,6 +283,42 @@ class MapDataController extends ChangeNotifier {
   String get launchedAt => _launchedAt;
   String get launchOrigins => _launchOrigins;
 
+  /// state.launches → forecast markers that fly the typical route from the launch site.
+  static List<MapTarget> _parseLaunches(dynamic raw) {
+    if (raw is! List) return const [];
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final out = <MapTarget>[];
+    for (final g in raw.whereType<Map>()) {
+      final route = [
+        for (final p in (g['route'] as List? ?? const []))
+          if (p is List && p.length == 2) [(p[0] as num).toDouble(), (p[1] as num).toDouble()],
+      ];
+      if (route.length < 2) continue;
+      final kmh = (g['kmh'] as num?)?.toDouble() ?? 157;
+      final t0 = (g['t0'] as num?)?.toInt() ?? now;
+      // Already at the end of the route — nothing left to show.
+      if (kmh * (now - t0) / 3600000 >= routeLengthKm(route)) continue;
+      final reactive = g['reactive'] == true;
+      final origin = (g['origin'] ?? '').toString();
+      out.add(MapTarget(
+        id: 'launch:${g['id']}',
+        label: 'Пуск з $origin${reactive ? ' (реакт.)' : ''}',
+        cat: 'shahed',
+        lat: route[0][0],
+        lon: route[0][1],
+        amount: (g['n'] as num?)?.toInt() ?? 1,
+        kmh: kmh / 0.85, // motion flies routes at 85 % of the weapon speed
+        seenMs: t0,
+        route: route,
+        forecast: true,
+        place: 'прогноз',
+        stageLabel: 'прогноз маршруту',
+        fromName: origin,
+      ));
+    }
+    return out;
+  }
+
   // --- RTDB ingest ------------------------------------------------------------
 
   void _onData(dynamic data) {
@@ -307,6 +348,7 @@ class MapDataController extends ChangeNotifier {
       });
     }
     _targets = t;
+    _launches = _parseLaunches(data['launches']);
 
     final rawR = data['rows'];
     _rows = rawR is List

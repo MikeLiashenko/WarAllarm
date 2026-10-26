@@ -133,6 +133,12 @@ public static class MapWriter
             if (t.AltM is { } am) sb.Append(",\"alt\":").Append(N(am));
             if (t.AltNote is { Length: > 0 } an) sb.Append(",\"altNote\":\"").Append(Esc(an)).Append('"');
             if (t.Down) sb.Append(",\"down\":true");
+            // Типовий маршрут далі (на Київ / на захід, або вздовж реального курсу): застосунок веде
+            // мітку ним між постами й зупиняє на межі області без тривоги. Новий пост — новий старт.
+            if (t.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target && !t.Launch && !t.Down
+                && !t.LastPlace.EndsWith("(обл.)")
+                && TypicalRoutes.FromPosition(t.Pos!.Value, t.Heading, t.HeadingKnown) is { } rt)
+                sb.Append(",\"route\":[").Append(string.Join(",", rt.Select(p => $"[{N(p.lat)},{N(p.lon)}]"))).Append(']');
             sb.Append(",\"seen\":").Append(((DateTimeOffset)t.LastUpdate).ToUnixTimeMilliseconds()); // час останнього спостереження позиції (для руху/екстраполяції)
             sb.Append(",\"place\":\"").Append(Esc(t.LastPlace)).Append('"');
             // approx = ціль лише на рівні області (без точної точки/курсу). Для таких НЕ малюємо
@@ -194,6 +200,8 @@ public static class MapWriter
         sb.Append(",\"power\":").Append(PowerJson.Length > 0 ? PowerJson : "{}");
         // 🚀 Пуски / оцінка «у повітрі» від моніторів.
         sb.Append(",\"air\":").Append(AirJson.Length > 0 ? AirJson : "{}");
+        // 🚀 Групи пуску в польоті (оцінка): летять типовим маршрутом, доки канали не покажуть справжні цілі.
+        sb.Append(",\"launches\":").Append(LaunchGroups.Json(now));
         sb.Append(",\"night\":").Append(NightJson.Length > 0 ? NightJson : "{}");
         sb.Append(",\"sources\":").Append(SourcesJson.Length > 0 ? SourcesJson : "{}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.

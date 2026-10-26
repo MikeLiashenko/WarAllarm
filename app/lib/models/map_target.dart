@@ -55,6 +55,14 @@ class MapTarget {
   /// Падає / збита — зараз зникне з карти.
   final bool down;
 
+  /// Типовий маршрут далі ([[lat, lon], …], перша точка — де ціль зараз): на Київ / на
+  /// захід або вздовж реального курсу. Застосунок веде мітку ним між постами.
+  final List<List<double>> route;
+
+  /// Група пуску в польоті — ПРОГНОЗ типовим маршрутом від місця пуску (не справжня
+  /// ціль): блідо на карті, не вмикає тривогу й не рахується в лічильниках.
+  final bool forecast;
+
   /// Per-place distance, filled in by the situation logic.
   final double? pdist;
 
@@ -91,6 +99,8 @@ class MapTarget {
     this.altM,
     this.altNote = '',
     this.down = false,
+    this.route = const [],
+    this.forecast = false,
   });
 
   MapTarget withPdist(double? d) => MapTarget(
@@ -101,8 +111,12 @@ class MapTarget {
         sources: sources, srcs: srcs, kmh: kmh,
         from: from, to: to, fromName: fromName, fromGuess: fromGuess,
         t0: t0, launch: launch,
-        headingKnown: headingKnown, altM: altM, altNote: altNote, down: down,
+        headingKnown: headingKnown, altM: altM, altNote: altNote, down: down, route: route, forecast: forecast,
       );
+
+  static List<List<double>> _route(dynamic v) => v is List
+      ? [for (final p in v) if (p is List && p.length == 2) [(p[0] as num).toDouble(), (p[1] as num).toDouble()]]
+      : const [];
 
   static List<double>? _pair(dynamic v) =>
       v is List && v.length == 2 ? [(v[0] as num).toDouble(), (v[1] as num).toDouble()] : null;
@@ -140,6 +154,7 @@ class MapTarget {
       altM: d(m['alt']),
       altNote: (m['altNote'] ?? '').toString(),
       down: m['down'] == true,
+      route: _route(m['route']),
       trail: (m['trail'] as List<dynamic>? ?? [])
           .map((e) => [
                 ((e as List)[0] as num).toDouble(),

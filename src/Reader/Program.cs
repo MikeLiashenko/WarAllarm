@@ -268,6 +268,45 @@ if (args.Length >= 1 && args[0].Equals("move", StringComparison.OrdinalIgnoreCas
     return;
 }
 
+// ── Тест груп пуску (оффлайн): пост про пуск → групи летять типовим маршрутом;
+//    справжні цілі поблизу «забирають» дрони з групи.   dotnet run -- launches
+if (args.Length >= 1 && args[0].Equals("launches", StringComparison.OrdinalIgnoreCase))
+{
+    var t0 = DateTime.Now;
+    var b = LaunchFeed.ParseLaunch("18:35 по пусках шахедів:\n8 штук реактивних з Орла\n12 штук з Криму\n6 штук Курськ")!;
+    LaunchGroups.Add(b, t0);
+    Console.WriteLine("Бот:\n" + string.Join("\n", b.Items.Select(i => $"• {i.Origin} — {i.N}{(i.Reactive ? " (реакт.)" : "")}{LaunchRouteHint(i)}")) + "\n");
+    foreach (var h in new[] { 0.0, 1.0, 2.0, 3.0 })
+        foreach (var g in LaunchGroups.Active)
+        {
+            var p = g.PosAt(t0.AddHours(h));
+            var (along, pass) = TypicalRoutes.Closest(g.Route, (HomeLat, HomeLon));
+            Console.WriteLine($"+{h:0} год  {g.Origin,-6}{(g.Reactive ? " реакт." : "       ")} ×{g.Left,-3} → ({p.lat:0.00},{p.lon:0.00})"
+                + $" · біля {NearestCity(p)} · маршрут {g.LengthKm:0} км · до дому ~{along / g.Kmh / 0.85:0.0} год (повз за {pass:0} км)");
+        }
+    // Справжні цілі там, де мала б бути група з Криму через 2 год → забирають з неї.
+    var crimea = LaunchGroups.Active.First(g => g.Origin == "Крим");
+    LaunchGroups.Absorb(crimea.PosAt(t0.AddHours(2)), 5, t0.AddHours(2));
+    Console.WriteLine($"\nПісля 5 справжніх цілей біля розрахункової точки кримської групи: ×{LaunchGroups.Active.FirstOrDefault(g => g.Origin == "Крим")?.Left}");
+    Console.WriteLine("\nМаршрути справжніх цілей (без курсу):");
+    foreach (var (name, p) in new[] { ("Суми", (50.91, 34.80)), ("Полтава", (49.59, 34.55)), ("Миколаїв", (46.97, 32.0)), ("Житомир", (50.25, 28.66)), ("Бровари", (50.51, 30.79)) })
+        Console.WriteLine($"  {name,-9} → {(TypicalRoutes.FromPosition(p, null, false) is { } r ? string.Join(" → ", r.Skip(1).Select(NearestCity)) : "— (вже біля Києва)")}");
+    return;
+}
+// «→ на Київ, біля тебе ~через 1,5 год» — куди типово йде група з цього місця пуску (оцінка).
+string LaunchRouteHint(LaunchItem i)
+{
+    if (TypicalRoutes.FromOrigin(i.Origin) is not { } route) return "";
+    var end = ThreatGeo.Km(route[^1], TypicalRoutes.Kyiv) < 30 ? "на Київ" : "на захід";
+    var (along, pass) = TypicalRoutes.Closest(route, tracker.Home);
+    double hours = along / ((i.Reactive ? 500 : 185) * 0.85);
+    return pass <= 60
+        ? $" → {end}, біля тебе ~через {(hours < 1 ? $"{hours * 60:0} хв" : $"{hours:0.#} год")} (оцінка)"
+        : $" → типово {end}";
+}
+string NearestCity((double lat, double lon) p) =>
+    Cities.All.Take(400).MinBy(c => ThreatGeo.Km((c.lat, c.lon), p)) is var c && ThreatGeo.Km((c.lat, c.lon), p) < 60 ? c.name : $"({p.lat:0.0},{p.lon:0.0})";
+
 // ── Тест хаба джерел (оффлайн, без Telegram і без запису в Firebase):
 //    dotnet run -- sources <файл>   формат: «##### @канал» + пости через «---»
 if (args.Length >= 2 && args[0].Equals("sources", StringComparison.OrdinalIgnoreCase))
@@ -1660,9 +1699,10 @@ async Task OnUpdate(Update update)
         if (LaunchFeed.ParseLaunch(m.message) is { } lb)
         {
             lastBatch = lb; lastBatchAt = DateTime.Now; PublishAir();
+            LaunchGroups.Add(lb, DateTime.Now); // групи вилітають на карті й летять типовим маршрутом
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
             var at = lb.When is { } w ? $" о {w}" : "";
-            var rows = lb.Items.Select(i => $"• {i.Origin} — {i.N}{(i.Reactive ? " (реакт.)" : "")}").ToList();
+            var rows = lb.Items.Select(i => $"• {i.Origin} — {i.N}{(i.Reactive ? " (реакт.)" : "")}{LaunchRouteHint(i)}").ToList();
             int react = lb.Items.Where(i => i.Reactive).Sum(i => i.N);
             var head = $"🚀 Пуск ~{lb.Total} шахедів{at}" + (react > 0 ? $" (з них реактивних {react})" : "");
             Ui.Line(ConsoleColor.Red, $"🚀 [{time}] {src} · {head}");

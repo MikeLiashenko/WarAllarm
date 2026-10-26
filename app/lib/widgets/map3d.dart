@@ -896,7 +896,16 @@ class _Map3DPainter extends CustomPainter {
             ..strokeWidth = 1
             ..color = color.withValues(alpha: 0.35));
     }
-    final faded = m.quietMin >= 6 || t.down;
+    if (t.route.length >= 2 && (t.forecast || t.id == selectedId)) {
+      final ahead = routeAhead(t.route, m.lat, m.lon);
+      for (var i = 1; i < ahead.length; i++) {
+        _dashed(canvas, cam.proj(ahead[i - 1][0], ahead[i - 1][1], z).o, cam.proj(ahead[i][0], ahead[i][1], z).o,
+            Paint()
+              ..strokeWidth = 1.2
+              ..color = color.withValues(alpha: t.forecast ? 0.35 : 0.55));
+      }
+    }
+    final faded = m.quietMin >= 6 || t.down || t.forecast;
     if (faded) canvas.saveLayer(null, Paint()..color = Colors.white.withValues(alpha: 0.5));
 
     canvas.drawOval(Rect.fromCenter(center: ground.o, width: 14, height: 14 * (1 - 0.6 * cam.st)),
@@ -918,7 +927,9 @@ class _Map3DPainter extends CustomPainter {
     paintThreatGlyph(canvas, air.o, r * 1.7, t.cat, color, m.heading - cam.yaw);
     if (faded) canvas.restore();
     final alt = altitudeShort(t);
-    if (t.down) {
+    if (t.forecast) {
+      _text(canvas, 'прогноз', air.o + Offset(0, r + 11), 9.5, color, bold: true);
+    } else if (t.down) {
       _text(canvas, alt.isEmpty ? 'падає' : alt, air.o + Offset(0, r + 12), 10.5, const Color(0xFFFF6B5E), bold: true);
     } else if (alt.isNotEmpty && cam.zoom >= 2) {
       _text(canvas, alt, air.o + Offset(r + 5, 6), 10, AppColors.textPrimary, bold: true);

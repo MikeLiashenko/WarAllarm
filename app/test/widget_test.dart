@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:waralarm/data/oblast_lookup.dart';
 import 'package:waralarm/models/api_key.dart';
 import 'package:waralarm/models/map_target.dart';
 import 'package:waralarm/models/monitored_place.dart';
@@ -110,4 +111,50 @@ void main() {
     expect(m.uncertKm, closeTo(50, 0.5)); // 500 km/h × 0.5 × 12 min
     expect(motionOf(t, seen + 30 * 60 * 1000).uncertKm, 80); // capped
   });
+
+  group('typical route', () {
+    // Полтава → Київ (the Reader's route for a drone seen in the north-east).
+    const route = [[49.59, 34.55], [50.45, 30.52]];
+    final seen = DateTime(2026, 10, 26, 3).millisecondsSinceEpoch;
+    MapTarget drone({int? at, double lat = 49.59, double lon = 34.55}) => MapTarget(
+        id: 'd', label: 'Шахед', cat: 'shahed', lat: lat, lon: lon, kmh: 185,
+        seenMs: at ?? seen, route: [[lat, lon], route[1]]);
+
+    tearDown(() => setMotionAlarmOblasts(null));
+
+    test('flies the route for 20 min at 85 % speed, then stops', () {
+      final m10 = motionOf(drone(), seen + 10 * 60000);
+      expect(kmBetween(49.59, 34.55, m10.lat, m10.lon), closeTo(185 / 60 * 0.85 * 10, 1));
+      expect(m10.uncertKm, 0);
+      final m40 = motionOf(drone(), seen + 40 * 60000);
+      expect(kmBetween(49.59, 34.55, m40.lat, m40.lon), closeTo(185 / 60 * 0.85 * 20, 1));
+      expect(m40.uncertKm, greaterThan(0)); // stopped → ring grows
+    });
+
+    test('never flies out of the alarm zone', () {
+      setMotionAlarmOblasts({'Poltava'}); // Київщина — відбій
+      final m = motionOf(drone(), seen + 20 * 60000);
+      expect(OblastLookupProbe.oblastAt(m.lat, m.lon), 'Poltava');
+    });
+
+    test('a new post moves it to the reported place and it flies on from there', () {
+      final later = seen + 30 * 60000;
+      final m = motionOf(drone(at: later, lat: 50.02, lon: 33.0), later); // «Шахед на Лубни»
+      expect(m.lat, closeTo(50.02, 0.01));
+      expect(m.lon, closeTo(33.0, 0.01));
+    });
+
+    test('a launch group (forecast) flies its whole route without the 20-min stop', () {
+      final g = MapTarget(
+          id: 'launch:L1', label: 'Пуск з Орла', cat: 'shahed', lat: 52.97, lon: 36.06,
+          kmh: 185, seenMs: seen, forecast: true, route: const [[52.97, 36.06], [51.87, 33.48], [50.45, 30.52]]);
+      final m = motionOf(g, seen + 90 * 60000);
+      expect(kmBetween(52.97, 36.06, m.lat, m.lon), greaterThan(185 / 60 * 0.85 * 60)); // > an hour of flight
+    });
+  });
+}
+
+/// Test-only access to the point-in-oblast lookup.
+class OblastLookupProbe {
+  static String? oblastAt(double lat, double lon) => OblastLookup.instance.nameAt(lat, lon);
 }

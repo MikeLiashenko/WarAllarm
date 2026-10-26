@@ -31,6 +31,12 @@ void main() {
       MapTarget(label: 'Шахед', cat: 'shahed', lat: 50.51, lon: 30.79, heading: 220, kmh: 500, amount: 3, seenMs: now),
       MapTarget(label: 'Шахед', cat: 'shahed', lat: 49.23, lon: 28.47, heading: 300, kmh: 185, seenMs: now),
       MapTarget(label: 'Ракета (Х-101)', cat: 'missile', lat: 48.9, lon: 32.0, heading: 290, kmh: 750, seenMs: now),
+      // Launch group from Орел an hour ago (forecast) + a drone flying its typical route to Kyiv.
+      MapTarget(id: 'launch:L1', label: 'Пуск з Орел (реакт.)', cat: 'shahed', lat: 52.97, lon: 36.06, amount: 8,
+          kmh: 185, seenMs: now - 70 * 60000, forecast: true,
+          route: const [[52.97, 36.06], [51.87, 33.48], [51.05, 31.89], [50.51, 30.79], [50.45, 30.52]]),
+      MapTarget(id: 'd1', label: 'Шахед', cat: 'shahed', lat: 49.59, lon: 34.55, kmh: 185, seenMs: now - 8 * 60000,
+          route: const [[49.59, 34.55], [50.45, 30.52]]),
     ];
     // The east under a mass alarm: every raion east of the Dnipro red, plus
     // whole-oblast alarms around them (raions inside those must not stack).

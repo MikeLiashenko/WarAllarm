@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../domain/motion.dart';
 import '../services/official_alerts_service.dart';
 
 /// Polls the official per-oblast air-raid status every ~25 s and exposes it as
@@ -43,8 +44,10 @@ class AlertsController extends ChangeNotifier {
       _oblastWhole = snap.oblastWhole;
       _ok = true;
       _at = DateTime.now();
+      setMotionAlarmOblasts(_levels.keys.toSet()); // прогноз польоту не заходить у зони відбою
     } catch (_) {
       _ok = false;
+      setMotionAlarmOblasts(null);
     }
     notifyListeners();
   }

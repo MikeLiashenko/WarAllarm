@@ -66,10 +66,12 @@ class _MapScreenState extends State<MapScreen> {
     final alerts = context.watch<AlertsController>();
     final settings = context.watch<SettingsController>();
     final focus = context.watch<TargetFocusController>();
+    // Real targets + launch groups flying their typical route (forecast, map only).
+    final mapTargets = [...data.targets, ...data.launches];
     final s = Situation(data, alarm, alerts);
     final selected = focus.id == null
         ? null
-        : data.targets.where((t) => t.id == focus.id).firstOrNull;
+        : mapTargets.where((t) => t.id == focus.id).firstOrNull;
     // The followed target left the feed — nothing to ride along with any more.
     if (focus.id != null && selected == null && focus.follow) {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -125,7 +127,7 @@ class _MapScreenState extends State<MapScreen> {
               child: _is3d
                   ? Map3D(
                       key: _map3dKey,
-                      targets: data.targets,
+                      targets: mapTargets,
                       home: (lat: s.place.lat, lon: s.place.lon),
                       homeName: s.place.name,
                       oblastWhole: alerts.oblastWhole,
@@ -144,7 +146,7 @@ class _MapScreenState extends State<MapScreen> {
                     )
                   : UkraineMap(
                       key: _mapKey,
-                      targets: data.targets,
+                      targets: mapTargets,
                       home: (lat: s.place.lat, lon: s.place.lon),
                       homeName: s.place.name,
                       audibilityKm: settings.audibilityKm,
