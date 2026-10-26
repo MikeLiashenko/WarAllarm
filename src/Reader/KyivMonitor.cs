@@ -29,6 +29,28 @@ public static class KyivMonitor
         ("биківн", GeoRole.CityGeneral, "Биківня"),       ("лівобереж", GeoRole.CityGeneral, "Лівий берег"),
         ("лівому берез", GeoRole.CityGeneral, "Лівий берег"), ("лівий берег", GeoRole.CityGeneral, "Лівий берег"),
         ("правому берез", GeoRole.CityGeneral, "Правий берег"), ("правий берег", GeoRole.CityGeneral, "Правий берег"),
+        ("нова дарниц", GeoRole.CityGeneral, "Нова Дарниця"), ("нової дарниц", GeoRole.CityGeneral, "Нова Дарниця"),
+        ("дарниц", GeoRole.CityGeneral, "Дарниця"),       ("соцміст", GeoRole.CityGeneral, "Соцмісто"),
+        ("воскресенк", GeoRole.CityGeneral, "Воскресенка"), ("вигурівщин", GeoRole.CityGeneral, "Вигурівщина"),
+        ("райдужн", GeoRole.CityGeneral, "Райдужний"),    ("лівобережн", GeoRole.CityGeneral, "Лівобережний масив"),
+        ("дврз", GeoRole.CityGeneral, "ДВРЗ"),            ("микільськ", GeoRole.CityGeneral, "Микільська Слобідка"),
+        ("гідропарк", GeoRole.CityGeneral, "Гідропарк"),  ("труханов", GeoRole.CityGeneral, "Труханів острів"),
+        ("червоний хутір", GeoRole.CityGeneral, "Червоний Хутір"), ("червоного хутор", GeoRole.CityGeneral, "Червоний Хутір"),
+        ("мінський мас", GeoRole.CityGeneral, "Мінський масив"), ("мінському мас", GeoRole.CityGeneral, "Мінський масив"),
+        ("мінського мас", GeoRole.CityGeneral, "Мінський масив"), ("пріорк", GeoRole.CityGeneral, "Пріорка"),
+        ("вітряні гор", GeoRole.CityGeneral, "Вітряні Гори"), ("вітряних гор", GeoRole.CityGeneral, "Вітряні Гори"),
+        ("мостицьк", GeoRole.CityGeneral, "Мостицький масив"), ("сирц", GeoRole.CityGeneral, "Сирець"),
+        ("сирець", GeoRole.CityGeneral, "Сирець"),        ("білич", GeoRole.CityGeneral, "Біличі"),
+        ("академміст", GeoRole.CityGeneral, "Академмістечко"), ("пуща-водиц", GeoRole.CityGeneral, "Пуща-Водиця"),
+        ("відрадн", GeoRole.CityGeneral, "Відрадний"),    ("чоколівк", GeoRole.CityGeneral, "Чоколівка"),
+        ("караваєв", GeoRole.CityGeneral, "Караваєві дачі"), ("батиєв", GeoRole.CityGeneral, "Батиєва гора"),
+        ("татарк", GeoRole.CityGeneral, "Татарка"),       ("липк", GeoRole.CityGeneral, "Липки"),
+        ("саперн", GeoRole.CityGeneral, "Саперна Слобідка"), ("багринов", GeoRole.CityGeneral, "Багринова гора"),
+        ("корчуват", GeoRole.CityGeneral, "Корчувате"),   ("китаїв", GeoRole.CityGeneral, "Китаїв"),
+        ("феофані", GeoRole.CityGeneral, "Феофанія"),     ("хрещатик", GeoRole.CityGeneral, "Хрещатик"),
+        ("деснянськ", GeoRole.CityGeneral, "Деснянський район"), ("дніпровськ", GeoRole.CityGeneral, "Дніпровський район"),
+        ("оболонськ", GeoRole.CityGeneral, "Оболонський район"), ("подільськ", GeoRole.CityGeneral, "Подільський район"),
+        ("шевченківськ", GeoRole.CityGeneral, "Шевченківський район"),
         // ── ближний пригород/область Киева (наближається) ───────────────────
         ("бровар", GeoRole.Suburb, "Бровари"),      ("бориспіл", GeoRole.Suburb, "Бориспіль"),
         ("вишгород", GeoRole.Suburb, "Вишгород"),   ("ірпін", GeoRole.Suburb, "Ірпінь"),
@@ -106,7 +128,7 @@ public static class KyivMonitor
     {
         // Розвідники — своя мітка; решта — словник засобів (Х-101, Іскандер, «бандероль»
         // = крилата ракета, «ціль» = крилата, «швидкісна ціль» = балістика).
-        if (Regex.IsMatch(l, @"мавік|mavic|орлан|зала|supercam|суперкам")) return (ThreatKind.Drone, "розвідник");
+        if (Regex.IsMatch(l, @"мавік|mavic|орлан|\bзала\b|supercam|суперкам")) return (ThreatKind.Drone, "розвідник");
         if (Regex.IsMatch(l, @"розвід|дорозвід") && !Regex.IsMatch(l, @"ракет|балісти|каб")) return (ThreatKind.Drone, "розвідка");
         if (WeaponCatalog.Match(l) is { } w) return (w.Kind, WeaponCatalog.DisplayName(w));
         if (l.Contains("балісти") || l.Contains("баллист") || Regex.IsMatch(l, @"кн-?23|точка[-\s]?у")) return (ThreatKind.Ballistic, null);

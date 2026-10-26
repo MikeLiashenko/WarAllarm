@@ -161,6 +161,13 @@ public static class PlaceFinder
         (@"^столиц", "Київ", 50.4547, 30.5238),
     };
 
+    /// Назва ОБЛАСТІ замість точки: «Харківщині», «Київщину», «Запорізьку область».
+    /// Лише справжні обласні «-щина/-ччина» — раніше відкидалось будь-яке «щин», і
+    /// Троєщина (масив Києва) ніколи не потрапляла на карту.
+    public static readonly Regex OblastWord = new(
+        @"(?:харків|київ|сум|полтав|чернігів|черка|житомир|оде|миколаїв|херсон|дніпропетров|луган|кіровоград|тернопіль|львів|рівнен|франків|слобожан)щин|(?:вінни|доне|хмельни)ччин|област|\bобл\b",
+        RegexOptions.IgnoreCase);
+
     public static string Norm(string s)
     {
         var t = s.ToLowerInvariant().Replace('ʼ', '\'').Replace('’', '\'').Replace('`', '\'').Replace('ё', 'е');
@@ -231,7 +238,7 @@ public static class PlaceFinder
         var q = Norm(raw);
         if (q.Length < 3) return null;
         // Область замість міста («маневрує на Харківщині») — це не точка.
-        if (Geo.Canonical(q) is not null || Regex.IsMatch(q, @"щин|област")) return null;
+        if (Geo.Canonical(q) is not null || OblastWord.IsMatch(q)) return null;
         if (Aliases.FirstOrDefault(a => Regex.IsMatch(q, a.re)) is { name: not null } al)
             return (al.name, al.lat, al.lon);
 
@@ -386,7 +393,7 @@ public sealed class SourceHub
                 if (ev.City is null) continue;
                 var region = ev.Oblast is { } eo ? new[] { eo } : src.Oblasts;
                 // «на Запорізьку область», «на Харківщині» — рівень області, не точка.
-                if (Regex.IsMatch(ev.City, @"област|щин|обл", RegexOptions.IgnoreCase)) { st.Unplaced++; continue; }
+                if (PlaceFinder.OblastWord.IsMatch(ev.City)) { st.Unplaced++; continue; }
                 var g = PlaceFinder.Find(CityCore(ev.City), region, bare ? 160 : 260);
                 if (g is not { } gp) { st.Unplaced++; continue; }
                 placed++;

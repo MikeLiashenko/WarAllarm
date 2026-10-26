@@ -227,7 +227,7 @@ public static class KharkivMonitor
     {
         // Розвідники й FPV — свої мітки; решта — словник засобів (Х-101, Іскандер, «бандероль»
         // = крилата ракета, «ціль» = крилата, «швидкісна ціль» = балістика).
-        if (Regex.IsMatch(l, @"розвід|развед|мавік|mavic|орлан|зала|supercam|суперкам")) return (ThreatKind.Drone, "розвідувальний");
+        if (Regex.IsMatch(l, @"розвід|развед|мавік|mavic|орлан|\bзала\b|supercam|суперкам")) return (ThreatKind.Drone, "розвідувальний");
         if (l.Contains("fpv")) return (ThreatKind.Drone, "FPV");
         if (l.Contains("петух")) return (ThreatKind.Aviation, "пуски КАБ");
         if (WeaponCatalog.Match(l) is { } w) return (w.Kind, WeaponCatalog.DisplayName(w));
