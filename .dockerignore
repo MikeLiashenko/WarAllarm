@@ -12,3 +12,11 @@ alarms.csv
 WTelegram.log
 updates.state
 .git/
+
+# Сервер збирає лише Reader — Flutter-застосунок, сайт, дизайн і журнал не потрібні.
+app/
+site/
+design/
+src/Reader/journal/
+**/*.exe
+**/*.dll

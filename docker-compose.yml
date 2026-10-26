@@ -5,6 +5,8 @@ services:
     build: .
     container_name: waralarm
     restart: unless-stopped        # сам поднимется после перезагрузки/падения
+    environment:
+      - TZ=Europe/Kyiv             # час у боті / журналі — київський, не UTC
     volumes:
       - ./data:/data               # секреты, сессия, map.html, журнал
     # карту можно смотреть, раскомментировав простой веб-сервер ниже (по желанию):
