@@ -181,12 +181,14 @@ public sealed class ThreatTracker
 
     // ── приход всеукраинского события (@raketa_trevoga): «N ТИП на Місто» ──────
     // Геолокуем город по справочнику всей Украины и ставим стрелку на карте.
-    public TrackUpdate? IngestUa(ThreatEvent ev, DateTime now)
+    public TrackUpdate? IngestUa(ThreatEvent ev, DateTime now, (string name, double lat, double lon)? at = null)
     {
         if (ev.Kind == ThreatKind.AllClear) return null;
-        // Точный город; если нет в справочнике — фолбэк в центр области (по заголовку поста).
-        // Курований довідник, далі повний (~5300 н.п., з відмінками) у межах області поста.
-        var g = ThreatGeo.Resolve(ev.City)
+        // Хаб уже знайшов точку з урахуванням області каналу — беремо її (пошук лише за назвою
+        // плутає тезок: «Новоселівка» на Чернігівщині ≠ Новоселівка на Полтавщині).
+        // Інакше: точне місто; якщо нема в довіднику — центр області (з заголовка поста).
+        var g = at
+                ?? ThreatGeo.Resolve(ev.City)
                 ?? (ev.City is { } cc ? PlaceFinder.Find(cc, ev.Oblast is { } eo ? new[] { eo } : Array.Empty<string>()) : null);
         bool approx = false;
         // «на півночі Сумщини, курсом на Полтаву» — у тій частині області, а не над містом курсу.

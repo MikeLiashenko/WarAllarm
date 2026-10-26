@@ -270,6 +270,15 @@ if (args.Length >= 1 && args[0].Equals("move", StringComparison.OrdinalIgnoreCas
     return;
 }
 
+// ── 📍 Де хаб поставить місце:   dotnet run -- place <назва> [область]
+if (args.Length >= 2 && args[0].Equals("place", StringComparison.OrdinalIgnoreCase))
+{
+    var reg = args.Length >= 3 ? new[] { args[2] } : Array.Empty<string>();
+    var p = PlaceFinder.Find(args[1], reg);
+    Console.WriteLine(p is { } pp ? $"📍 «{args[1]}» ({string.Join(",", reg)}) → {pp.name} ({pp.lat:0.000}, {pp.lon:0.000})" : $"📍 «{args[1]}» → не знайдено");
+    return;
+}
+
 // ── 📒 Звіт журналу постів:   dotnet run -- journal [РРРР-ММ-ДД]
 if (args.Length >= 1 && args[0].Equals("journal", StringComparison.OrdinalIgnoreCase))
 {
@@ -2045,7 +2054,7 @@ async Task HandleHub(SourceInfo si, string text, string src, string time, int ms
         // Уточнили тип («Ціль» → шахед): прибираємо стару «Ціль» у цьому місці, щоб не двоїлась.
         if (he.Ev.Kind != ThreatKind.Target)
             tracker.SweepWhere(t => t.Zone == "UA" && t.Kind == ThreatKind.Target && t.LastPlace == he.Place);
-        if (tracker.IngestUa(he.Ev, now) is not { } up) continue;
+        if (tracker.IngestUa(he.Ev, now, (he.Place, he.Pos.lat, he.Pos.lon)) is not { } up) continue;
         drew = true;
         lock (up.Threat.Srcs) foreach (var s in he.Sources) up.Threat.Srcs.Add(s);
         var tag = he.Sources.Count > 1 ? $"✓{he.Sources.Count} джерела" : $"✓{si.Label}";

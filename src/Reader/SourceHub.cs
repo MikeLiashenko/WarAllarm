@@ -185,6 +185,23 @@ public static class PlaceFinder
         return sb.ToString();
     }
 
+    // Назва й запит — те саме слово з точністю до відмінкового закінчення
+    // («Новоселівка» / «Новоселівку» / «Новоселівці»), а не лише «схожі приголосні».
+    static string Core(string w) => Regex.Replace(w, "[аеєиіїоуюяь]+$", "");
+    public static bool Literal(string name, string q)
+    {
+        var nw = Norm(name).Split(' ', '-'); var qw = Norm(q).Split(' ', '-');
+        if (nw.Length != qw.Length) return false;
+        for (int i = 0; i < nw.Length; i++)
+        {
+            var a = Core(nw[i]); var b = Core(qw[i]);
+            if (a.Length < 2) { if (nw[i] != qw[i]) return false; continue; }
+            // «Новоселівка/Новоселівці»: основа збігається, у відмінку може змінитись 1 приголосна (к→ц).
+            if (a != b && !(a.Length == b.Length && a.Length >= 5 && a[..^1] == b[..^1])) return false;
+        }
+        return true;
+    }
+
     static int Lcp(string a, string b)
     {
         int n = Math.Min(a.Length, b.Length), i = 0;
@@ -252,6 +269,12 @@ public static class PlaceFinder
             if (near is null || near <= maxKm) { cur = g; curScore = gs; }
         }
 
+        // Назва СПРАВЖНЯ (є такий н.п. хоч десь) — тоді «схоже за приголосними» інше село не
+        // підставляємо: «Новоселівка» ≠ «Новосілки» (а то Новоселівка з Чернігівщини ставала
+        // Новосілками під Києвом і вмикала київську тривогу). Краще «місце не знайдено».
+        bool real = Cities.All.Any(c => Literal(c.name, q));
+        if (real && cur is { } c0 && !Literal(c0.name, q)) { cur = null; curScore = 0; }
+
         // 2) Повний довідник: усі збіги, найкращий за (якість, близькість до регіону, розмір).
         (string name, double lat, double lon)? best = null;
         double bestKey = double.MinValue;
@@ -260,6 +283,7 @@ public static class PlaceFinder
             var c = Cities.All[i];
             int sc = Score(c.name, q);
             if (sc == 0) continue;
+            if (real && !Literal(c.name, q)) continue;
             var km = RegionKm((c.lat, c.lon), region);
             if (km is { } k && k > maxKm) continue;
             if (km is null && sc < 1000 && q.Length < 5) continue; // без регіону — лише впевнені
