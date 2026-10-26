@@ -116,8 +116,10 @@ public sealed class ThreatTracker
         // Обобщённый пост БЕЗ места («вибух…», «тривога») цепляем к самой свежей цели этой зоны.
         var placeKey = place.Length > 0 ? place : zone;
         string key;
+        // Лише ціль ТОГО Ж типу: «бандероль…» без місця не має оновлювати реактивний шахед.
         if (place.Length == 0
-            && _active.Values.Where(a => a.Zone == zone).OrderByDescending(a => a.LastUpdate).FirstOrDefault() is { } recent)
+            && _active.Values.Where(a => a.Zone == zone && (e.Kind is ThreatKind.Target or ThreatKind.Unknown || a.Kind == e.Kind))
+                   .OrderByDescending(a => a.LastUpdate).FirstOrDefault() is { } recent)
             key = recent.Id;
         else
             key = $"{zone}:{placeKey}:{e.Kind}";

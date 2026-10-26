@@ -491,13 +491,19 @@ public sealed class SourceHub
         var res = new List<ThreatEvent>();
         if (clean.Length > 120) return res; // довгий текст — це не «голий» список місць
         var kind = ThreatKind.Target; string? extra = null;
-        if (_ctx.TryGetValue(src.User, out var cx) && at - cx.at < TimeSpan.FromMinutes(15)) { kind = cx.kind; extra = cx.extra; }
+        // Тип, названий У САМОМУ пості («Бандероль — Оболонь», «2 бандеролі: Дарниця»), важливіший
+        // за тип попереднього поста каналу: раніше бандероль після «реактивні» ставала реактивним дроном.
+        if (WeaponCatalog.Match(clean) is { } own) { kind = own.Kind; extra = WeaponCatalog.DisplayName(own); }
+        else if (_ctx.TryGetValue(src.User, out var cx) && at - cx.at < TimeSpan.FromMinutes(15)) { kind = cx.kind; extra = cx.extra; }
         foreach (var seg0 in Regex.Split(clean, @"[,;\n]+"))
         {
             var seg = seg0.Trim();
             int count = 1;
             var m = Regex.Match(seg, @"^(\d+)\s*[хx×]?\s+");
             if (m.Success) { int.TryParse(m.Groups[1].Value, out count); seg = seg[m.Length..]; }
+            // Назва засобу перед місцем: «бандероль — Оболонь», «бандеролі: Дарниця», «ракета Бровари».
+            var wm = Regex.Match(seg, @"^(?:бандерол\w*|ракет\w*|крилат\w*|ціл[ьі]\w*|каб\w*|шахед\w*|реактив\w*|рбпла|бпла)\s*[-—–:]?\s*", RegexOptions.IgnoreCase);
+            if (wm.Success) { seg = seg[wm.Length..]; if (seg.Length == 0) continue; }
             seg = Regex.Replace(seg, @"^(?:і\s+)?(?:ще|знову|другий|третій|перший|один|два|три|в районі|у районі|район|рбпла|бпла|шахед\w*|реактив\w*)\s+", "", RegexOptions.IgnoreCase);
             seg = Regex.Replace(seg, @"\s+(?:низько|високо|приблизно|йде|летить|прямо|зараз|червоний|жовтий|жовтогарячий|жовтогорячий|помаранчевий|зелений)\b.*$", "", RegexOptions.IgnoreCase).Trim(' ', '.', '!', '?');
             // Голий список — це 1–2 слова назви («Оболонь», «Біла Церква»), не речення.
