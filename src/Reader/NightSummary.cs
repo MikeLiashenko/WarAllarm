@@ -17,8 +17,9 @@ public static class NightSummary
     public record Impact(double Lat, double Lon, string Place, DateTime At);
     // N — скільки ракет у цьому пуску («5х Балістик на Київ»); Guessed — місце пуску не
     // назване в пості, взято найближчий до цілі район пусків балістики (орієнтовно).
+    // More — «Ще балістика на Київ»: додається до вже названих, а не повтор.
     public record Ballistic(string Origin, double OLat, double OLon, double TLat, double TLon, string Target, DateTime At,
-                            int N = 1, bool Guessed = false);
+                            int N = 1, bool Guessed = false, bool More = false);
 
     // Райони, звідки зазвичай б'ють балістикою (для «орієнтовного» місця пуску).
     static readonly string[] BallisticSites = { "Брянськ", "Курськ", "Бєлгород", "Воронеж", "Таганрог", "Крим" };
@@ -178,6 +179,7 @@ public static class NightSummary
                 RegexOptions.IgnoreCase);
             if (!m.Success) continue;
             int n = int.TryParse(m.Groups[1].Value, out var k) && k is > 0 and < 60 ? k : 1;
+            bool more = Regex.IsMatch(ll, @"^\W*(?:ще|ещё|еще|і ще|та ще|додатково|новий|нова)(?!\p{L})|^\s*\+");
             if (TargetOf(m.Groups[2].Value) is not { } tg) continue;
             string site; bool guessed = false;
             if (origins.Count > 0) site = origins[0];
@@ -187,8 +189,55 @@ public static class NightSummary
                 guessed = true;
             }
             var sc = LaunchFeed.SiteCoords(site)!.Value;
-            outp.Add(new(site, sc.lat, sc.lon, tg.lat, tg.lon, tg.name, at, n, guessed));
+            outp.Add(new(site, sc.lat, sc.lon, tg.lat, tg.lon, tg.name, at, n, guessed, more));
         }
+    }
+
+    /// Пости радара про один залп — наростаючий підсумок, а не нові ракети: «Балістика на Київ» →
+    /// «2х Балістики на Київ» → «4х Балістики на Київ» → «Ще балістика на Київ» = 5, а не 1+2+4+1 = 8.
+    /// Пости про ту саму ціль з паузою ≤ 5 хв — один залп: «Nх» — скільки всього вже, «Ще (N)» —
+    /// додає, повтор без числа — та сама ракета. За ніч 26→27.10 так виходило ×22 на Київ при 16
+    /// балістичних по всій країні (за словами Президента).
+    public static List<Ballistic> Salvos(List<Ballistic> posts)
+    {
+        var outp = new List<Ballistic>();
+        foreach (var g in posts.GroupBy(b => b.Target))
+        {
+            Ballistic? first = null; int count = 0; DateTime last = default;
+            void Flush() { if (first is not null) outp.Add(first with { N = Math.Max(1, count), More = false }); }
+            foreach (var b in g.OrderBy(b => b.At))
+            {
+                if (first is null || b.At - last > TimeSpan.FromMinutes(5))
+                {
+                    Flush();
+                    first = b; count = b.N; last = b.At;
+                    continue;
+                }
+                count = b.More ? count + b.N : Math.Max(count, b.N);
+                if (first.Guessed && !b.Guessed) first = first with { Origin = b.Origin, OLat = b.OLat, OLon = b.OLon, Guessed = false };
+                last = b.At;
+            }
+            Flush();
+        }
+        return outp.OrderBy(b => b.At).ToList();
+    }
+
+    /// Оффлайн-перевірка підрахунку на журналі ночі (`night_ball.log`): рядки радара (без « К»).
+    /// `dotnet run -- nightball night_ball.log [out.png]`
+    public static Data FromBallLog(string path)
+    {
+        var posts = new List<Ballistic>();
+        var year = DateTime.Now.Year;
+        foreach (var line in File.ReadLines(path))
+        {
+            var m = Regex.Match(line, @"^\[(\d\d)\.(\d\d) (\d\d):(\d\d)\](?! К) (.*)$");
+            if (!m.Success) continue;
+            var at = new DateTime(year, int.Parse(m.Groups[2].Value), int.Parse(m.Groups[1].Value), int.Parse(m.Groups[3].Value), int.Parse(m.Groups[4].Value), 0);
+            BallisticFrom(m.Groups[5].Value.Replace(" ⏎ ", "\n"), at, false, posts);
+        }
+        var salvos = Salvos(posts);
+        var from = salvos.Count > 0 ? salvos.Min(b => b.At).AddHours(-1) : DateTime.Now.AddHours(-12);
+        return new(from, from.AddHours(14), new(), new(), new(), 0, salvos);
     }
 
     public static async Task<Data> Collect(WTelegram.Client client,
@@ -256,7 +305,7 @@ public static class NightSummary
                          .Select(g => g.First()).ToList();
 
         // Ті самі пуски пишуть кілька каналів → рахуємо з радара; інші — тільки як запасний варіант.
-        var ballistics = ball.Count > 0 ? ball : ballOther;
+        var ballistics = Salvos(ball.Count > 0 ? ball : ballOther);
 
         // Ранковий звіт ПС ЗСУ виходить ~09:00 — шукаємо до +6 год після кінця вікна.
         OfficialReport? official = null;

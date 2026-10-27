@@ -544,17 +544,19 @@ public static class MapImage
             Arrow(pts[^1], pts.Count >= 2 ? pts[^2] : pts[0], c, t.Kind == ThreatKind.Missile ? 14 : 11);
         }
 
-        // Балістика: червоні дуги від місця пуску до цілі.
-        // Кожна ракета — своя лінія; кілька на одну ціль розходяться віялом (різний вигин).
+        // Балістика: червоні дуги від місця пуску до цілі. Не більше 3 дуг на напрямок (вузький
+        // жмуток) і справжня кількість «×N»: раніше кожна ракета — своя дуга, і 22 дуги
+        // Брянськ→Київ малювали страшне червоне віяло на півкарти.
         using var bStroke = new SKPaint { Color = CBallistic.WithAlpha(0xD0), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2.2f };
         foreach (var g in d.Ballistics.GroupBy(b => (b.Origin, b.Target)))
         {
             var b0 = g.First();
             var a = P(b0.OLat, b0.OLon); var z = P(b0.TLat, b0.TLon);
             int total = g.Sum(b => b.N);
-            for (int i = 0; i < total; i++)
+            int lines = Math.Min(3, total);
+            for (int i = 0; i < lines; i++)
             {
-                float bend = total == 1 ? 0.12f : -0.20f + 0.40f * i / (total - 1);
+                float bend = lines == 1 ? 0.12f : 0.06f + 0.10f * i / (lines - 1);
                 using var path = new SKPath(); path.MoveTo(a); Arc(path, a, z, bend);
                 canvas.DrawPath(path, bStroke);
             }

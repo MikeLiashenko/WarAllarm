@@ -365,6 +365,18 @@ if (args.Length >= 2 && args[0].Equals("mappng", StringComparison.OrdinalIgnoreC
     return;
 }
 
+// ── 🌙 Балістика ночі з журналу (оффлайн): скільки ракет по залпах + картинка.
+//    dotnet run -- nightball night_ball.log [out.png]
+if (args.Length >= 2 && args[0].Equals("nightball", StringComparison.OrdinalIgnoreCase))
+{
+    var nd = NightSummary.FromBallLog(args[1]);
+    foreach (var b in nd.Ballistics)
+        Console.WriteLine($"[{b.At:dd.MM HH:mm}] {b.Origin}{(b.Guessed ? "?" : "")} → {b.Target} ×{b.N}");
+    Console.WriteLine($"Разом балістики: {nd.Ballistics.Sum(b => b.N)}");
+    if (args.Length >= 3) { File.WriteAllBytes(args[2], MapImage.RenderNight(nd)); Console.WriteLine($"🖼 {args[2]}"); }
+    return;
+}
+
 // ── 📒 Звіт журналу постів:   dotnet run -- journal [РРРР-ММ-ДД]
 if (args.Length >= 1 && args[0].Equals("journal", StringComparison.OrdinalIgnoreCase))
 {
