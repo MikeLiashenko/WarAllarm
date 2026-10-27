@@ -326,13 +326,30 @@ if (args.Length >= 2 && args[0].Equals("place", StringComparison.OrdinalIgnoreCa
 }
 
 // ── 🖼 Картинка карти для бота (оффлайн, без Telegram) — перевірка шрифтів/Skia на сервері:
-//    dotnet run -- mappng out.png
+//    dotnet run -- mappng out.png [demo]   (demo — з кількома вигаданими цілями, щоб оцінити вигляд)
 if (args.Length >= 2 && args[0].Equals("mappng", StringComparison.OrdinalIgnoreCase))
 {
     var snap0 = await OfficialAlerts.FetchFull();
-    var png = MapImage.Render((HomeLat, HomeLon), new List<Threat>(), "WarAlarm · Перевірка карти",
-        $"Тривога: {snap0.RedUa.Count} обл · часткова: {snap0.YellowUa.Count}", snap0.ByPolygon,
-        showHome: true, raionLevels: snap0.ByRaion, oblastWhole: snap0.ByOblastWhole);
+    var demoT = new List<Threat>();
+    if (args.Length >= 3 && args[2] == "demo")
+    {
+        Threat T(string id, ThreatKind k, double lat, double lon, double hdg, int n, params (double, double)[] track)
+        {
+            var t = new Threat { Id = id, Zone = "UA", Kind = k, Pos = (lat, lon), Heading = hdg, Count = n, LastPlace = id };
+            t.Track.AddRange(track); t.Track.Add((lat, lon));
+            return t;
+        }
+        demoT.Add(T("Харків", ThreatKind.Drone, 49.99, 36.18, 250, 1, (50.25, 36.9), (50.1, 36.55)));
+        demoT.Add(T("Запоріжжя", ThreatKind.Drone, 47.86, 35.10, 300, 2, (47.55, 35.7)));
+        demoT.Add(T("Кривий Ріг", ThreatKind.Fpv, 47.80, 33.55, 240, 1));
+        demoT.Add(T("Бровари", ThreatKind.Drone, 50.52, 30.95, 245, 3, (50.75, 31.9), (50.62, 31.4)));
+        demoT.Add(T("Суми", ThreatKind.Kab, 50.85, 34.95, 200, 1));
+        demoT.Add(T("Миргород", ThreatKind.Missile, 49.95, 33.6, 290, 1, (49.4, 35.8), (49.7, 34.7)));
+    }
+    var a0 = RiskModel.For((HomeLat, HomeLon), demoT.Select(t => (t, t.Amount)).ToList());
+    var png = MapImage.Render((HomeLat, HomeLon), demoT, $"WarAlarm · {MyCity}",
+        $"Ймовірність удару: {a0.Percent}% — {a0.Verdict}", snap0.ByPolygon,
+        showHome: true, raionLevels: snap0.ByRaion, oblastWhole: snap0.ByOblastWhole, tone: a0.Cls);
     File.WriteAllBytes(args[1], png);
     Console.WriteLine($"🖼 {args[1]}: {png.Length / 1024} КБ");
     return;
@@ -1423,7 +1440,7 @@ async Task<byte[]?> BuildBotMapPng(bool channel = false, (double lat, double lon
     var a = RiskModel.For(home, live.Where(t => !t.Approx).Select(t => (t, t.Amount)).ToList());
     return MapImage.Render(home, live, $"WarAlarm · {name ?? MyCity}",
         $"Ймовірність удару: {a.Percent}% — {a.Verdict}", snap.ByPolygon,
-        showHome: true, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
+        showHome: true, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole, tone: a.Cls);
 }
 
 static string KindName(string cat) => cat switch
