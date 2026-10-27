@@ -1,0 +1,37 @@
+# iOS .ipa can only be built on a Mac, so build_all.bat dispatches this job and
+# downloads the result. Unsigned: install with Sideloadly / AltStore (or re-sign).
+name: Build iOS (.ipa)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.4
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter build ios --release --no-codesign
+
+      - name: Pack .ipa
+        run: |
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry WarAlarm.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WarAlarm-ipa
+          path: app/WarAlarm.ipa
+          retention-days: 14

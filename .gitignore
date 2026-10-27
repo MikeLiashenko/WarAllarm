@@ -35,3 +35,6 @@ src/Reader/night.txt
 src/Reader/night_ball.log
 src/Reader/journal/
 src/Reader/sources_check_error.txt
+
+# --- build_all.bat output ---
+release/
