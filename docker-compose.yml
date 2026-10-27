@@ -2,7 +2,10 @@
 # Положи в папку ./data свои файлы:  secrets.local.txt, settings.local.txt, WTelegram.session
 services:
   waralarm:
-    build: .
+    build:
+      context: .
+      # На слабкому сервері — готова програма з ПК (deploy/deploy-server.sh кладе .env з Dockerfile.prebuilt).
+      dockerfile: ${WARALARM_DOCKERFILE:-Dockerfile}
     container_name: waralarm
     restart: unless-stopped        # сам поднимется после перезагрузки/падения
     environment:

@@ -325,6 +325,19 @@ if (args.Length >= 2 && args[0].Equals("place", StringComparison.OrdinalIgnoreCa
     return;
 }
 
+// ── 🖼 Картинка карти для бота (оффлайн, без Telegram) — перевірка шрифтів/Skia на сервері:
+//    dotnet run -- mappng out.png
+if (args.Length >= 2 && args[0].Equals("mappng", StringComparison.OrdinalIgnoreCase))
+{
+    var snap0 = await OfficialAlerts.FetchFull();
+    var png = MapImage.Render((HomeLat, HomeLon), new List<Threat>(), "WarAlarm · Перевірка карти",
+        $"Тривога: {snap0.RedUa.Count} обл · часткова: {snap0.YellowUa.Count}", snap0.ByPolygon,
+        showHome: true, raionLevels: snap0.ByRaion, oblastWhole: snap0.ByOblastWhole);
+    File.WriteAllBytes(args[1], png);
+    Console.WriteLine($"🖼 {args[1]}: {png.Length / 1024} КБ");
+    return;
+}
+
 // ── 📒 Звіт журналу постів:   dotnet run -- journal [РРРР-ММ-ДД]
 if (args.Length >= 1 && args[0].Equals("journal", StringComparison.OrdinalIgnoreCase))
 {

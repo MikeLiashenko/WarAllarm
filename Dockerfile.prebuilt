@@ -1,0 +1,11 @@
+# ── WarAlarm · образ для слабкого сервера (e2-micro, 1 ГБ) ────────────────────
+# Програму збирають на ПК (dotnet publish -r linux-x64), сюди лише копіюється готова
+# папка app/ — сервер не мучиться зі збиранням .NET. Шрифти з кирилицею — для
+# картинки карти в боті (SkiaSharp). Звук на сервері не потрібен.
+FROM mcr.microsoft.com/dotnet/runtime:9.0
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libfontconfig1 fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
+COPY app /app
+WORKDIR /data
+ENTRYPOINT ["dotnet", "/app/WarAlarm.Reader.dll"]

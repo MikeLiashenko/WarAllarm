@@ -11,6 +11,8 @@
     <PackageReference Include="WTelegramClient" Version="4.4.7" />
     <!-- Renders the threat map to a PNG for the Telegram bot (/map). -->
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
+    <!-- Linux server (Docker): native libSkiaSharp; fonts come from the image (fonts-dejavu). -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.8" />
   </ItemGroup>
 
 </Project>
