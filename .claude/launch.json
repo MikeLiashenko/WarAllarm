@@ -7,6 +7,13 @@
       "runtimeArgs": ["/c", "cd /d C:\\Work\\WarAlarm\\app && flutter run -d web-server --web-port 8099 --web-hostname 127.0.0.1"],
       "port": 8099,
       "url": "http://127.0.0.1:8099"
+    },
+    {
+      "name": "waralarm-site",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:\\Work\\WarAlarm\\site\\serve.js"],
+      "port": 8091,
+      "url": "http://127.0.0.1:8091"
     }
   ]
 }
