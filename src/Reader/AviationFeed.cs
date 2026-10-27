@@ -135,6 +135,12 @@ public static class AviationFeed
         z.Side is { } s && AirBase.TryGetValue(z.Canon + ":" + s, out var ps) ? ps
         : AirBase.TryGetValue(z.Canon, out var p) ? p : null; // глибокий тил — літаків там нема, на карту не ставимо
 
+    /// Зони для картинки бота: де літак (РФ / окупована), коло досяжності, чи є загроза КАБ.
+    public static List<(string canon, string where, double lat, double lon, int areaKm, bool kab)> MapZones() =>
+        Active.Select(z => (z, p: Point(z))).Where(x => x.p is not null)
+              .Select(x => (x.z.Canon, x.p!.Value.where, x.p.Value.lat, x.p.Value.lon, x.z.Kab ? KabReachKm : 25, x.z.Kab))
+              .ToList();
+
     /// state.aviation — для застосунку: точка в частині області, радіус ураження КАБ.
     public static string Json(DateTime now)
     {

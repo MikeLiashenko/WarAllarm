@@ -345,6 +345,16 @@ if (args.Length >= 2 && args[0].Equals("mappng", StringComparison.OrdinalIgnoreC
         demoT.Add(T("Бровари", ThreatKind.Drone, 50.52, 30.95, 245, 3, (50.75, 31.9), (50.62, 31.4)));
         demoT.Add(T("Суми", ThreatKind.Kab, 50.85, 34.95, 200, 1));
         demoT.Add(T("Миргород", ThreatKind.Missile, 49.95, 33.6, 290, 1, (49.4, 35.8), (49.7, 34.7)));
+        // Ті самі моделі, що на живій карті: реактивний шахед, бандероль, балістика в польоті
+        // з Бєлгорода, КАБ від точки скиду, авіація над РФ, група пуску з Курська.
+        var jet = T("Полтава", ThreatKind.Drone, 49.62, 34.2, 265, 1, (49.7, 35.3)); jet.Ammo = "реакт. шахед"; jet.HeadingKnown = true; demoT.Add(jet);
+        var band = T("Лозова", ThreatKind.Missile, 48.95, 36.5, 300, 1, (48.6, 37.3)); band.Ammo = "бандероль"; band.HeadingKnown = true; demoT.Add(band);
+        var bal = T("Харків-бал", ThreatKind.Ballistic, 49.99, 36.23, 200, 1);
+        bal.From = (50.60, 36.59); bal.FromName = "Бєлгород"; bal.To = (49.99, 36.23); bal.LaunchAt = DateTime.Now.AddSeconds(-35); demoT.Add(bal);
+        var kab = T("Краматорськ", ThreatKind.Kab, 48.74, 37.58, 300, 1);
+        kab.From = LaunchSites.KabRelease((48.74, 37.58)); kab.FromName = "скид КАБ"; kab.FromGuess = true; kab.To = (48.74, 37.58); kab.LaunchAt = DateTime.Now.AddSeconds(-50); demoT.Add(kab);
+        AviationFeed.Ingest("💣КАБи на північ Харківщини! Активність тактичної авіації", new[] { "Харківська" }, "demo", DateTime.Now);
+        LaunchGroups.Add(LaunchFeed.ParseLaunch("по пусках шахедів:\n15 штук з Курська")!, DateTime.Now.AddMinutes(-40));
     }
     var a0 = RiskModel.For((HomeLat, HomeLon), demoT.Select(t => (t, t.Amount)).ToList());
     var png = MapImage.Render((HomeLat, HomeLon), demoT, $"WarAlarm · {MyCity}",
