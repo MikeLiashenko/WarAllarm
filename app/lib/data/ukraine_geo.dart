@@ -5519,6 +5519,10 @@ final List<MapCity> kBigCities = () {
   ];
 }();
 
+/// English duplicates in the source list («Desna», «Darnytsya Car Repair Plant
+/// Microdistrict») — not shown on a Ukrainian map.
+bool isLatinName(String name) => RegExp(r"[A-Za-z]").hasMatch(name);
+
 /// City districts / odd entries that sit in tier 0 of the source list.
 bool isCityDistrict(String name) =>
     name.contains('район') ||

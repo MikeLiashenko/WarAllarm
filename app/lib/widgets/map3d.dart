@@ -769,6 +769,7 @@ class _Map3DPainter extends CustomPainter {
     final placed = <Rect>[];
     final screen = Offset.zero & size;
     for (final c in kCities) {
+      if (isLatinName(c.name)) continue; // «Desna», «… Microdistrict» — англ. дублі
       final big = _big.contains(c);
       final show = big ||
           (c.tier <= 1 && z >= 2.5 && !isCityDistrict(c.name)) ||

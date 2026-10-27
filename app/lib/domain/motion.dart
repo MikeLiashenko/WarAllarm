@@ -125,7 +125,9 @@ bool _inAlarm(String obl, double lat, double lon) {
 bool motionAllowed(double fromLat, double fromLon, double lat, double lon) {
   final lookup = OblastLookup.instance;
   final to = lookup.nameAt(lat, lon);
-  if (to == null) return lookup.nameAt(fromLat, fromLon) == null;
+  // Never further outside Ukraine — not even from a point that is already just
+  // outside (a reported place on the border falls outside the simplified outline).
+  if (to == null) return false;
   return _inAlarm(to, lat, lon) || !_inAlarmAt(fromLat, fromLon);
 }
 
@@ -150,7 +152,7 @@ final Map<String, double> _limitCache = {};
 
 /// How far along [route] the target may fly before it would leave the alarm zone —
 /// or Ukraine: a drone over Odesa oblast flying "west" must not drift on into
-/// Moldova and Romania. Short excursions (≤15 km) are allowed because the
+/// Moldova and Romania. Short excursions (≤30 km) are allowed because the
 /// polygons are simplified along the border and the coast.
 double _alarmLimitKm(MapTarget t, List<List<double>> route) {
   final zones = motionAlarmOblasts;
@@ -168,7 +170,7 @@ double _alarmLimitKm(MapTarget t, List<List<double>> route) {
     if (name == null) {
       if (!wasIn) continue; // still on its way in (launched from Russia / the sea)
       leftAt ??= d;
-      if (d - leftAt > 15) {
+      if (d - leftAt > 30) { // > 30 km outside: really left (Crimea→Kherson crosses a ~20 km gap)
         lim = math.max(0, leftAt - 4);
         break;
       }
@@ -184,6 +186,9 @@ double _alarmLimitKm(MapTarget t, List<List<double>> route) {
     }
   }
   if (leftAt != null && lim == total) lim = math.max(0, leftAt - 4);
+  // Never entered Ukraine: a target just outside the simplified border heading away
+  // (to Belarus / Russia) stays where it was seen.
+  if (!wasIn) lim = 0;
   return _limitCache[key] = lim;
 }
 

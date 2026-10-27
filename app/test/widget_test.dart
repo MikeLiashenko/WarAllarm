@@ -154,6 +154,23 @@ void main() {
       expect(OblastLookup.raions.nameAt(end.lat, end.lon), 'Харківський район');
     });
 
+    test('a target just outside the border (Городня) heading to Belarus stays put', () {
+      // The simplified outline leaves this border point «outside»; it must not be
+      // treated as «launched from Russia, still on its way in».
+      final r = MapTarget(
+          id: 'by', label: 'Шахед реактивний', cat: 'shahed', lat: 52.09, lon: 31.30, kmh: 500,
+          seenMs: seen, route: const [[52.09, 31.30], [52.6, 30.5]]);
+      final m = motionOf(r, seen + 10 * 60000);
+      expect(m.lat, closeTo(52.09, 0.001));
+      expect(m.lon, closeTo(31.30, 0.001));
+      final c = MapTarget(
+          id: 'by2', label: 'Шахед', cat: 'shahed', lat: 52.09, lon: 31.30, kmh: 185,
+          seenMs: seen, heading: 315, headingKnown: true);
+      final mc = motionOf(c, seen + 4 * 60000);
+      expect(mc.lat, closeTo(52.09, 0.001));
+      expect(allowedLeadKm(52.09, 31.30, 315, 55), 0);
+    });
+
     test('never flies out of Ukraine (Odesa → west stops before Moldova)', () {
       // A reactive drone over Odesa with a real westward course: 20 min × 7 km/min would
       // put it deep in Moldova; it must stop at the border instead.

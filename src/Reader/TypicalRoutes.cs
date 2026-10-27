@@ -45,13 +45,16 @@ public static class TypicalRoutes
         };
         var route = new List<(double lat, double lon)> { o };
         route.AddRange(tail);
-        return ClipToUkraine(route);
+        // Коридори від місць пуску задані вручну й закінчуються в Україні — не обрізаємо
+        // (з Криму маршрут перетинає затоку ~30 км і обривався біля Армянська).
+        return route;
     }
 
     /// Маршрут, що ЗАЙШОВ в Україну, з неї не виходить: обрізаємо там, де він покидає
     /// країну (шахед з Одещини «на захід» летів через Молдову в Румунію, а «вздовж курсу»
     /// на 150 км — за Дунай). Початок поза Україною (пуск з РФ, з моря) — нормально.
-    /// Короткі «вилазки» до 15 км не рахуються: полігони спрощені біля кордону й моря.
+    /// Короткі «вилазки» до 30 км не рахуються: полігони спрощені біля кордону й моря, а
+    /// між Кримом і Херсонщиною — затока (маршрут з Криму обривався біля Армянська).
     public static List<(double lat, double lon)>? ClipToUkraine(List<(double lat, double lon)> route)
     {
         if (route.Count < 2) return null;
@@ -64,8 +67,11 @@ public static class TypicalRoutes
             if (OblastGeo.InUkraine(p.lat, p.lon)) { wasIn = true; leftAt = null; continue; }
             if (!wasIn) continue;
             leftAt ??= d;
-            if (d - leftAt.Value > 15) return Cut(route, leftAt.Value - 3); // остання точка ще в Україні
+            if (d - leftAt.Value > 30) return Cut(route, leftAt.Value - 3); // остання точка ще в Україні
         }
+        // Так і не зайшов в Україну: ціль біля кордону (спрощений контур лишив її «зовні» —
+        // Городня, Любеч) і курс веде геть — у Білорусь / Росію. Маршруту нема, лишається, де бачили.
+        if (!wasIn) return null;
         // Кінець маршруту — уже за кордоном (останній відрізок короткий).
         return leftAt is { } la ? Cut(route, la - 3) : route;
     }

@@ -202,7 +202,7 @@ function inAlarmObl(obl, lat, lon){
 // (якщо вже була поза тривогою чи поза Україною — її не тримаємо).
 function allowed(fLat, fLon, lat, lon){
   const to = oblastAt(lat, lon);
-  if(to === null) return oblastAt(fLat, fLon) === null;
+  if(to === null) return false; // ніколи далі за кордон — навіть з точки «трохи зовні» на кордоні
   if(inAlarmObl(to, lat, lon)) return true;
   const fo = oblastAt(fLat, fLon);
   return !(fo !== null && inAlarmObl(fo, fLat, fLon));
@@ -228,11 +228,12 @@ function limitKm(t, route, alarm){
   const total = routeLen(route); let lim = total, wasIn = false, leftAt = null;
   for(let d=0; d<=total; d+=4){
     const p = alongRoute(route, d), name = oblastAt(p[0], p[1]);
-    if(name === null){ if(!wasIn) continue; if(leftAt === null) leftAt = d; if(d-leftAt > 15){ lim = Math.max(0, leftAt-4); break; } continue; }
+    if(name === null){ if(!wasIn) continue; if(leftAt === null) leftAt = d; if(d-leftAt > 30){ lim = Math.max(0, leftAt-4); break; } /* >30 км поза контуром — справді вийшла (Крим→Херсонщина — затока) */ continue; }
     wasIn = true; leftAt = null;
     if(!inAlarmObl(name, p[0], p[1])){ lim = Math.max(0, d-4); break; } // межа відбою
   }
   if(leftAt !== null && lim === total) lim = Math.max(0, leftAt-4);
+  if(!wasIn) lim = 0; // так і не зайшла в Україну (ціль на кордоні, курс — геть) — стоїть, де бачили
   limitCache.set(key, lim); return lim;
 }
 function motionOf(t, now, alarm){
@@ -364,6 +365,7 @@ function drawBase(s){
     const seen = new Set();
     for(const [nm0, lon, lat, tier] of PLACES){
       const nm = LABEL[nm0] || nm0;
+      if(/[A-Za-z]/.test(nm)) continue; // «Desna», «Darnytsya Car Repair Plant Microdistrict» — англ. дублі
       const show = (tier <= 1 && (!isDistrict(nm) || tier === 0) && (tier === 0 || !seen.has(nm))) || (tier === 2 && z >= 2.8) || (tier === 3 && z >= 4.2);
       if(!show) continue;
       const q = P(lon, lat);

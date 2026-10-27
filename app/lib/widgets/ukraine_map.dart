@@ -471,6 +471,7 @@ class _MapPainter extends CustomPainter {
     MapCity? best;
     double bd = 1e9;
     for (final c in kCities) {
+      if (isLatinName(c.name)) continue;
       final dx = (c.lon - lon) * 71, dy = (c.lat - lat) * 111;
       final d = math.sqrt(dx * dx + dy * dy);
       if (d < bd) {
@@ -623,6 +624,7 @@ class _MapPainter extends CustomPainter {
     final placed = <Rect>[]; // label boxes already drawn (collision avoidance)
     final dotCell = <int, int>{}; // per-grid-cell village dot cap (even density)
     for (final c in kCities) {
+      if (isLatinName(c.name)) continue; // «Desna», «… Microdistrict» — англ. дублі
       // Country zoom: real big cities only (tier 0 also holds city districts,
       // and villages share big-city names) — see kBigCities.
       final big = c.tier <= 1 && _bigSet.contains(c);
