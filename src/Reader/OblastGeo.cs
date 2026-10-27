@@ -88,10 +88,23 @@ public static class OblastGeo
     /// або null поза межами. Для звірки «чи є офіційна тривога в області цілі».
     public static string? PolyName(double lat, double lon) => NameAt(lat, lon);
 
+    /// Точка в межах України (полігони спрощені: біля кордону/узбережжя похибка ~10–15 км).
+    public static bool InUkraine(double lat, double lon) => NameAt(lat, lon) != null;
+
+    // Рамки полігонів — швидко відкинути «явно не та область» (маршрути перевіряють
+    // сотні точок на кожен запис карти).
+    static readonly (double minLat, double maxLat, double minLon, double maxLon)[] Boxes = Polys
+        .Select(p => p.rings.SelectMany(r => r).ToList())
+        .Select(pts => (pts.Min(x => x[1]), pts.Max(x => x[1]), pts.Min(x => x[0]), pts.Max(x => x[0])))
+        .ToArray();
+
     static string? NameAt(double lat, double lon)
     {
-        foreach (var (en, rings) in Polys)
+        for (int k = 0; k < Polys.Count; k++)
         {
+            var b = Boxes[k];
+            if (lat < b.minLat || lat > b.maxLat || lon < b.minLon || lon > b.maxLon) continue;
+            var (en, rings) = Polys[k];
             bool inside = false;
             foreach (var ring in rings)
                 for (int i = 0, j = ring.Count - 1; i < ring.Count; j = i++)

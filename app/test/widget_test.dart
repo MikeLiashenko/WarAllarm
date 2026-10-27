@@ -139,6 +139,17 @@ void main() {
       expect(OblastLookupProbe.oblastAt(m.lat, m.lon), 'Poltava');
     });
 
+    test('never flies out of Ukraine (Odesa → west stops before Moldova)', () {
+      // A reactive drone over Odesa with a real westward course: 20 min × 7 km/min would
+      // put it deep in Moldova; it must stop at the border instead.
+      final w = MapTarget(
+          id: 'o', label: 'Шахед реактивний', cat: 'shahed', lat: 46.48, lon: 30.73, kmh: 500,
+          seenMs: seen, route: const [[46.48, 30.73], [46.48, 28.0]]);
+      final m = motionOf(w, seen + 20 * 60000);
+      expect(OblastLookupProbe.oblastAt(m.lat, m.lon), isNotNull);
+      expect(m.lon, greaterThan(29.5));
+    });
+
     test('a new post moves it to the reported place and it flies on from there', () {
       final later = seen + 30 * 60000;
       final m = motionOf(drone(at: later, lat: 50.02, lon: 33.0), later); // «Шахед на Лубни»

@@ -99,24 +99,40 @@ void setMotionAlarmOblasts(Set<String>? zones) {
 
 final Map<String, double> _limitCache = {};
 
-/// How far along [route] the target may fly before it would leave the alarm zone.
+/// How far along [route] the target may fly before it would leave the alarm zone —
+/// or Ukraine: a drone over Odesa oblast flying "west" must not drift on into
+/// Moldova and Romania. Short excursions (≤15 km) are allowed because the
+/// polygons are simplified along the border and the coast.
 double _alarmLimitKm(MapTarget t, List<List<double>> route) {
   final zones = motionAlarmOblasts;
-  if (zones == null || zones.isEmpty) return double.infinity;
   final key = '${t.id}|${t.seenMs}|${t.lat},${t.lon}|$_zonesVersion';
   final hit = _limitCache[key];
   if (hit != null) return hit;
   if (_limitCache.length > 400) _limitCache.clear();
   final total = routeLengthKm(route);
   var lim = total;
+  var wasIn = false;
+  double? leftAt;
   for (var d = 0.0; d <= total; d += 4) {
     final p = alongRoute(route, d);
     final name = OblastLookup.instance.nameAt(p.lat, p.lon);
-    if (name != null && !zones.contains(name)) {
+    if (name == null) {
+      if (!wasIn) continue; // still on its way in (launched from Russia / the sea)
+      leftAt ??= d;
+      if (d - leftAt > 15) {
+        lim = math.max(0, leftAt - 4);
+        break;
+      }
+      continue;
+    }
+    wasIn = true;
+    leftAt = null;
+    if (zones != null && zones.isNotEmpty && !zones.contains(name)) {
       lim = math.max(0, d - 4);
       break;
     }
   }
+  if (leftAt != null && lim == total) lim = math.max(0, leftAt - 4);
   return _limitCache[key] = lim;
 }
 
@@ -210,8 +226,12 @@ TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
     // Real course: creep along it for at most [kCreepMin] minutes, at ~70 % of the
     // speed (turns and zig-zags make the straight-line progress shorter).
     final m = moveKm(t.lat, t.lon, t.heading!, math.min(30.0, spd * 0.7 * math.min(quiet, kCreepMin)));
-    lat = m.lat;
-    lon = m.lon;
+    // Never creep out of Ukraine (Odesa oblast → Moldova / Romania).
+    final lookup = OblastLookup.instance;
+    if (lookup.nameAt(m.lat, m.lon) != null || lookup.nameAt(t.lat, t.lon) == null) {
+      lat = m.lat;
+      lon = m.lon;
+    }
   }
   // After that it could be anywhere within this much — shown as a ring.
   final uncert = frozen || t.down || quiet < 1.5 ? 0.0 : math.min(80.0, spd * 0.5 * quiet);

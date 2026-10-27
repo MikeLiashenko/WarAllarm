@@ -306,7 +306,9 @@ class MapDataController extends ChangeNotifier {
             stageLabel: 'зона авіації',
             seenMs: (z['ts'] as num?)?.toInt() ?? 0,
             sources: (z['src'] as num?)?.toInt() ?? 0,
-            areaKm: z['kab'] == true ? 60 : 35,
+            // The plane sits where it really flies (Russian / occupied airspace); the
+            // ring is how far its KABs glide from there.
+            areaKm: (z['areaKm'] as num?)?.toDouble() ?? (z['kab'] == true ? 60 : 35),
           ),
     ];
   }

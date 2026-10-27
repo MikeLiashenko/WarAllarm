@@ -352,6 +352,11 @@ public sealed class ThreatTracker
         var pos = (f.lat, f.lon);
         lock (_gate)
         {
+            // Ціль цієї балістики вже названо («на Харків») — повторні «загроза балістики з
+            // Бєлгорода» не повертають велике коло досяжності поверх справжнього польоту.
+            if (ev.Kind == ThreatKind.Ballistic && _active.Values.Any(a => a.Kind == ThreatKind.Ballistic && !a.Launch
+                    && a.From is { } af && ThreatGeo.Km(af, pos) < 80 && now - a.LastUpdate < TimeSpan.FromMinutes(5)))
+                return null;
             var key = $"LAUNCH:{f.name}:{ev.Kind}";
             bool isNew = !_active.TryGetValue(key, out var t);
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now, LaunchAt = now }; _active[key] = t; }

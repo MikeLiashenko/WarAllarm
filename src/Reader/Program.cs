@@ -410,8 +410,12 @@ if (args.Length >= 1 && args[0].Equals("launches", StringComparison.OrdinalIgnor
     LaunchGroups.Absorb(crimea.PosAt(t0.AddHours(2)), 5, t0.AddHours(2));
     Console.WriteLine($"\nПісля 5 справжніх цілей біля розрахункової точки кримської групи: ×{LaunchGroups.Active.FirstOrDefault(g => g.Origin == "Крим")?.Left}");
     Console.WriteLine("\nМаршрути справжніх цілей (без курсу):");
-    foreach (var (name, p) in new[] { ("Суми", (50.91, 34.80)), ("Полтава", (49.59, 34.55)), ("Миколаїв", (46.97, 32.0)), ("Житомир", (50.25, 28.66)), ("Бровари", (50.51, 30.79)) })
-        Console.WriteLine($"  {name,-9} → {(TypicalRoutes.FromPosition(p, null, false) is { } r ? string.Join(" → ", r.Skip(1).Select(NearestCity)) : "— (вже біля Києва)")}");
+    foreach (var (name, p) in new[] { ("Суми", (50.91, 34.80)), ("Полтава", (49.59, 34.55)), ("Миколаїв", (46.97, 32.0)), ("Житомир", (50.25, 28.66)), ("Бровари", (50.51, 30.79)),
+                                      ("Одеса", (46.48, 30.73)), ("Б.-Дністровський", (46.19, 30.35)), ("Ізмаїл", (45.35, 28.84)) })
+        Console.WriteLine($"  {name,-9} → {(TypicalRoutes.FromPosition(p, null, false) is { } r ? string.Join(" → ", r.Skip(1).Select(NearestCity)) : "— (далі маршруту нема)")}");
+    // Відомий курс на захід з Одещини — не далі кордону (раніше +150 км — у Молдову/Румунію).
+    foreach (var (name, p, h) in new[] { ("Одеса→Зх", (46.48, 30.73), 270.0), ("Ізмаїл→Пн", (45.35, 28.84), 0.0), ("Рені→Зх", (45.46, 28.28), 270.0) })
+        Console.WriteLine($"  {name,-9} курс {h:0}° → {(TypicalRoutes.FromPosition(p, h, true) is { } r ? $"до ({r[^1].lat:0.00},{r[^1].lon:0.00}), {TypicalRoutes.LengthKm(r):0} км, в Україні: {OblastGeo.InUkraine(r[^1].lat, r[^1].lon)}" : "— (одразу кордон)")}");
     return;
 }
 // «→ на Київ, біля тебе ~через 1,5 год» — куди типово йде група з цього місця пуску (оцінка).

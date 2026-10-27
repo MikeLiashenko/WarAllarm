@@ -45,7 +45,45 @@ public static class TypicalRoutes
         };
         var route = new List<(double lat, double lon)> { o };
         route.AddRange(tail);
-        return route;
+        return ClipToUkraine(route);
+    }
+
+    /// Маршрут, що ЗАЙШОВ в Україну, з неї не виходить: обрізаємо там, де він покидає
+    /// країну (шахед з Одещини «на захід» летів через Молдову в Румунію, а «вздовж курсу»
+    /// на 150 км — за Дунай). Початок поза Україною (пуск з РФ, з моря) — нормально.
+    /// Короткі «вилазки» до 15 км не рахуються: полігони спрощені біля кордону й моря.
+    public static List<(double lat, double lon)>? ClipToUkraine(List<(double lat, double lon)> route)
+    {
+        if (route.Count < 2) return null;
+        double total = LengthKm(route);
+        bool wasIn = false;
+        double? leftAt = null;
+        for (double d = 0; d <= total; d += 3)
+        {
+            var p = At(route, d);
+            if (OblastGeo.InUkraine(p.lat, p.lon)) { wasIn = true; leftAt = null; continue; }
+            if (!wasIn) continue;
+            leftAt ??= d;
+            if (d - leftAt.Value > 15) return Cut(route, leftAt.Value - 3); // остання точка ще в Україні
+        }
+        // Кінець маршруту — уже за кордоном (останній відрізок короткий).
+        return leftAt is { } la ? Cut(route, la - 3) : route;
+    }
+
+    // Перші [km] маршруту; null — якщо від нього майже нічого не лишилось.
+    static List<(double lat, double lon)>? Cut(List<(double lat, double lon)> route, double km)
+    {
+        if (km < 5) return null;
+        var outp = new List<(double lat, double lon)> { route[0] };
+        double run = 0;
+        for (int i = 1; i < route.Count; i++)
+        {
+            double seg = ThreatGeo.Km(route[i - 1], route[i]);
+            if (run + seg >= km) { outp.Add(At(route, km)); return outp; }
+            run += seg;
+            outp.Add(route[i]);
+        }
+        return outp;
     }
 
     /// Куди ймовірно полетить ціль, що зараз у точці [p] (перша точка — сама p).
@@ -58,7 +96,7 @@ public static class TypicalRoutes
         if (headingKnown && heading is { } h)
         {
             route.Add(Move(p, h, 150));
-            return route;
+            return ClipToUkraine(route);
         }
         bool northEast = p.lat > 49.3 && p.lon > 30.9 && p.lon < 38.5;
         if (northEast)
@@ -69,10 +107,13 @@ public static class TypicalRoutes
         if (p.lon < 30.2 && p.lat > 50.0) // Житомирщина, Рівненщина — далі на захід
         {
             foreach (var w in new[] { Zhytomyr, Rivne, Lviv }) if (w.lon < p.lon - 0.3) route.Add(w);
-            return route.Count > 1 ? route : null;
+            return route.Count > 1 ? ClipToUkraine(route) : null;
         }
+        // Бессарабія (Ізмаїл, Рені, Болград): «на захід» — це Молдова й Румунія. Там цілі
+        // летять на порти Дунаю, тобто вже біля цілі — маршруту далі нема.
+        if (p.lat < 46.4 && p.lon < 30.3) return null;
         foreach (var w in West) if (w.lon < p.lon - 0.3) route.Add(w);
-        return route.Count > 1 ? route : null;
+        return route.Count > 1 ? ClipToUkraine(route) : null;
     }
 
     /// Маршрут цілі: якщо в пості названо, куди вона летить («курсом на Полтаву»), — спершу
@@ -84,7 +125,7 @@ public static class TypicalRoutes
         {
             var route = new List<(double lat, double lon)> { p, (c.lat, c.lon) };
             if (FromPosition((c.lat, c.lon), null, false) is { } further) route.AddRange(further.Skip(1));
-            return route;
+            return ClipToUkraine(route);
         }
         return FromPosition(p, t.Heading, t.HeadingKnown);
     }
