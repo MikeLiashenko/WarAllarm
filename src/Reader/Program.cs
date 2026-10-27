@@ -345,6 +345,13 @@ if (args.Length >= 1 && args[0].Equals("journal", StringComparison.OrdinalIgnore
     return;
 }
 
+// ── 🔁 Прогін журналу через теперішній хаб:   dotnet run -- replay [РРРР-ММ-ДД|файл] [вихід.txt]
+if (args.Length >= 1 && args[0].Equals("replay", StringComparison.OrdinalIgnoreCase))
+{
+    Journal.Replay(args.Length >= 2 ? args[1] : null, args.Length >= 3 ? args[2] : null);
+    return;
+}
+
 // ── Тест «де ціль, а куди летить» (оффлайн):   dotnet run -- course
 if (args.Length >= 1 && args[0].Equals("course", StringComparison.OrdinalIgnoreCase))
 {

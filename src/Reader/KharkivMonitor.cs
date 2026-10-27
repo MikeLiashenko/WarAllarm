@@ -82,6 +82,7 @@ public static class KharkivMonitor
         // ── Основ'янський ───────────────────────────────────────────────────
         ("основ",           GeoRole.CityDistrict, "Основа"),
         ("сортув",          GeoRole.CityDistrict, "Основа"),
+        ("сортиров",        GeoRole.CityDistrict, "Основа"),
         ("нові дома",       GeoRole.CityDistrict, "Нові Дома"),
         ("новые дома",      GeoRole.CityDistrict, "Нові Дома"),
         ("левад",           GeoRole.CityDistrict, "Левада"),
@@ -127,6 +128,8 @@ public static class KharkivMonitor
         ("питомник",GeoRole.Suburb, "Питомник"),  ("пітомник",GeoRole.Suburb,"Питомник"),
         ("козач",   GeoRole.Suburb, "Козача Лопань"),("жуки",GeoRole.Suburb, "Жуки"),
         ("вільхівк",GeoRole.Suburb, "Вільхівка"), ("кутузівк",GeoRole.Suburb,"Кутузівка"),
+        ("р лозов", GeoRole.Suburb, "Руська Лозова"), ("руська лозов", GeoRole.Suburb, "Руська Лозова"),
+        ("русская лозов", GeoRole.Suburb, "Руська Лозова"),
         ("лісне",   GeoRole.Suburb, "Лісне"),     ("черноглаз",GeoRole.Suburb,"Черноглазівка"),
         // ── дальняя область (>40 км) ────────────────────────────────────────
         ("ізюм", GeoRole.Far, "Ізюм"),      ("куп'янськ", GeoRole.Far, "Куп'янськ"),
@@ -143,6 +146,19 @@ public static class KharkivMonitor
         ("колодец", GeoRole.Far, "Вел. Бурлук"),("первомайск", GeoRole.Far, "Первомайський"),
         ("шалигине", GeoRole.Far, "Шалигине"),("малих проход", GeoRole.Far, "Малі Проходи"),
     };
+
+    /// Місце Харкова/області за місцевою назвою з поста («Новые Дома», «Алексеевку», «на Салтівку»)
+    /// → канонічна назва (Нові Дома, Олексіївка…), або null. Для хабу джерел: харківські
+    /// канали пишуть масиви й російською, а повний довідник н.п. їх не знає.
+    /// <paramref name="multiWord"/> — лише назви з кількох слів («Р Лозовая», «Большая Даниловка»):
+    /// їх шукаємо в усій фразі, до розбору на окремі слова.
+    public static string? PlaceName(string phrase, bool multiWord = false)
+    {
+        var low = phrase.ToLowerInvariant().Replace('.', ' ').Replace("  ", " ");
+        foreach (var (stem, role, name) in Gaz)
+            if (role != GeoRole.CityGeneral && (!multiWord || stem.Contains(' ')) && low.Contains(stem)) return name;
+        return null;
+    }
 
     // ── главный разбор одного поста ──────────────────────────────────────────
     public static KhEvent Analyze(string post, string myDistrict)

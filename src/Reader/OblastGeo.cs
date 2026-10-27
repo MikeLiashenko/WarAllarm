@@ -139,6 +139,7 @@ public static class RaionGeo
     static readonly List<(string name, string core, double lat, double lon)> Centres = Parse();
 
     static string Core(string w) => System.Text.RegularExpressions.Regex.Replace(w.ToLowerInvariant().Replace('’', '\'').Replace('ʼ', '\''), "[аеєиіїоуюяь]+$", "");
+    static string Consonants(string w) => System.Text.RegularExpressions.Regex.Replace(w, "[аеєиіїоуюяьыэёъ'-]", "");
 
     static List<(string, string, double, double)> Parse()
     {
@@ -159,12 +160,17 @@ public static class RaionGeo
     /// «Херсонський район» / «Херсонському районі» → (назва, центр). null — не район / не знайдено.
     public static (string name, double lat, double lon)? Find(string q, IReadOnlyCollection<string> region)
     {
-        var m = System.Text.RegularExpressions.Regex.Match(q.Trim(), @"^([\p{L}'’ʼ\-]+)\s+район\w*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        // «Конотопський р-н» — так само, як «район».
+        var m = System.Text.RegularExpressions.Regex.Match(q.Trim(), @"^([\p{L}'’ʼ\-]+)\s+(?:район\w*|р-н\w*)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (!m.Success) return null;
         var core = Core(m.Groups[1].Value);
         if (core.Length < 4) return null;
         // «херсонськ» (називний) vs «херсонськ» (місцевий «Херсонському») — основа однакова.
         var cands = Centres.Where(c => c.core == core || (core.Length >= 6 && c.core.StartsWith(core[..^1]))).ToList();
+        // Російською («Березовский», «Подольский», «Раздельнянский район») — однакові приголосні:
+        // б-р-з-в-с-к = Березівський, п-д-л-с-к = Подільський.
+        if (cands.Count == 0 && Consonants(core) is { Length: >= 5 } cc)
+            cands = Centres.Where(c => Consonants(c.core) == cc).ToList();
         if (cands.Count == 0) return null;
         var best = cands.OrderBy(c => PlaceFinder.RegionKm((c.lat, c.lon), region) ?? 0).First();
         return (best.name, best.lat, best.lon);

@@ -37,6 +37,55 @@ public static class Journal
             targets = r.Confirmed.Select(e => new { k = e.Ev.Kind.ToString(), place = e.Place, lat = Math.Round(e.Pos.lat, 3), lon = Math.Round(e.Pos.lon, 3), n = e.Ev.Count, toward = e.Ev.Toward }),
         });
 
+    /// Прогнати пости журналу через ТЕПЕРІШНІЙ хаб (з реальним часом постів): кожен пост,
+    /// що він зрозумів тоді і що розуміє зараз. Щоб правки сортувальника перевірялись на
+    /// справжній ночі, а не на вигаданих прикладах.   `dotnet run -- replay [дата|файл] [вихід.txt]`
+    public static void Replay(string? date, string? outPath)
+    {
+        var file = date is { } d && File.Exists(d) ? d : Path.Combine(Dir, $"{date ?? DateTime.Now.ToString("yyyy-MM-dd")}.jsonl");
+        if (!File.Exists(file)) { Console.WriteLine($"Немає журналу {file}"); return; }
+        var day = DateTime.TryParse(Path.GetFileNameWithoutExtension(file), out var dd) ? dd : DateTime.Today;
+        var posts = new List<(string ch, int id, DateTime at, string text)>();
+        var was = new Dictionary<(string, int), string>();
+        foreach (var line in File.ReadLines(file))
+        {
+            try
+            {
+                var e = JsonDocument.Parse(line).RootElement;
+                var ch = e.GetProperty("ch").GetString()!; var id = e.GetProperty("id").GetInt32();
+                if (e.GetProperty("kind").GetString() == "post")
+                    posts.Add((ch, id, day + TimeSpan.Parse(e.GetProperty("t").GetString()!), e.GetProperty("text").GetString() ?? ""));
+                else was[(ch, id)] = e.GetProperty("verdict").GetString() ?? "";
+            }
+            catch { }
+        }
+        var hub = new SourceHub();
+        var sb = new System.Text.StringBuilder();
+        var now = new Dictionary<HubVerdict, int>();
+        int changed = 0;
+        foreach (var (ch, id, at, text) in posts.OrderBy(p => p.at))
+        {
+            if (SourceCatalog.Get(ch) is not { } si) continue;
+            // Лише пости, що й наживо йшли в хаб (харківські/київські канали має свій парсер).
+            if (was.Count > 0 && !was.ContainsKey((ch, id))) continue;
+            var r = hub.Process(si, text, at);
+            now[r.Verdict] = now.GetValueOrDefault(r.Verdict) + 1;
+            var old = was.GetValueOrDefault((ch, id), "?");
+            if (old != r.Verdict.ToString()) changed++;
+            var what = r.Verdict switch
+            {
+                HubVerdict.Confirmed => string.Join("; ", r.Confirmed.Select(e => $"{e.Ev.Kind} {e.Place}×{e.Ev.Count}")),
+                HubVerdict.AllClear => "відбій " + (r.ClearOblast ?? ""),
+                _ => r.Note,
+            };
+            sb.AppendLine($"{at:HH:mm:ss}\t@{ch}\t{old}→{r.Verdict}\t{what}\t{text.Replace("\n", " ⏎ ")}");
+        }
+        if (outPath != null) File.WriteAllText(outPath, sb.ToString()); else Console.Write(sb);
+        Console.WriteLine($"📒 {file}: постів каталогу {now.Values.Sum()}, вердикт змінився у {changed}");
+        foreach (var (v, n) in now.OrderByDescending(p => p.Value)) Console.WriteLine($"   {v,-10} {n}");
+        Console.WriteLine("\n" + hub.Report(15));
+    }
+
     /// Звіт за день: скільки постів, що не розібрано (з текстами), які місця найчастіші.
     public static void Report(string? date)
     {

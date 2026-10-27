@@ -159,7 +159,17 @@ public static class PlaceFinder
     {
         (@"^(?:київське )?(?:водосховищ|море\b)", "Київське водосховище", 50.82, 30.47),
         (@"^столиц", "Київ", 50.4547, 30.5238),
+        // Місцевий сленг: «Троя» = Троєщина (Київ), «Амур» = Амур-Нижньодніпровський (Дніпро),
+        // «Хортицький» = район Запоріжжя, ТЕЦ-6 — біля Троєщини.
+        (@"^тро[яюєї]\b", "Троєщина", 50.516, 30.605),
+        (@"^тец[- ]?6\b", "ТЕЦ-6 (Київ)", 50.524, 30.655),
+        (@"^амур\b", "Амур (Дніпро)", 48.505, 35.085),
+        (@"^хортицьк", "Хортицький р-н (Запоріжжя)", 47.820, 35.030),
     };
+
+    // Нормовані назви довідника — рахуємо раз (раніше Norm для кожного з ~5300 імен на
+    // кожен запит: десятки тисяч Regex на пост на слабкому сервері).
+    static readonly string[] CityNorm = Cities.All.Select(c => Norm(c.name)).ToArray();
 
     /// Назва ОБЛАСТІ замість точки: «Харківщині», «Київщину», «Запорізьку область».
     /// Лише справжні обласні «-щина/-ччина» — раніше відкидалось будь-яке «щин», і
@@ -188,9 +198,10 @@ public static class PlaceFinder
     // Назва й запит — те саме слово з точністю до відмінкового закінчення
     // («Новоселівка» / «Новоселівку» / «Новоселівці»), а не лише «схожі приголосні».
     static string Core(string w) => Regex.Replace(w, "[аеєиіїоуюяь]+$", "");
-    public static bool Literal(string name, string q)
+    public static bool Literal(string name, string q) => LiteralN(Norm(name), Norm(q));
+    static bool LiteralN(string name, string q)
     {
-        var nw = Norm(name).Split(' ', '-'); var qw = Norm(q).Split(' ', '-');
+        var nw = name.Split(' ', '-'); var qw = q.Split(' ', '-');
         if (nw.Length != qw.Length) return false;
         for (int i = 0; i < nw.Length; i++)
         {
@@ -211,9 +222,9 @@ public static class PlaceFinder
 
     /// Чи названо місце <paramref name="name"/> у фразі <paramref name="q"/> (з відмінком).
     /// Повертає «якість» збігу (0 — ні).
-    public static int Score(string name, string q)
+    public static int Score(string name, string q) => ScoreN(Norm(name), Norm(q));
+    static int ScoreN(string name, string q)
     {
-        name = Norm(name); q = Norm(q);
         if (name.Length < 3 || q.Length < 3) return 0;
         if (name == q) return 1000;
         var nw = name.Split(' ', '-'); var qw = q.Split(' ', '-');
@@ -254,11 +265,14 @@ public static class PlaceFinder
     {
         var q = Norm(raw);
         if (q.Length < 3) return null;
-        // Область замість міста («маневрує на Харківщині») — це не точка.
-        if (Geo.Canonical(q) is not null || OblastWord.IsMatch(q)) return null;
+        // Область замість міста («маневрує на Харківщині») — це не точка. Крім «Запоріжжя»:
+        // монітори так кличуть МІСТО («На Запоріжжя»), а не область.
+        if (Geo.Canonical(q) is not null && q != "запоріжжя" || OblastWord.IsMatch(q)) return null;
         // «Херсонський район» (офіційні районні тривоги: «дронова загроза») → центр району.
         if (RaionGeo.Find(q, region) is { } rg) return rg;
-        if (Aliases.FirstOrDefault(a => Regex.IsMatch(q, a.re)) is { name: not null } al)
+        // Норма прибирає цифри («ТЕЦ-6» → «тец-»), тож орієнтири звіряємо й із сирим текстом.
+        var rawLow = raw.Trim().ToLowerInvariant();
+        if (Aliases.FirstOrDefault(a => Regex.IsMatch(q, a.re) || Regex.IsMatch(rawLow, a.re)) is { name: not null } al)
             return (al.name, al.lat, al.lon);
 
         // 1) Курований довідник (райони міст, ключові н.п.). Він ловить і префікс фрази
@@ -274,7 +288,7 @@ public static class PlaceFinder
         // Назва СПРАВЖНЯ (є такий н.п. хоч десь) — тоді «схоже за приголосними» інше село не
         // підставляємо: «Новоселівка» ≠ «Новосілки» (а то Новоселівка з Чернігівщини ставала
         // Новосілками під Києвом і вмикала київську тривогу). Краще «місце не знайдено».
-        bool real = Cities.All.Any(c => Literal(c.name, q));
+        bool real = CityNorm.Any(c => LiteralN(c, q));
         if (real && cur is { } c0 && !Literal(c0.name, q)) { cur = null; curScore = 0; }
 
         // 2) Повний довідник: усі збіги, найкращий за (якість, близькість до регіону, розмір).
@@ -283,9 +297,9 @@ public static class PlaceFinder
         for (int i = 0; i < Cities.All.Length; i++)
         {
             var c = Cities.All[i];
-            int sc = Score(c.name, q);
+            int sc = ScoreN(CityNorm[i], q);
             if (sc == 0) continue;
-            if (real && !Literal(c.name, q)) continue;
+            if (real && !LiteralN(CityNorm[i], q)) continue;
             var km = RegionKm((c.lat, c.lon), region);
             if (km is { } k && k > maxKm) continue;
             if (km is null && sc < 1000 && q.Length < 5) continue; // без регіону — лише впевнені
@@ -298,6 +312,38 @@ public static class PlaceFinder
         // («на Миколаївку» → Миколаївка, а не Миколаїв).
         if (cur is { } cv && (best is null || curScore >= Score(best.Value.name, q))) return cv;
         if (best is { } b) ThreatGeo.Learn(b.name, b.lat, b.lon);
+        return best;
+    }
+
+    /// Назва без тезок по всій країні (усі однойменні н.п. в межах 40 км) — тоді її можна
+    /// ставити й без регіону каналу: «курсом на Єзупіль» від київського агрегатора.
+    public static (string name, double lat, double lon)? Unique(string raw)
+    {
+        var q = Norm(raw);
+        if (q.Length < 4 || Geo.Canonical(q) is not null && q != "запоріжжя" || OblastWord.IsMatch(q)) return null;
+        var hits = new List<int>();
+        for (int i = 0; i < CityNorm.Length; i++)
+            if (LiteralN(CityNorm[i], q)) hits.Add(i);
+        if (hits.Count == 0) return null;
+        var f = Cities.All[hits[0]];
+        if (hits.Any(i => ThreatGeo.Km((Cities.All[i].lat, Cities.All[i].lon), (f.lat, f.lon)) > 40)) return null;
+        ThreatGeo.Learn(f.name, f.lat, f.lon);
+        return f;
+    }
+
+    /// Скорочена назва з крапкою («Червоногригор. ТГ») — н.п. регіону, що з неї починається.
+    public static (string name, double lat, double lon)? Prefix(string abbr, IReadOnlyCollection<string> region, double maxKm)
+    {
+        var q = Norm(abbr);
+        if (q.Length < 6 || q.Contains(' ') || region.Count == 0) return null;
+        (string name, double lat, double lon)? best = null;
+        double bestKm = maxKm;
+        for (int i = 0; i < CityNorm.Length; i++)
+        {
+            if (!CityNorm[i].StartsWith(q)) continue;
+            var c = Cities.All[i];
+            if (RegionKm((c.lat, c.lon), region) is { } km && km <= bestKm) { bestKm = km; best = c; }
+        }
         return best;
     }
 }
@@ -340,16 +386,31 @@ public sealed class SourceHub
 
     // Сміття, яке не несе живої загрози: підписи, реклама, збори, новини «після».
     static readonly Regex SigLine = new(
-        @"@\w|https?://|t\.me/|підписат|подписат|надіслати новину|зворотн|alerts live|skyops|#реклама|whatsapp|instagram|tiktok|threads|написати нам|чуєте бпла",
+        @"@\w|https?://|t\.me/|підписат|подписат|підпиш|подпиш|надіслати новину|зворотн|alerts live|skyops|#реклама|whatsapp|instagram|tiktok|threads|написати нам|чуєте бпла|крам радар|темный рыцарь",
         RegexOptions.IgnoreCase);
     static readonly Regex Fundraise = new(@"monobank|банк[аи]|картк|донат|збір|зібрали|реквізит|paypal|грн\b", RegexOptions.IgnoreCase);
     static readonly Regex AfterNews = new(
-        @"наслідк|поранен|загинул|поміран|постраждал|пошкоджен|зруйнов|госпіталізов|ворог (?:атакував|наніс|завдав)|завдали удару|удар по|влучив|влучанн[яю] (?:в|у) |— суспільне|, — \w+|isw|за даними|повідомив|повідомила",
+        @"наслідк|поранен|загинул|поміран|постраждал|пошкоджен|зруйнов|госпіталізов|ворог (?:атакував|наніс|завдав)|завдали удару|удар по|влучив|влучанн[яю] (?:в|у) |— суспільне|, — \w+|isw|за даними|повідомив|повідомила|уражен|за тиждень|за добу|протягом \d|прогноз погоди|поїзд|результати тижня|ворог здійснив|обстріл",
         RegexOptions.IgnoreCase);
+    static readonly Regex Impact = new(@"удар по|приліт|прилет|влучанн|загибл|загинул|поранен|за попередньою інформацією|—\s*терехов", RegexOptions.IgnoreCase);
     static readonly Regex Clear = new(
         @"^(?:✅|⚪️|❎|🟢)?\s*(?:відбій|отбой)|(?:область|київ|харків|місто|небо)\s*[—:-]?\s*чисто|наразі чисто|над \w+ наразі чисто|^чисто\b|^[А-ЯІЇЄҐ][\w'ʼ’-]*\s+чисто\W*$",
         RegexOptions.IgnoreCase);
-    static readonly Regex AlarmOnly = new(@"повітряна тривога|оголошена .*тривога|^\W*тривога\W*$|загроза (?:шахедів|бпла|реактивних)", RegexOptions.IgnoreCase);
+    // Відбій по району/громаді («🟢 Конотопський р-н ⏎ Відбій повітряної тривоги», «Чугуївський район
+    // - відбій») — не ціль у центрі району і не відбій по всій області каналу.
+    static readonly Regex ClearWord = new(@"\b(?:відбій|отбой)\b", RegexOptions.IgnoreCase);
+    static readonly Regex RaionWord = new(@"р-н|район|громад|\bтг\b", RegexOptions.IgnoreCase);
+    // Районна «дронова загроза» («🟡 Корюківський район — повітряна тривога, жовтий рівень: Дронова
+    // загроза», «🟡 Миколаївський район - Дронова загроза») — ФПВ біля центру району.
+    static readonly Regex RaionDrone = new(
+        @"(?m)^\W*([\p{L}'ʼ’-]+\s+(?:район|р-н))\b[^\n]*?дронова загроза", RegexOptions.IgnoreCase);
+    // Офіційні оголошення загроз і рівнів тривоги («🛸 Вишгород (Київська обл.) ⏎ Загроза
+    // застосування БПЛА», «Ракетна загроза (червоний рівень)», «Желтый уровень тревоги ⏎ • Березовский
+    // район») — це тривоги, а не ціль у точці; вони й так є з офіційного API.
+    static readonly Regex AlertNotice = new(
+        @"загроза застосування|ракетна загроза|(?:рівень|уровень)\s+(?:тривоги|тревоги)|(?:жовтий|червоний|желтый|красный)\s+(?:рівень|уровень)",
+        RegexOptions.IgnoreCase);
+    static readonly Regex AlarmOnly = new(@"повітряна тривога|воздушная тревога|оголошена .*тривога|^\W*тривога\W*$|загроза (?:шахедів|бпла|реактивних)", RegexOptions.IgnoreCase);
     static readonly Regex Ballistic = new(@"балісти|іскандер", RegexOptions.IgnoreCase);
     static readonly Regex Memorial = new(@"прощаєт|прощаєм|з героєм|навіки в строю|вічна пам|загинув|загинула|співчутт", RegexOptions.IgnoreCase);
 
@@ -368,14 +429,18 @@ public sealed class SourceHub
             var clean = Clean(text);
             if (clean.Length == 0 || Fundraise.IsMatch(clean) && clean.Length > 60)
             { st.Noise++; return new(HubVerdict.Noise, [], "шум"); }
-            if (AfterNews.IsMatch(clean) && clean.Length > 70)
+            // «🗞 …» — рубрика новин (@nikalert); «удар по Новобаварському району — Терехов» — постфактум.
+            // «⚡️Прилет Новобаварском районе», «є загиблі. — Терехов» — постфактум навіть коротко: ціль
+            // уже не летить, а «Терехов» ставав селом Терни.
+            if (text.TrimStart().StartsWith("🗞") || Impact.IsMatch(clean) && clean.Length < 200
+                || AfterNews.IsMatch(clean) && clean.Length > 70)
             { st.News++; return new(HubVerdict.News, [], "новина (не жива загроза)"); }
 
             // Відбій від місцевого спостерігача свого регіону / офіційного.
             if (Clear.IsMatch(clean) && clean.Length < 90)
             {
                 string? obl = src.Oblasts.Length == 1 ? src.Oblasts[0] : null;
-                if (src.Tier == SourceTier.Official) obl = null;
+                if (src.Tier == SourceTier.Official || RaionWord.IsMatch(clean)) obl = null;
                 return new(HubVerdict.AllClear, [], "відбій", obl ?? (src.Tier == SourceTier.Official ? "*" : null));
             }
             if (Memorial.IsMatch(clean))
@@ -400,10 +465,18 @@ public sealed class SourceHub
             if (ballisticText && events.All(e => e.City == null))
                 return new(HubVerdict.Ballistic, [], clean.Replace("\n", " "));
             bool bare = false;
-            if (events.All(e => e.City == null && e.Toward == null) && src.Oblasts.Length > 0)
+            if (events.All(e => e.City == null && e.Toward == null))
             {
-                var b = BareNames(clean, src, at);
-                if (b.Count > 0) { events = b; bare = true; }
+                var rd = RaionDrone.Matches(clean);
+                if (ClearWord.IsMatch(clean) && clean.Length < 200)
+                    return new(HubVerdict.AllClear, [], "відбій по району/громаді");
+                if (rd.Count > 0)
+                    events = rd.Select(m => new ThreatEvent(ThreatKind.Fpv, dflt, m.Groups[1].Value, 1, "дронова загроза", m.Value)).ToList();
+                // «🔴 Прилуцький район — Повітряна тривога» — тривога, а не ціль у центрі району.
+                else if ((AlertNotice.IsMatch(clean) || AlarmOnly.IsMatch(clean)) && clean.Length < 250)
+                    return new(HubVerdict.Noise, [], "оголошення загрози/тривоги (є з офіційного API)");
+                else if (src.Oblasts.Length > 0 && BareNames(clean, src, at) is { Count: > 0 } b)
+                { events = b; bare = true; }
             }
             if (events.Count == 0)
             {
@@ -413,24 +486,27 @@ public sealed class SourceHub
             }
 
             var outp = new List<HubEvent>();
+            var missed = new List<string>();
             int placed = 0;
             foreach (var ev in events)
             {
                 (string name, double lat, double lon)? g;
-                if (ev.City is null)
-                {
+                // «Реактивний від Березни» (міста не названо) — ціль зараз біля Березни. Але не
+                // район пуску («з Курська», «з Криму») і не балістика/ракети (вони ще далеко).
+                var phrase = ev.City ?? (ev.Kind is ThreatKind.Drone or ThreatKind.Target or ThreatKind.Fpv
+                                         && ev.From is { } fr && LaunchSites.FromText(fr) is null ? fr : null);
+                if (ev.City is null && ev.Toward is not null && ev.Oblast is not null && OblastGeo.PartPoint(ev.Oblast, ev.Side) is { } part)
                     // «на півночі Сумщини, курсом на Полтаву» — точка в цій частині області.
-                    if (ev.Toward is null || ev.Oblast is null || OblastGeo.PartPoint(ev.Oblast, ev.Side) is not { } part) continue;
                     g = (OblastGeo.Region(part.lat, part.lon) + " (обл.)", part.lat, part.lon);
-                }
+                else if (phrase is null) continue;
                 else
                 {
-                    var region = ev.Oblast is { } eo ? new[] { eo } : src.Oblasts;
-                    // «на Запорізьку область», «на Харківщині» — рівень області, не точка.
-                    if (PlaceFinder.OblastWord.IsMatch(ev.City)) { st.Unplaced++; continue; }
-                    g = PlaceFinder.Find(CityCore(ev.City), region, bare ? 160 : 260);
+                    // «Зпр: Ще Реактив на ТОТ Веселе з Криму» — область з початку рядка поста.
+                    var rawObl = Regex.Match(ev.Raw, @"^\W*([\p{L}'\-]{2,20})\s*:") is { Success: true } rh ? OblastHint(rh.Groups[1].Value) : null;
+                    g = Locate(phrase, rawObl ?? ev.Oblast, src, bare, out bool hadName);
+                    if (!hadName) continue; // «Збили», «Транзит», «Центр» — статус, а не місце
                 }
-                if (g is not { } gp) { st.Unplaced++; continue; }
+                if (g is not { } gp) { st.Unplaced++; missed.Add(phrase ?? ev.Toward ?? "?"); continue; }
                 placed++;
                 var pos = (gp.lat, gp.lon);
                 var placeObl = Geo.Canonical(OblastGeo.Region(gp.lat, gp.lon)) ?? ev.Oblast;
@@ -479,7 +555,9 @@ public sealed class SourceHub
                     }
                 }
             }
-            if (placed == 0) return new(HubVerdict.Unplaced, [], "місце не знайдено");
+            if (placed == 0 && missed.Count == 0)
+            { st.Noise++; return new(HubVerdict.Noise, [], "без місця"); }
+            if (placed == 0) return new(HubVerdict.Unplaced, [], "місце не знайдено: " + string.Join(" | ", missed));
             return new(outp.Count > 0 ? HubVerdict.Confirmed : HubVerdict.Pending, outp,
                 outp.Count > 0 ? "" : "чекаю підтвердження");
         }
@@ -510,26 +588,186 @@ public sealed class SourceHub
         return string.Join("\n", lines).Trim();
     }
 
-    // Ядро назви з хвоста фрази: «сектор Ірпінь» → «Ірпінь», «Курисово залетел очередной»
-    // → «Курисово», «Біла Церква» лишається (до 3 слів з великої літери).
-    static string CityCore(string raw)
+    // ── місце з фрази ───────────────────────────────────────────────────────
+    // Монітори пишуть місце як завгодно: «Далі Федорівка», «на півночі від н.п. Буялик на Одещині»,
+    // «Лідне/Пісочин», «Вишгород (Київська обл.)», «Зпр: Водяне», «Червоногригор. ТГ»,
+    // «Новые Дома», «2500-2700м Спасское». Тут — варіанти назви по черзі, до першого знайденого.
+
+    // Скорочення @nikalert: «Зпр:», «Мгнц:», «Хрсн:», «Dнпр:».
+    static readonly Dictionary<string, string> AbbrOblast = new(StringComparer.OrdinalIgnoreCase)
     {
-        // «Херсонський район» — назва району цілком (інакше лишалось би «Херсонський»).
-        if (Regex.IsMatch(raw.Trim(), @"^\S+\s+район\w*$", RegexOptions.IgnoreCase)) return raw.Trim();
-        var s = Regex.Replace(raw.Trim(), @"^(?:сектор|район|напрямок|місто|м\.|смт|село|с\.|сел\.)\s+", "", RegexOptions.IgnoreCase);
-        var words = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length <= 1 || !char.IsUpper(words[0][0])) return s;
-        var keep = new List<string> { words[0] };
-        foreach (var w in words.Skip(1))
+        ["зпр"] = "Запорізька", ["зп"] = "Запорізька", ["мгнц"] = "Дніпропетровська", ["нкп"] = "Дніпропетровська",
+        ["днпр"] = "Дніпропетровська", ["dнпр"] = "Дніпропетровська", ["хрсн"] = "Херсонська",
+    };
+
+    /// «Київська обл.», «Франківська», «Миколаївщина», «Зпр» → канонічна область (або null).
+    static string? OblastHint(string w)
+    {
+        w = w.Trim().TrimEnd('.', ':', ' ');
+        if (w.Length < 2) return null;
+        if (Geo.Canonical(w) is { } c) return c;
+        if (AbbrOblast.TryGetValue(w, out var a)) return a;
+        var adj = Regex.Replace(w, @"\s*(?:обл\.?|область|області)$", "", RegexOptions.IgnoreCase).Trim();
+        if (adj.Length < 4) return null;
+        return Geo.Oblasts.Values.Distinct().FirstOrDefault(v => v.Equals(adj, StringComparison.OrdinalIgnoreCase)
+                                                             || v.EndsWith("-" + adj, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Слова перед назвою: напрямки, прийменники, «н.п.», дієслова руху.
+    static readonly Regex LeadWord = new(
+        @"^(?:далі|далее|дальше|потім|знову|опять|снова|ще|і|и|та|на|в|у|до|над|под|під|біля|возле|около|поблизу|неподалік|недалеко|навпроти|напротив|повз|мимо|через|бік|сторону|напрямку|направлении|напрямок|курс|курсом|сектор|районі|районе|район|р-ні|р-н|н\.п|нп|с|смт|м|сел|село|селище|місто|мікрорайоні|мікрорайону|мікрорайон|микрорайон|масив|околиці|околицях|краю|підльоті|траса|трасі|трасу|проходить|пройшов|проходит|прошел|розворот|повернув|повертає|пішов|йде|іде|летить|летит|рух|рухається|змістилась|змістився|заходить|залітає|залетів|від|із|з|зі|межі|кордоні|тот|\w+(?:ніше|нее)|півночі|півдні|сході|заході|центрі)$",
+        RegexOptions.IgnoreCase);
+    // Засоби й службові слова — не частина назви (розривають «Кушугум Балабине ФПВ»).
+    static readonly Regex NotName = new(
+        @"^(?:бпла|бп|рбпла|дрон\w*|шахед\w*|шахід\w*|шохєд\w*|герань\w*|геран\w*|молні\w*|ланцет\w*|фпв|fpv|каб\w*|ракет\w*|крилат\w*|бандерол\w*|реактив\w*|мопед\w*|італмас\w*|ціл[ьі]\w*|розвід\w*|ударн\w*|звич\w*|р|тг|отг|обл|область|області|район|р-н"
+        + @"|центр|центрі|центру|центр\w+ села|транзит\w*|збил\w*|збит\w*|збиття|впал\w*|впав\w*|падає|вибух\w*|взрыв\w*|зник\w*|чути|чую|тиша|чисто|укрил\w*|увага|тривога|ситуац\w*|оновлен\w*|відбій|не|без|все|всі|пуск\w*|груп\w*|місто|штук\w*|висота|захід|схід|північ|південь|база|базар|україн\w*|країн\w*|росі\w*|рф|європ\w*|зала|орлан|мавік|червоним|жовтим|зеленим|синім|білим|помаранчевим)$",
+        RegexOptions.IgnoreCase);
+    // Прикметник-частина назви («Нові», «Велика») сам по собі — не місце.
+    static readonly Regex AdjPart = new(@"^(?:нов|стар|вел|мал|верх|нижн|біл|чорн|черв|зелен|середн|північн|південн|східн|західн)\w*$", RegexOptions.IgnoreCase);
+
+    /// Варіанти назви з фрази, по черзі. <paramref name="hint"/> — область з самої фрази
+    /// («(Київська обл.)», «Зпр:», «на Одещині»), <paramref name="hromada"/> — «… ТГ».
+    static List<string> PlaceVariants(string phrase, out string? hint, out bool hromada, bool split = false)
+    {
+        hint = null;
+        var p = phrase.Replace('’', '\'').Replace('ʼ', '\'').Replace('`', '\'');
+        // Дужки: область/район — підказка; інша назва («Траса Слов'янськ/Ізюм (Хрестище)») — точніше місце.
+        var inner = new List<string>();
+        foreach (Match m in Regex.Matches(p, @"\(([^)]*)\)"))
         {
-            if (keep.Count >= 3 || !(char.IsUpper(w[0]) || w.StartsWith('-'))) break;
-            keep.Add(w);
+            var pr = m.Groups[1].Value.Trim();
+            if (OblastHint(pr) is { } h) hint = h;
+            else if (RaionGeo.Find(PlaceFinder.Norm(pr), Array.Empty<string>()) is { } rg)
+                hint = Geo.Canonical(OblastGeo.Region(rg.lat, rg.lon)) ?? hint;
+            // Але не стара назва вулиці («вулиця Бориса Мозолевського (Фрунзе)») — то не село Фрунзе.
+            else if (pr.Length > 2 && char.IsUpper(pr[0]) && !Regex.IsMatch(p, @"вулиц|проспект|площ|бульвар|провулок|\bул\.", RegexOptions.IgnoreCase))
+                inner.Add(pr);
         }
-        return string.Join(' ', keep);
+        p = Regex.Replace(p, @"\([^)]*\)", " ");
+        // «Зпр: …», «Франківська: …», «Чернігівщина: …»
+        var mh = Regex.Match(p, @"^\W*([\p{L}'\-]{2,20}(?:\s+обл\.?)?)\s*:\s*");
+        if (mh.Success && OblastHint(mh.Groups[1].Value) is { } h2) { hint = h2; p = p[mh.Length..]; }
+        // Хвіст «на Одещині» — підказка; «з Тернопільщини», «в області» — просто відрізаємо.
+        var tail = Regex.Match(p, @"\s+(?:(на|в|у)|з|із|зі|від|по)\s+([\p{L}'\-]+(?:щин|ччин)\w*)\b.*$|\s+(?:на|в|у)\s+(?:\S+\s+)?област\w*.*$", RegexOptions.IgnoreCase);
+        if (tail.Success)
+        {
+            if (tail.Groups[1].Success && Geo.Canonical(tail.Groups[2].Value) is { } th) hint ??= th;
+            p = p[..tail.Index];
+        }
+        hromada = Regex.IsMatch(p, @"\b(?:ТГ|ОТГ|громад\w*)\b", RegexOptions.IgnoreCase);
+
+        var res = new List<string>();
+        foreach (var alt in Regex.Split(p, @"\s*/\s*"))
+        {
+            var a = alt.Trim();
+            // «Херсонський район», «Нікопольський р-н» — район цілком (RaionGeo).
+            if (Regex.Match(a, @"^\W*([\p{L}'\-]+\s+(?:район\w*|р-н\w*))\W*$", RegexOptions.IgnoreCase) is { Success: true } rm)
+            { res.Add(rm.Groups[1].Value); continue; }
+            var toks = a.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Select(t => Regex.Replace(t, @"^[^\p{L}\d]+|[^\p{L}\d.]+$", ""))
+                .Select(t => Regex.Replace(t, @"[-/](?:район|р-н)$", "", RegexOptions.IgnoreCase))
+                .Where(t => t.Length > 0).ToList();
+            int i = 0;
+            while (i < toks.Count && (LeadWord.IsMatch(toks[i].TrimEnd('.')) || char.IsDigit(toks[i][0]) || NotName.IsMatch(toks[i].TrimEnd('.'))))
+                i++;
+            if (i >= toks.Count) continue;
+            // Назва — до 3 слів з великої («Біла Церква», «Нові Санжари»); з малої — лише
+            // останнє слово одразу після «курс»/«на» («Жабки курс осняг»).
+            bool lowOk = i == toks.Count - 1 && toks[i].Length >= 5
+                         && (toks.Count == 1 || Regex.IsMatch(toks[i - 1], "^(?:курс|курсом|на|бік|напрямку|до)$", RegexOptions.IgnoreCase));
+            var run = new List<string>();
+            for (int j = i; j < toks.Count && run.Count < 3; j++)
+            {
+                var t = toks[j];
+                if (NotName.IsMatch(t.TrimEnd('.')) || !char.IsUpper(t[0]) && !lowOk) break;
+                run.Add(t);
+            }
+            if (run.Count == 0) continue;
+            res.Add(string.Join(' ', run).TrimEnd('.'));
+            // «Кушугум Балабине» → «Кушугум», «Балабине»; але не «Нові» з «Нові Будинки».
+            if (run.Count > 1 && split)
+                foreach (var t in run)
+                    if (t.TrimEnd('.').Length >= 6 && !AdjPart.IsMatch(t)) res.Add(t.TrimEnd('.'));
+            // «Червоногригор.» — скорочення.
+            if (run[^1].EndsWith('.')) res.Add(run[^1]);
+        }
+        res.AddRange(inner); // уточнення в дужках («(Хрестище)») — коли основну назву не знайшли
+        // «Червоногригорівська ТГ» → Червоногригорівка; «Марганецька» → Марганець; «Покровська» → Покровське.
+        if (hromada)
+            foreach (var c in res.ToList())
+                if (Regex.Match(c, @"^(.*?)(ськ|цьк)(?:а|ої|ій|у)$") is { Success: true } hm)
+                {
+                    var stem = hm.Groups[1].Value;
+                    res.AddRange(hm.Groups[2].Value == "цьк" ? new[] { stem + "ць", stem + "цьке" } : new[] { stem + "ка", stem + "ське", stem + "ськ" });
+                }
+        // Російською: «Изюм», «Ольшаны», «Игрень», «Березовка» → українське написання.
+        foreach (var c in res.ToList())
+            if (RuToUk(c) is var u && u != c) res.Add(u);
+        return res.Distinct().ToList();
+    }
+
+    // Російські назви, що не перекладаються по літерах.
+    static readonly Dictionary<string, string> RuNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Киев"] = "Київ", ["Киева"] = "Київ", ["Харьков"] = "Харків", ["Харькова"] = "Харків", ["Днепр"] = "Дніпро",
+        ["Одесса"] = "Одеса", ["Одессу"] = "Одеса", ["Николаев"] = "Миколаїв", ["Запорожье"] = "Запоріжжя",
+        ["Чернигов"] = "Чернігів", ["Сумы"] = "Суми", ["Кривой Рог"] = "Кривий Ріг", ["Песочин"] = "Пісочин",
+        ["Волчанск"] = "Вовчанськ", ["Чугуев"] = "Чугуїв", ["Купянск"] = "Куп'янськ", ["Лозовая"] = "Лозова",
+    };
+
+    static string RuToUk(string s)
+    {
+        if (RuNames.TryGetValue(s, out var known)) return known;
+        if (!Regex.IsMatch(s, @"[ыэёъЫЭ]|^[Ии]|ск(?:ое)?$|ая$|ое$|[ое]вка$")) return s; // схоже на українське — не чіпаємо
+        // Спершу «и»→«і», потім «ы»→«и» (інакше «Ольшаны» ставали б «Ольшані»).
+        var t = s.Replace('и', 'і').Replace('И', 'І')
+                 .Replace('ы', 'и').Replace('Ы', 'И').Replace('э', 'е').Replace('Э', 'Е').Replace('ё', 'е').Replace('ъ', '\'');
+        t = Regex.Replace(t, @"ское$", "ське"); t = Regex.Replace(t, @"ск$", "ськ");
+        t = Regex.Replace(t, @"ая$", "а"); t = Regex.Replace(t, @"ое$", "е");
+        t = Regex.Replace(t, @"[ое]вка$", "івка"); t = Regex.Replace(t, @"ій$", "ий");
+        return t;
+    }
+
+    /// Знайти місце з фрази поста. <paramref name="hadName"/> = false — у фразі взагалі
+    /// немає назви («Збили», «Транзит»), тобто це не «не знайдено», а «без місця».
+    (string name, double lat, double lon)? Locate(string phrase, string? oblast, SourceInfo src, bool bare, out bool hadName)
+    {
+        hadName = true;
+        // «на схід Кіровоградщини з Дніпропетровщини», «північ Чернігівщини» — частина області.
+        var pm = Regex.Match(phrase, @"^\W*(?:на\s+)?(півн\w*|півд\w*|сх[іо]д\w*|зах[іо]д\w*|центр\w*)(?:[\s-]+(сх\w*|зах\w*))?\s+([\p{L}'\-]+(?:щин|ччин)\w*)", RegexOptions.IgnoreCase);
+        if (pm.Success && Geo.Canonical(pm.Groups[3].Value) is { } po
+            && OblastGeo.PartPoint(po, pm.Groups[1].Value + " " + pm.Groups[2].Value) is { } pp)
+            return (OblastGeo.Region(pp.lat, pp.lon) + " (обл.)", pp.lat, pp.lon);
+
+        var vars = PlaceVariants(phrase, out var hint, out bool hromada, split: bare);
+        if (vars.Count == 0) { hadName = false; return null; }
+        IReadOnlyCollection<string> region = hint is { } h ? new[] { h } : oblast is { } o ? new[] { o } : src.Oblasts;
+        double maxKm = bare ? 160 : 260;
+        bool kharkiv = region.Contains("Харківська", StringComparer.OrdinalIgnoreCase);
+        if (kharkiv && KharkivMonitor.PlaceName(phrase, multiWord: true) is { } km && PlaceFinder.Find(km, region, maxKm) is { } kmg) return kmg;
+        foreach (var v in vars)
+        {
+            // «Червоногригор.» — н.п. регіону, що з цього починається.
+            if (v.EndsWith('.'))
+            {
+                if (PlaceFinder.Prefix(v.TrimEnd('.'), region, maxKm) is { } pf) return pf;
+                continue;
+            }
+            if (PlaceFinder.Find(v, region, maxKm) is { } g) return g;
+            // Масиви Харкова й російські назви з місцевих каналів («Новые Дома», «Алексеевку»).
+            if (kharkiv && KharkivMonitor.PlaceName(v) is { } kn && PlaceFinder.Find(kn, region, maxKm) is { } kg) return kg;
+        }
+        // Громада без повної назви («Червоногригор ТГ») — н.п., що з неї починається.
+        if (hromada && PlaceFinder.Prefix(vars[0], region, maxKm) is { } hp) return hp;
+        // Агрегатор чи місце в «чужому» регіоні: назва без тезок по всій країні («курсом на Єзупіль»).
+        if (!bare)
+            foreach (var v in vars)
+                if (!v.EndsWith('.') && PlaceFinder.Unique(v) is { } u) return u;
+        return null;
     }
 
     // «Голі» назви від місцевих: «Оболонь», «1 Оболонь, 1 Боярка», «Коцюбинське, Ірпінь»,
-    // «2 в районі Ірпеня», «Другий Білогородка», «Знову Оболонь».
+    // «2 в районі Ірпеня», «Другий Білогородка», «Знову Оболонь», «Далі Федорівка», «Зпр: 1 Водяне».
     List<ThreatEvent> BareNames(string clean, SourceInfo src, DateTime at)
     {
         var res = new List<ThreatEvent>();
@@ -542,17 +780,23 @@ public sealed class SourceHub
         // за тип попереднього поста каналу: раніше бандероль після «реактивні» ставала реактивним дроном.
         if (WeaponCatalog.Match(clean) is { } own) { kind = own.Kind; extra = WeaponCatalog.DisplayName(own); }
         else if (_ctx.TryGetValue(src.User, out var cx) && at - cx.at < TimeSpan.FromMinutes(15)) { kind = cx.kind; extra = cx.extra; }
+        string? obl = src.Oblasts.Length == 1 ? src.Oblasts[0] : null;
         foreach (var seg0 in Regex.Split(clean, @"[,;\n]+"))
         {
-            var seg = seg0.Trim();
+            var seg = Regex.Replace(seg0.Trim(), @"\s*/\s*", "/");
             // «◼️ 12:16 с. Мар'ївка», «◻️ Марганецька ТГ», «🟡 Херсонський район — повітряна тривога»
             seg = Regex.Replace(seg, @"^[^\p{L}\d]+", "");                            // маркери / емодзі
             seg = Regex.Replace(seg, @"^\d{1,2}[:.]\d{2}\s*", "");                   // час
+            // «Зпр: 1 Новосергіївка», «Франківська: Галич/Більшівці» — область для цього й наступних рядків.
+            var hm = Regex.Match(seg, @"^([\p{L}'\-]{2,20})\s*:\s*");
+            if (hm.Success && OblastHint(hm.Groups[1].Value) is { } ho) { obl = ho; seg = Regex.Replace(seg[hm.Length..], @"^[^\p{L}\d]+", ""); }
             // «Херсонський район — повітряна тривога» → до тире; але «Бандероль — Оболонь» — місце ПІСЛЯ тире.
             if (!Regex.IsMatch(seg, @"^(?:бандерол|ракет|крилат|ціл[ьі]|каб|шахед|реактив|рбпла|бпла)", RegexOptions.IgnoreCase))
                 seg = Regex.Split(seg, @"\s+[—–-]\s+")[0].Trim();
             seg = Regex.Replace(seg, @"^(?:с\.|с-ще|смт\.?|сел\.|м\.|село|селище|місто)\s*", "", RegexOptions.IgnoreCase);
-            seg = Regex.Replace(seg, @"\s+(?:тг|громада|територіальна громада)$", "", RegexOptions.IgnoreCase);
+            bool hromada = Regex.IsMatch(seg, @"\s+(?:тг|отг|громада|територіальна громада)\.?$", RegexOptions.IgnoreCase);
+            seg = Regex.Replace(seg, @"\s+(?:тг|отг|громада|територіальна громада)\.?$", "", RegexOptions.IgnoreCase);
+            seg = Regex.Replace(seg, @"^\d{3,5}(?:\s*-\s*\d{3,5})?\s*м\b\s*", "");    // висота «2500-2700м Спасское»
             int count = 1;
             var m = Regex.Match(seg, @"^(\d+)\s*[хx×]?\s+");
             if (m.Success) { int.TryParse(m.Groups[1].Value, out count); seg = seg[m.Length..]; }
@@ -560,11 +804,15 @@ public sealed class SourceHub
             var wm = Regex.Match(seg, @"^(?:бандерол\w*|ракет\w*|крилат\w*|ціл[ьі]\w*|каб\w*|шахед\w*|реактив\w*|рбпла|бпла)\s*[-—–:]?\s*", RegexOptions.IgnoreCase);
             if (wm.Success) { seg = seg[wm.Length..]; if (seg.Length == 0) continue; }
             seg = Regex.Replace(seg, @"^(?:і\s+)?(?:ще|знову|другий|третій|перший|один|два|три|в районі|у районі|район|рбпла|бпла|шахед\w*|реактив\w*)\s+", "", RegexOptions.IgnoreCase);
-            seg = Regex.Replace(seg, @"\s+(?:низько|високо|приблизно|йде|летить|прямо|зараз|червоний|жовтий|жовтогарячий|жовтогорячий|помаранчевий|зелений)\b.*$", "", RegexOptions.IgnoreCase).Trim(' ', '.', '!', '?');
+            // «Далі Федорівка», «Далее Балашовка», «На Яворницьке», «Розворот На Ховми».
+            for (Match lw; (lw = Regex.Match(seg, @"^(\S+)\s+")).Success && LeadWord.IsMatch(lw.Groups[1].Value);) seg = seg[lw.Length..];
+            // Хвіст після назви: «Мар'ївка ФПВ», «Степуки курс до вас», «Кушугум Балабине ФПВ низько…».
+            seg = Regex.Replace(seg, @"\s+(?:низько|високо|приблизно|йде|летить|прямо|зараз|червоний|жовтий|жовтогарячий|жовтогорячий|помаранчевий|зелений|курс\w*|в бік|у бік|через|повз|фпв|fpv|бпла|молні\w*|ланцет\w*|шахед\w*|реактив\w*|акустика|кружля\w*)\b.*$", "", RegexOptions.IgnoreCase).Trim(' ', '.', '!', '?');
             // Голий список — це 1–2 слова назви («Оболонь», «Біла Церква»), не речення.
-            if (seg.Length < 3 || seg.Split(' ').Length > 2) continue;
+            var words = Regex.Replace(seg, @"\([^)]*\)", "").Split('/')[0].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (seg.Length < 3 || words.Length is 0 or > 2) continue;
             if (!char.IsUpper(seg[0]) && !Regex.IsMatch(seg0, @"^\d")) continue; // назва з великої
-            res.Add(new ThreatEvent(kind, src.Oblasts.Length == 1 ? src.Oblasts[0] : null, seg, count, extra, seg0));
+            res.Add(new ThreatEvent(kind, obl, hromada ? seg + " ТГ" : seg, count, extra, seg0));
         }
         return res;
     }
