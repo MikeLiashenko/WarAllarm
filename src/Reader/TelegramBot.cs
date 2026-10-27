@@ -1,25 +1,29 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 // ── WarAlarm · Telegram-бот (персональний) ───────────────────────────────────
 // Кожен користувач задає СВОЄ місто (пошук по великому списку ~5330 міст, як у
-// застосунку). Далі /status, /risk і тривоги — по його місту. Бот сам шле
-// сповіщення в особисті, коли загроза поруч із містом користувача.
+// застосунку, кнопкою або геолокацією). Далі статус, ризик, карта, тривоги — по його
+// місту. Бот сам шле сповіщення в особисті, коли загроза поруч із містом користувача.
 // Токен — secrets.local.txt (telegram_bot_token=...). Окремий від каналу.
+//
+// Усі відповіді — Telegram HTML (parse_mode=HTML): тексти від Program уже екрановані.
+// Проти спаму: «🔄 Оновити» і стеження за ціллю РЕДАГУЮТЬ повідомлення, а не шлють нові.
 
-// Що вміє ядро (Program передає): усе відносно точки (lat,lon).
+// Що вміє ядро (Program передає): усе відносно точки (lat,lon). Тексти — HTML.
 public sealed record BotFeatures(
     Func<double, double, string> StatusAt,
     Func<double, double, string> RiskAt,
-    Func<double, double, (bool alarm, string text)> AlarmAt,
-    Func<Task<byte[]?>> MapPng,
+    Func<double, double, (bool alarm, string text)> AlarmAt, // text — простий текст («Шахед ~12 км»)
+    Func<double, double, string, Task<byte[]?>> MapPng,      // карта з містом користувача
     Func<Task<string>> Ai,
     Func<string> Stats,
-    Func<Task<string>> Alerts,
+    Func<double, double, Task<string>> Alerts,              // офіційні тривоги: твоя область + країна
     Func<Task<(byte[] png, string caption)>>? Night = null, // 🌙 підсумок ночі
     Func<string>? Sources = null, // 📡 які канали що дали (SourceHub)
-    Func<double, double, int, List<(string id, string text)>>? TargetsNear = null, // 🛰 найближчі цілі
-    Func<string, double, double, string?>? TargetInfo = null); // 🛰 опис цілі за id (null — зникла)
+    Func<double, double, int, List<(string id, string text)>>? TargetsNear = null, // 🛰 найближчі цілі (короткі рядки)
+    Func<string, double, double, (string text, string stage)?>? TargetInfo = null); // 🛰 картка цілі (null — зникла)
 
 public sealed class TelegramBot
 {
@@ -27,14 +31,16 @@ public sealed class TelegramBot
     const string SubsFile = "bot_subscribers.json";
 
     sealed record Place(string Name, double Lat, double Lon);
+    sealed record Upd(long Id, long Chat, string? Text, string? CbData, string? CbId, long MsgId, double? Lat, double? Lon);
 
     readonly string _api;
     readonly BotFeatures _f;
     readonly Dictionary<long, Place?> _users = new();      // chat → місто (null = ще не задано)
     readonly Dictionary<long, bool> _lastAlarm = new();    // для фронта тривоги
-    // 🛰 Стеження: chat → (id цілі, останній надісланий опис). Ключі кнопок — короткі
-    // (callback_data ≤ 64 байти, а id цілі кирилицею довший).
-    readonly Dictionary<long, (string id, string last)> _tracking = new();
+    readonly Dictionary<long, DateTime> _calmSince = new(); // відбій — лише після ≥60 с тиші (без «тривога-відбій-тривога»)
+    // 🛰 Стеження: chat → (id цілі, останній опис, стадія, повідомлення, яке редагуємо).
+    // Ключі кнопок — короткі (callback_data ≤ 64 байти, а id цілі кирилицею довший).
+    readonly Dictionary<long, (string id, string last, string stage, long msg)> _tracking = new();
     readonly Dictionary<string, string> _trackKeys = new();
     long _offset;
 
@@ -47,33 +53,61 @@ public sealed class TelegramBot
 
     public int SubscriberCount => _users.Count;
 
-    static readonly object Keyboard = new
+    // ── Клавіатури ───────────────────────────────────────────────────────────
+    // Головне — завжди під рукою; решта — у «☰ Ще» (inline-меню), щоб не було 10 кнопок.
+    static readonly object MainKb = new
     {
         keyboard = new[]
         {
-            new[] { "📊 Статус", "🗺 Карта" },
-            new[] { "🎯 Ризик", "🏠 Укриття" },
-            new[] { "📍 Моє місто", "📈 Аналітика" },
-            new[] { "🤖 ШІ", "🚨 Тривоги" },
-            new[] { "🛰 Цілі", "❓ Довідка" },
+            new[] { "📊 Статус", "🛰 Цілі" },
+            new[] { "🗺 Карта", "🚨 Тривоги" },
+            new[] { "🏠 Укриття", "☰ Ще" },
         },
         resize_keyboard = true,
+        is_persistent = true,
+        input_field_placeholder = "Назва міста або кнопка нижче",
     };
 
-    // Inline-кнопки під тривогою: «чи було чути вибух?» (краудсорс точності).
-    static readonly object BoomKb = new
+    static object Btn(string text, string data) => new { text, callback_data = data };
+    static object Inline(params object[][] rows) => new { inline_keyboard = rows };
+
+    static readonly object MoreKb = Inline(
+        new[] { Btn("🎯 Ризик", "cmd:/risk"), Btn("🌙 Підсумок ночі", "cmd:/night") },
+        new[] { Btn("📈 Аналітика", "cmd:/stats"), Btn("📡 Джерела", "cmd:/sources") },
+        new[] { Btn("🤖 ШІ-аналіз", "cmd:/ai"), Btn("📍 Змінити місто", "cmd:/place") },
+        new[] { Btn("❓ Довідка", "cmd:/help") });
+
+    static readonly object CityKb = Inline(
+        new[] { Btn("Київ", "city:Київ"), Btn("Харків", "city:Харків"), Btn("Дніпро", "city:Дніпро") },
+        new[] { Btn("Одеса", "city:Одеса"), Btn("Львів", "city:Львів"), Btn("Запоріжжя", "city:Запоріжжя") });
+
+    // Тимчасова клавіатура вибору міста: геолокація одним дотиком.
+    static readonly object LocationKb = new
     {
-        inline_keyboard = new[] { new object[]
+        keyboard = new object[]
         {
-            new { text = "💥 Чув вибух", callback_data = "boom_yes" },
-            new { text = "🤫 Тихо",      callback_data = "boom_no" },
-        }}
+            new object[] { new { text = "📍 Надіслати геолокацію", request_location = true } },
+            new object[] { "⬅️ Скасувати" },
+        },
+        resize_keyboard = true,
+        one_time_keyboard = true,
     };
+
+    static readonly object StatusKb = Inline(
+        new[] { Btn("🔄 Оновити", "upd:st"), Btn("🎯 Ризик", "cmd:/risk"), Btn("🛰 Цілі", "cmd:/targets") });
+    static readonly object RiskKb = Inline(new[] { Btn("🔄 Оновити", "upd:rk"), Btn("📊 Статус", "cmd:/status") });
+    static readonly object AlertsKb = Inline(new[] { Btn("🔄 Оновити", "upd:al"), Btn("🗺 Карта", "cmd:/map") });
+    static readonly object AlarmKb = Inline(new[] { Btn("🛰 Що летить", "cmd:/targets"), Btn("🏠 Укриття", "cmd:/shelter") });
+    // Під відбоєм: «чи було чути вибух?» (краудсорс точності).
+    static readonly object BoomKb = Inline(new[] { Btn("💥 Чув вибух", "boom_yes"), Btn("🤫 Було тихо", "boom_no") });
+    static readonly object UntrackKb = Inline(new[] { Btn("⏹ Не стежити", "untrk") });
+    static readonly object NoKb = new { inline_keyboard = Array.Empty<object[]>() };
 
     // ── Фонові цикли ──────────────────────────────────────────────────────────
     public async Task RunAsync(CancellationToken ct = default)
     {
         try { await InitOffset(); } catch { }
+        try { await SetCommands(); } catch { }
         _ = RunUserAlarms(ct);                 // персональні тривоги в особисті
         while (!ct.IsCancellationRequested)
         {
@@ -81,9 +115,14 @@ public sealed class TelegramBot
             {
                 foreach (var u in await GetUpdates(ct))
                 {
-                    _offset = u.id + 1;
-                    if (u.cbData != null) await HandleCallback(u.chat, u.cbData, u.cbId!);
-                    else if (u.text != null) await Handle(u.chat, u.text.Trim());
+                    _offset = u.Id + 1;
+                    try
+                    {
+                        if (u.CbData != null) await HandleCallback(u.Chat, u.CbData, u.CbId!, u.MsgId);
+                        else if (u.Lat is { } la && u.Lon is { } lo) await SetPlaceByLocation(u.Chat, la, lo);
+                        else if (u.Text != null) await Handle(u.Chat, u.Text.Trim());
+                    }
+                    catch (Exception ex) { Console.Error.WriteLine("⚠ bot handle: " + ex.Message); }
                 }
             }
             catch (OperationCanceledException) { break; }
@@ -106,34 +145,63 @@ public sealed class TelegramBot
                 if (place is null) continue;
                 var (alarm, text) = _f.AlarmAt(place.Lat, place.Lon);
                 bool last = _lastAlarm.TryGetValue(chat, out var l) && l;
+                if (alarm) _calmSince.Remove(chat);
                 if (alarm && !last)
-                    try { await SendInline(chat,
-                        $"🔴 ТРИВОГА поруч — {place.Name}!\n{text}\n➤ В укриття! Подалі від вікон, правило двох стін.\n\nЯк мине — познач, чи було чути вибух:",
-                        BoomKb); } catch { }
+                {
+                    try { await Send(chat,
+                        $"🔴 <b>ТРИВОГА поруч — {H(place.Name)}</b>\n"
+                        + (text.Length > 0 ? $"🎯 {H(text)}\n" : "")
+                        + "\n➤ <b>В укриття!</b> Подалі від вікон, правило двох стін.", AlarmKb); } catch { }
+                    _lastAlarm[chat] = true;
+                }
                 else if (!alarm && last)
-                    try { await Send(chat, $"🟢 Відбій — {place.Name}. Наразі поруч чисто."); } catch { }
-                _lastAlarm[chat] = alarm;
+                {
+                    // Ціль на межі 25 км «блимає» — відбій лише після хвилини тиші.
+                    if (!_calmSince.TryGetValue(chat, out var since)) { _calmSince[chat] = DateTime.Now; continue; }
+                    if (DateTime.Now - since < TimeSpan.FromSeconds(60)) continue;
+                    _calmSince.Remove(chat);
+                    try { await Send(chat,
+                        $"🟢 <b>Відбій — {H(place.Name)}</b>\nНаразі поруч чисто.\n\nЧи було чути вибух?", BoomKb); } catch { }
+                    _lastAlarm[chat] = false;
+                }
             }
-            // 🛰 Стеження: ціль змінилась (місце/стадія/курс) — шлемо оновлення; зникла — кінець.
+            // 🛰 Стеження: ціль рухається → РЕДАГУЄМО ту саму картку; змінилась стадія
+            // (наближається → на підльоті → над районом) — нове повідомлення, щоб дзенькнуло.
             if (_f.TargetInfo is { } ti)
                 foreach (var (chat, tr) in _tracking.ToArray())
                 {
                     var pl = _users.TryGetValue(chat, out var up) ? up : null;
                     if (pl is null) { _tracking.Remove(chat); continue; }
                     var info = ti(tr.id, pl.Lat, pl.Lon);
-                    if (info is null)
+                    if (info is not { } inf)
                     {
                         _tracking.Remove(chat);
-                        try { await Send(chat, "🛰 Ціль зникла з радарів (збита, долетіла або відбій) — стеження завершено."); } catch { }
+                        try
+                        {
+                            await EditMarkup(chat, tr.msg, NoKb);
+                            await Send(chat, "🛰 <b>Ціль зникла з радарів</b> — збита, долетіла або відбій.\nСтеження завершено.");
+                        }
+                        catch { }
                         continue;
                     }
                     // Рядок «оновлено HH:mm:ss» не рахуємо зміною — лише рух/стадію.
-                    static string Core(string x) => string.Join("\n", x.Split('\n').Where(l => !l.StartsWith("🕒")));
-                    if (Core(info) != Core(tr.last))
+                    static string Core(string x) => string.Join("\n", x.Split('\n').Where(l => !l.Contains("🕒")));
+                    if (Core(inf.text) == Core(tr.last)) continue;
+                    try
                     {
-                        _tracking[chat] = (tr.id, info);
-                        try { await SendInline(chat, "🛰 Ціль рухається:\n\n" + info, UntrackKb); } catch { }
+                        if (inf.stage != tr.stage)
+                        {
+                            await EditMarkup(chat, tr.msg, NoKb);
+                            var id = await Send(chat, $"🛰 <b>Ціль: {H(inf.stage)}</b>\n\n" + inf.text, UntrackKb);
+                            _tracking[chat] = (tr.id, inf.text, inf.stage, id ?? tr.msg);
+                        }
+                        else
+                        {
+                            await Edit(chat, tr.msg, "👁 <b>Стежу за ціллю</b> · оновлюється\n\n" + inf.text, UntrackKb);
+                            _tracking[chat] = (tr.id, inf.text, inf.stage, tr.msg);
+                        }
                     }
+                    catch { }
                 }
         }
     }
@@ -142,125 +210,217 @@ public sealed class TelegramBot
     async Task Handle(long chat, string text)
     {
         var cmd = text.Split(' ', '\n')[0].Split('@')[0].ToLowerInvariant();
+        bool hasCity = _users.TryGetValue(chat, out var pl) && pl is not null;
 
         switch (cmd)
         {
             case "/start":
-                bool isNew = !_users.ContainsKey(chat);
-                if (isNew) _users[chat] = null;
+                if (!_users.ContainsKey(chat)) _users[chat] = null;
                 SaveSubs();
+                if (hasCity)
+                {
+                    await Send(chat, $"👋 <b>З поверненням!</b>\nТвоє місто — <b>{H(pl!.Name)}</b>. Сповіщення увімкнені 🔔", MainKb);
+                    await SendStatus(chat, pl);
+                    return;
+                }
                 await Send(chat,
-                    "🛡 Вітаю у WarAlarm!\n\n"
-                    + "Напиши назву свого міста (напр. «Полтава» або «Бровари») — і я "
-                    + "сповіщатиму, коли загроза буде поруч, та показуватиму ризик саме по ньому.",
-                    withKeyboard: true);
+                    "👋 <b>Вітаю у WarAlarm!</b>\n\n"
+                    + "Я стежу за повітряними загрозами й попереджаю, коли щось летить до <b>твого</b> міста.\n\n"
+                    + "<b>Обери місто</b> 👇 кнопкою, надішли геолокацію 📍 або просто напиши назву (напр. «Бровари»).",
+                    CityKb);
+                await Send(chat, "📍 Або поділись геолокацією — так точніше:", LocationKb);
                 return;
 
             case "/stop":
-                _users.Remove(chat); _lastAlarm.Remove(chat);
+                _users.Remove(chat); _lastAlarm.Remove(chat); _tracking.Remove(chat); _calmSince.Remove(chat);
                 SaveSubs();
-                await Send(chat, "Відписано. /start — щоб знову.");
+                await Send(chat, "🔕 <b>Сповіщення вимкнено.</b>\nПовернутись — /start", new { remove_keyboard = true });
                 return;
+        }
 
-            case "/help":
-                await Send(chat,
-                    "WarAlarm — тривоги повітряної небезпеки по ТВОЄМУ місту.\n\n"
-                    + "📍 Моє місто — задати/змінити місто\n"
-                    + "📊 Статус — цілі + ймовірність по твоєму місту\n"
-                    + "🎯 Ризик — детально по типах\n🏠 Укриття — найближчі укриття/метро\n🗺 Карта — карта України\n"
-                    + "🚨 Тривоги — офіційні по областях\n📈 Аналітика — статистика\n"
-                    + "🤖 ШІ — розумний аналіз\n📡 Джерела — що дали канали моніторингу\n🛰 Цілі — найближчі цілі + стеження\n/stop — відписатися",
-                    withKeyboard: true);
-                return;
+        if (Match(text, cmd, "/more", "☰", "ще", "меню"))
+        {
+            await Send(chat, "☰ <b>Ще можливості</b>", MoreKb);
+            return;
+        }
+        if (Match(text, cmd, "/help", "❓", "довідка", "допомога"))
+        {
+            await Send(chat, HelpText(pl), MainKb);
+            return;
+        }
+        if (Match(text, cmd, "⬅️", "скасувати"))
+        {
+            await Send(chat, hasCity ? "👌 Гаразд." : "👌 Гаразд. Місто можна обрати будь-коли — просто напиши назву.", MainKb);
+            return;
+        }
+        if (Match(text, cmd, "/place", "📍", "моє місто", "мое место", "місто", "город"))
+        {
+            await Send(chat,
+                (hasCity ? $"📍 Зараз: <b>{H(pl!.Name)}</b>\n\n" : "")
+                + "Напиши назву міста (напр. «Львів», «Ірпінь», «Ізюм») або обери 👇", CityKb);
+            await Send(chat, "…чи поділись геолокацією:", LocationKb);
+            return;
         }
 
         // Кнопки-«вкладки».
         if (Match(text, cmd, "/map", "🗺", "карта"))
         {
-            await Send(chat, "🗺 Малюю карту…");
-            var png = await _f.MapPng();
-            if (png != null) await SendPhoto(chat, png, "🗺 Карта тривог"); else await Send(chat, "Не вдалося.");
+            await Action(chat, "upload_photo");
+            var png = await _f.MapPng(pl?.Lat ?? 0, pl?.Lon ?? 0, pl?.Name ?? ""); // без міста — карта країни
+            if (png != null) await SendPhoto(chat, png, $"🗺 <b>Карта загроз</b> · {DateTime.Now:HH:mm}\n🔴 тривога · 🟡 часткова · силуети — цілі за курсом");
+            else await Send(chat, "😔 Карту зараз не вдалося намалювати. Спробуй за хвилину.");
             return;
         }
         if (_f.Night is { } night && Match(text, cmd, "/night", "🌙", "ніч", "ночь", "підсумок"))
         {
-            await Send(chat, "🌙 Збираю підсумок ночі з каналів… (до хвилини)");
+            var wait = await Send(chat, "🌙 Збираю підсумок ночі з каналів… (до хвилини)");
+            await Action(chat, "upload_photo");
             try
             {
                 var (png, caption) = await night();
-                await SendPhoto(chat, png, caption.Length > 1000 ? caption[..1000] : caption);
+                await SendPhoto(chat, png, caption);
+                if (wait is { } w) await Delete(chat, w);
             }
-            catch (Exception ex) { await Send(chat, "Не вдалося: " + ex.Message); }
+            catch (Exception ex) { if (wait is { } w) await Edit(chat, w, "😔 Не вдалося зібрати підсумок: " + H(ex.Message)); }
             return;
         }
         if (Match(text, cmd, "/untrack", "⏹", "не стежити"))
         {
-            await Send(chat, _tracking.Remove(chat) ? "⏹ Стеження вимкнено." : "Ти ні за чим не стежиш.");
-            return;
-        }
-        if (_f.TargetsNear is { } near && Match(text, cmd, "/targets", "🛰", "цілі"))
-        {
-            if (!(_users.TryGetValue(chat, out var tp) && tp is not null)) { await Send(chat, "Спершу напиши назву свого міста 📍"); return; }
-            var list = near(tp.Lat, tp.Lon, 5);
-            if (list.Count == 0) { await Send(chat, $"🛰 Поруч із {tp.Name} (250 км) цілей немає."); return; }
-            await Send(chat, $"🛰 Найближчі цілі до {tp.Name} ({list.Count}). Натисни «Стежити» — пришлю зміни, щойно ціль рухається.");
-            foreach (var (id, info) in list)
-                await SendInline(chat, info, TrackKb(id));
+            await Send(chat, _tracking.Remove(chat) ? "⏹ Стеження вимкнено." : "Ти ні за чим не стежиш. Обери ціль у 🛰 Цілі.");
             return;
         }
         if (Match(text, cmd, "/stats", "📈", "аналітика")) { await Send(chat, _f.Stats()); return; }
         if (_f.Sources is { } srcs && Match(text, cmd, "/sources", "📡", "джерела")) { await Send(chat, srcs()); return; }
-        if (Match(text, cmd, "/alerts", "🚨", "тривоги")) { await Send(chat, "🚨 Перевіряю…"); await Send(chat, await _f.Alerts()); return; }
-        if (Match(text, cmd, "/ai", "🤖", "ші", "ии")) { await Send(chat, "🤖 Аналізую…"); await Send(chat, await _f.Ai()); return; }
-        if (Match(text, cmd, "/place", "📍", "моє місто", "мое место", "місто", "город"))
+        if (Match(text, cmd, "/ai", "🤖", "ші", "ии"))
         {
-            await Send(chat, "Напиши назву свого міста (напр. «Львів», «Ірпінь», «Ізюм»):");
+            var wait = await Send(chat, "🤖 Аналізую обстановку…");
+            await Action(chat, "typing");
+            var reply = await _f.Ai();
+            if (wait is not { } w || !await Edit(chat, w, reply)) await Send(chat, reply);
             return;
         }
 
-        bool hasCity = _users.TryGetValue(chat, out var pl) && pl is not null;
-        if (Match(text, cmd, "/status", "📊", "статус"))
+        bool needsCity = Match(text, cmd, "/status", "📊", "статус") || Match(text, cmd, "/risk", "🎯", "ризик")
+            || Match(text, cmd, "/shelter", "🏠", "укриття", "укрытие") || Match(text, cmd, "/alerts", "🚨", "тривоги")
+            || Match(text, cmd, "/targets", "🛰", "цілі");
+        if (needsCity && !hasCity)
         {
-            if (!hasCity) { await Send(chat, "Спершу напиши назву свого міста 📍"); return; }
-            await Send(chat, $"📍 {pl!.Name}\n" + _f.StatusAt(pl.Lat, pl.Lon));
+            await Send(chat, "📍 <b>Спершу обери своє місто</b> — напиши назву або натисни 👇", CityKb);
             return;
         }
-        if (Match(text, cmd, "/risk", "🎯", "ризик"))
-        {
-            if (!hasCity) { await Send(chat, "Спершу напиши назву свого міста 📍"); return; }
-            await Send(chat, $"📍 {pl!.Name}\n" + _f.RiskAt(pl.Lat, pl.Lon));
-            return;
-        }
+        if (Match(text, cmd, "/status", "📊", "статус")) { await SendStatus(chat, pl!); return; }
+        if (Match(text, cmd, "/risk", "🎯", "ризик")) { await Send(chat, RiskText(pl!), RiskKb); return; }
+        if (Match(text, cmd, "/alerts", "🚨", "тривоги")) { await Send(chat, await _f.Alerts(pl!.Lat, pl.Lon), AlertsKb); return; }
         if (Match(text, cmd, "/shelter", "🏠", "укриття", "укрытие"))
         {
-            if (!hasCity) { await Send(chat, "Спершу напиши назву свого міста 📍"); return; }
-            await Send(chat, "🏠 Шукаю найближчі укриття…");
-            await Send(chat, await Shelters.Near(pl!.Lat, pl.Lon));
+            var wait = await Send(chat, "🏠 Шукаю укриття поруч…");
+            var res = await Shelters.Near(pl!.Lat, pl.Lon);
+            if (wait is not { } w || !await Edit(chat, w, res)) await Send(chat, res);
+            return;
+        }
+        if (_f.TargetsNear is { } near && Match(text, cmd, "/targets", "🛰", "цілі"))
+        {
+            await SendTargets(chat, pl!, near);
             return;
         }
 
-        // Інакше — вважаємо це назвою міста → шукаємо у великому списку.
-        var hit = Cities.Find(text);
-        if (hit is { } c)
+        if (cmd.StartsWith('/'))
         {
-            _users[chat] = new Place(c.name, c.lat, c.lon);
-            _lastAlarm.Remove(chat);
-            SaveSubs();
-            await Send(chat, $"✅ Твоє місто: {c.name}.\nТепер /status і тривоги — по ньому. Змінити — просто напиши іншу назву.", withKeyboard: true);
+            await Send(chat, "🤔 Не знаю такої команди. Ось що я вмію 👇\n\n" + HelpText(pl), MainKb);
             return;
         }
-        var sug = Cities.Suggest(text);
-        await Send(chat, sug.Count > 0
-            ? "Не знайшов точно. Може, одне з цих?\n" + string.Join("\n", sug)
-            : "Не знайшов такого міста. Спробуй іншу назву (українською).");
+        // Інакше — вважаємо це назвою міста → шукаємо у великому списку.
+        await SetPlaceByName(chat, text);
     }
 
+    static string HelpText(Place? place) =>
+        "❓ <b>Як користуватись WarAlarm</b>\n\n"
+        + "<b>Головне</b>\n"
+        + "📊 Статус — що летить біля твого міста\n"
+        + "🛰 Цілі — найближчі цілі, за кожною можна 👁 стежити\n"
+        + "🗺 Карта — карта тривог і цілей\n"
+        + "🚨 Тривоги — офіційні: твоя область і країна\n"
+        + "🏠 Укриття — найближчі укриття й метро\n\n"
+        + "<b>☰ Ще</b>\n"
+        + "🎯 Ризик · 🌙 Підсумок ночі · 📈 Аналітика · 📡 Джерела · 🤖 ШІ-аналіз\n\n"
+        + "<b>Налаштування</b>\n"
+        + "📍 /place — змінити місто" + (place is { } p ? $" (зараз: {H(p.Name)})" : "") + "\n"
+        + "🔕 /stop — вимкнути сповіщення\n\n"
+        + "🔔 Сповіщення приходять самі: 🔴 тривога поруч → 🟢 відбій.\n"
+        + "<i>Бот — допоміжний. Завжди зважай на офіційну тривогу.</i>";
+
+    string StatusText(Place p) => $"📊 <b>{H(p.Name)}</b> · {DateTime.Now:HH:mm}\n\n" + _f.StatusAt(p.Lat, p.Lon).TrimEnd();
+    string RiskText(Place p) => $"🎯 <b>{H(p.Name)}</b> · {DateTime.Now:HH:mm}\n\n" + _f.RiskAt(p.Lat, p.Lon).TrimEnd();
+    Task SendStatus(long chat, Place p) => Send(chat, StatusText(p), StatusKb);
+
+    async Task SendTargets(long chat, Place p, Func<double, double, int, List<(string id, string text)>> near)
+    {
+        var list = near(p.Lat, p.Lon, 5);
+        if (list.Count == 0)
+        {
+            await Send(chat, $"🛰 <b>Поруч із {H(p.Name)} цілей немає</b>\nУ радіусі 250 км тихо 🟢", StatusKb);
+            return;
+        }
+        var sb = new StringBuilder($"🛰 <b>Найближчі цілі · {H(p.Name)}</b> · {DateTime.Now:HH:mm}\n\n");
+        var rows = new List<object[]>();
+        for (int i = 0; i < list.Count; i++)
+        {
+            sb.Append(i + 1).Append(". ").AppendLine(list[i].text).AppendLine();
+            rows.Add(new[] { TrackBtn(list[i].id, $"👁 Стежити за №{i + 1}") });
+        }
+        sb.Append("<i>Натисни 👁 — і я оновлюватиму картку цілі, поки вона летить.</i>");
+        await Send(chat, sb.ToString(), new { inline_keyboard = rows });
+    }
+
+    async Task SetPlaceByName(long chat, string text)
+    {
+        var hit = Cities.Find(text);
+        if (hit is { } c) { await SetPlace(chat, new Place(c.name, c.lat, c.lon)); return; }
+        var sug = Cities.Suggest(text).Where(n => Encoding.UTF8.GetByteCount("city:" + n) <= 64).Take(6).ToList();
+        if (sug.Count > 0)
+            await Send(chat, $"🤔 Не знайшов «{H(text)}» точно. Може, одне з цих?",
+                new { inline_keyboard = sug.Chunk(2).Select(r => r.Select(n => Btn(n, "city:" + n)).ToArray()).ToArray() });
+        else
+            await Send(chat, $"🤔 Не знайшов міста «{H(text)}».\nСпробуй інакше — українською, напр. «Біла Церква» — або надішли геолокацію 📍");
+    }
+
+    async Task SetPlaceByLocation(long chat, double lat, double lon)
+    {
+        // Назва — найближчий населений пункт зі списку; координати — точні, як надіслав.
+        var best = Cities.All.MinBy(c => ThreatGeo.Km((c.lat, c.lon), (lat, lon)));
+        var km = ThreatGeo.Km((best.lat, best.lon), (lat, lon));
+        await SetPlace(chat, new Place(km <= 15 ? best.name : $"біля {best.name}", lat, lon));
+    }
+
+    async Task SetPlace(long chat, Place p)
+    {
+        _users[chat] = p;
+        _lastAlarm.Remove(chat);
+        _calmSince.Remove(chat);
+        SaveSubs();
+        await Send(chat,
+            $"✅ <b>Готово! Твоє місто — {H(p.Name)}</b>\n"
+            + "🔔 Напишу, щойно загроза буде поруч, і дам відбій, коли мине.\n"
+            + "Змінити місто — просто напиши іншу назву.", MainKb);
+        await SendStatus(chat, p);
+    }
+
+    // Команда / кнопка: «/status», «📊 Статус» (кнопка, і старої клавіатури теж) або слово
+    // окремо («статус»). Слово — лише ЦІЛИМ повідомленням: інакше місто «Карташівка»
+    // відкривало карту, а «Решетилівка» — ШІ.
     static bool Match(string text, string cmd, params string[] keys)
     {
-        var low = text.ToLowerInvariant();
-        foreach (var k in keys) if (cmd == k || low.Contains(k)) return true;
+        var low = text.ToLowerInvariant().Trim();
+        var word = Regex.Replace(low, @"^[^\p{L}/]+", "").Trim(); // без емодзі на початку
+        foreach (var k in keys)
+        {
+            if (cmd == k) return true;
+            if (k[0] != '/' && !char.IsLetter(k[0]) ? low.StartsWith(k) : word == k) return true;
+        }
         return false;
     }
+
+    static string H(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     // ── Bot API ──────────────────────────────────────────────────────────────
     async Task InitOffset()
@@ -270,9 +430,23 @@ public sealed class TelegramBot
             _offset = Math.Max(_offset, u.GetProperty("update_id").GetInt64() + 1);
     }
 
-    async Task<List<(long id, long chat, string? text, string? cbData, string? cbId)>> GetUpdates(CancellationToken ct)
+    // Меню команд у Telegram (кнопка «/» біля поля вводу).
+    async Task SetCommands()
     {
-        var outp = new List<(long, long, string?, string?, string?)>();
+        var cmds = new (string c, string d)[]
+        {
+            ("status", "📊 Що летить біля мого міста"), ("targets", "🛰 Найближчі цілі"),
+            ("map", "🗺 Карта тривог"), ("alerts", "🚨 Офіційні тривоги"), ("shelter", "🏠 Укриття поруч"),
+            ("risk", "🎯 Ризик по типах"), ("night", "🌙 Підсумок ночі"), ("stats", "📈 Аналітика"),
+            ("sources", "📡 Джерела"), ("ai", "🤖 ШІ-аналіз"), ("place", "📍 Змінити місто"),
+            ("help", "❓ Довідка"), ("stop", "🔕 Вимкнути сповіщення"),
+        };
+        await Call("setMyCommands", new { commands = cmds.Select(x => new { command = x.c, description = x.d }) });
+    }
+
+    async Task<List<Upd>> GetUpdates(CancellationToken ct)
+    {
+        var outp = new List<Upd>();
         using var doc = await GetJson($"{_api}/getUpdates?timeout=25&offset={_offset}&allowed_updates=[\"message\",\"callback_query\"]", ct);
         foreach (var u in doc.RootElement.GetProperty("result").EnumerateArray())
         {
@@ -280,82 +454,135 @@ public sealed class TelegramBot
             if (u.TryGetProperty("callback_query", out var cq) &&
                 cq.TryGetProperty("message", out var cm) && cm.TryGetProperty("chat", out var cch))
             {
-                outp.Add((id, cch.GetProperty("id").GetInt64(), null,
+                outp.Add(new Upd(id, cch.GetProperty("id").GetInt64(), null,
                     cq.TryGetProperty("data", out var d) ? d.GetString() : "",
-                    cq.GetProperty("id").GetString()));
+                    cq.GetProperty("id").GetString(),
+                    cm.TryGetProperty("message_id", out var mid) ? mid.GetInt64() : 0, null, null));
             }
-            else if (u.TryGetProperty("message", out var m) &&
-                     m.TryGetProperty("text", out var t) && m.TryGetProperty("chat", out var ch))
+            else if (u.TryGetProperty("message", out var m) && m.TryGetProperty("chat", out var ch)
+                     && m.TryGetProperty("location", out var loc))
             {
-                outp.Add((id, ch.GetProperty("id").GetInt64(), t.GetString() ?? "", null, null));
+                outp.Add(new Upd(id, ch.GetProperty("id").GetInt64(), null, null, null, 0,
+                    loc.GetProperty("latitude").GetDouble(), loc.GetProperty("longitude").GetDouble()));
+            }
+            else if (u.TryGetProperty("message", out var m2) &&
+                     m2.TryGetProperty("text", out var t) && m2.TryGetProperty("chat", out var ch2))
+            {
+                outp.Add(new Upd(id, ch2.GetProperty("id").GetInt64(), t.GetString() ?? "", null, null, 0, null, null));
             }
             else { _offset = Math.Max(_offset, id + 1); }
         }
         return outp;
     }
 
-    async Task Send(long chat, string text, bool withKeyboard = false)
+    async Task<HttpResponseMessage> Call(string method, object payload)
     {
-        object payload = withKeyboard
-            ? new { chat_id = chat, text, disable_web_page_preview = true, reply_markup = Keyboard }
-            : new { chat_id = chat, text, disable_web_page_preview = true };
         using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        var resp = await Http.PostAsync($"{_api}/sendMessage", content);
-        if (!resp.IsSuccessStatusCode && (int)resp.StatusCode == 403) { _users.Remove(chat); SaveSubs(); }
+        return await Http.PostAsync($"{_api}/{method}", content);
     }
 
-    async Task SendInline(long chat, string text, object markup)
+    // Надсилає HTML-повідомлення; повертає його id (для редагування) або null.
+    async Task<long?> Send(long chat, string text, object? markup = null)
     {
-        var payload = JsonSerializer.Serialize(new { chat_id = chat, text, disable_web_page_preview = true, reply_markup = markup });
-        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        await Http.PostAsync($"{_api}/sendMessage", content);
+        var resp = await Call("sendMessage", markup is null
+            ? new { chat_id = chat, text, parse_mode = "HTML", disable_web_page_preview = true }
+            : (object)new { chat_id = chat, text, parse_mode = "HTML", disable_web_page_preview = true, reply_markup = markup });
+        if ((int)resp.StatusCode == 403) { _users.Remove(chat); SaveSubs(); return null; } // заблокував бота
+        if (!resp.IsSuccessStatusCode) { Console.Error.WriteLine($"⚠ bot send: {await resp.Content.ReadAsStringAsync()}"); return null; }
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("result").GetProperty("message_id").GetInt64();
+    }
+
+    // Редагує текст повідомлення. «Не змінилось» теж успіх.
+    async Task<bool> Edit(long chat, long msg, string text, object? markup = null)
+    {
+        var resp = await Call("editMessageText", markup is null
+            ? new { chat_id = chat, message_id = msg, text, parse_mode = "HTML", disable_web_page_preview = true }
+            : (object)new { chat_id = chat, message_id = msg, text, parse_mode = "HTML", disable_web_page_preview = true, reply_markup = markup });
+        return resp.IsSuccessStatusCode || (await resp.Content.ReadAsStringAsync()).Contains("not modified");
+    }
+
+    async Task EditMarkup(long chat, long msg, object markup)
+    {
+        try { await Call("editMessageReplyMarkup", new { chat_id = chat, message_id = msg, reply_markup = markup }); } catch { }
+    }
+
+    async Task Delete(long chat, long msg)
+    {
+        try { await Call("deleteMessage", new { chat_id = chat, message_id = msg }); } catch { }
+    }
+
+    // «друкує… / надсилає фото…» замість зайвих «⏳ Зачекай» повідомлень.
+    async Task Action(long chat, string action)
+    {
+        try { await Call("sendChatAction", new { chat_id = chat, action }); } catch { }
     }
 
     async Task AnswerCallback(string cbId, string text)
     {
-        var payload = JsonSerializer.Serialize(new { callback_query_id = cbId, text });
-        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        try { await Http.PostAsync($"{_api}/answerCallbackQuery", content); } catch { }
+        try { await Call("answerCallbackQuery", new { callback_query_id = cbId, text }); } catch { }
     }
 
-    object TrackKb(string id)
+    object TrackBtn(string id, string label)
     {
         var key = "trk:" + ((uint)id.GetHashCode()).ToString("x");
         _trackKeys[key] = id;
-        return new { inline_keyboard = new[] { new object[] { new { text = "👁 Стежити", callback_data = key } } } };
+        return Btn(label, key);
     }
 
-    static readonly object UntrackKb = new
+    async Task HandleCallback(long chat, string data, string cbId, long msg)
     {
-        inline_keyboard = new[] { new object[] { new { text = "⏹ Не стежити", callback_data = "untrk" } } }
-    };
-
-    // Натиснули «чи було чути вибух?» → пишемо у журнал (краудсорс реальних прильотів).
-    async Task HandleCallback(long chat, string data, string cbId)
-    {
+        var p = _users.TryGetValue(chat, out var up) ? up : null;
+        if (data.StartsWith("cmd:"))
+        {
+            await AnswerCallback(cbId, "");
+            await Handle(chat, data[4..]);
+            return;
+        }
+        if (data.StartsWith("city:"))
+        {
+            await AnswerCallback(cbId, "");
+            await SetPlaceByName(chat, data[5..]);
+            return;
+        }
+        if (data.StartsWith("upd:"))
+        {
+            if (p is null) { await AnswerCallback(cbId, "Спершу обери місто 📍"); return; }
+            var (text, kb) = data switch
+            {
+                "upd:rk" => (RiskText(p), RiskKb),
+                "upd:al" => (await _f.Alerts(p.Lat, p.Lon), AlertsKb),
+                _        => (StatusText(p), StatusKb),
+            };
+            await Edit(chat, msg, text, kb);
+            await AnswerCallback(cbId, $"🔄 Оновлено о {DateTime.Now:HH:mm}");
+            return;
+        }
         if (data.StartsWith("trk:") && _trackKeys.TryGetValue(data, out var tid))
         {
-            var p = _users.TryGetValue(chat, out var tpl) ? tpl : null;
             var info = p is null ? null : _f.TargetInfo?.Invoke(tid, p.Lat, p.Lon);
-            if (info is null) { await AnswerCallback(cbId, "Ця ціль уже зникла з радарів"); return; }
-            _tracking[chat] = (tid, info);
+            if (info is not { } inf) { await AnswerCallback(cbId, "Ця ціль уже зникла з радарів"); return; }
+            if (_tracking.TryGetValue(chat, out var old)) await EditMarkup(chat, old.msg, NoKb);
             await AnswerCallback(cbId, "👁 Стежу");
-            await SendInline(chat, "👁 Стежу за ціллю — пришлю, щойно вона зміниться:\n\n" + info, UntrackKb);
+            var id = await Send(chat, "👁 <b>Стежу за ціллю</b> · оновлюється\n\n" + inf.text, UntrackKb);
+            if (id is { } m) _tracking[chat] = (tid, inf.text, inf.stage, m);
             return;
         }
         if (data == "untrk")
         {
             _tracking.Remove(chat);
+            await EditMarkup(chat, msg, NoKb);
             await AnswerCallback(cbId, "⏹ Стеження вимкнено");
             return;
         }
         if (data is "boom_yes" or "boom_no")
         {
-            var p = _users.TryGetValue(chat, out var pl) ? pl : null;
-            LogBoom(chat, p, data == "boom_yes");
+            LogBoom(chat, p, data == "boom_yes"); // у журнал (краудсорс реальних прильотів)
+            await EditMarkup(chat, msg, NoKb);    // відповідь одна — кнопки прибираємо
             await AnswerCallback(cbId, data == "boom_yes" ? "Дякую! Бережи себе 🇺🇦" : "Дякую за відгук!");
+            return;
         }
-        else await AnswerCallback(cbId, "");
+        await AnswerCallback(cbId, "");
     }
 
     void LogBoom(long chat, Place? p, bool heard)
@@ -373,10 +600,13 @@ public sealed class TelegramBot
 
     async Task SendPhoto(long chat, byte[] png, string caption)
     {
+        // Підпис ≤1024: ріжемо на межі рядка, щоб не розірвати <b>…</b>.
+        if (caption.Length > 1000) { var cut = caption.LastIndexOf('\n', 999); caption = cut > 0 ? caption[..cut] : caption[..1000]; }
         using var form = new MultipartFormDataContent
         {
             { new StringContent(chat.ToString()), "chat_id" },
             { new StringContent(caption), "caption" },
+            { new StringContent("HTML"), "parse_mode" },
         };
         var photo = new ByteArrayContent(png);
         photo.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");

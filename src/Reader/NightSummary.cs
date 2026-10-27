@@ -330,7 +330,7 @@ public static class NightSummary
             sb.AppendLine($"💥 Вибухи (Київ): {d.Impacts.Count} — " + T(string.Join(", ", where)));
         }
         if (d.Launched == 0 && d.Points.Count == 0 && d.Impacts.Count == 0) sb.AppendLine("😌 Ніч була відносно спокійною.");
-        sb.Append(html ? "\n🤖 WarAlarm · за даними моніторів, звіряйтесь з офіційними" : "\n🤖 WarAlarm");
+        sb.Append(html ? "\n<i>🤖 WarAlarm · за даними моніторів, звіряйтесь з офіційними</i>" : "\n🤖 WarAlarm");
         return sb.ToString();
     }
 

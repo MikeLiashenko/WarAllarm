@@ -1102,6 +1102,18 @@ class _SourcesPanel extends StatelessWidget {
                   color: AppColors.textSecondary,
                 ),
               ),
+              // Same empty state as the bot's «📡 Джерела».
+              if (top.isEmpty && data.sourcesCatalog > 0) ...[
+                const SizedBox(height: 10),
+                Text(
+                  '🤫 Поки що тихо — цілей з каналів ще не було.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ],
               if (top.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 for (final s in top)

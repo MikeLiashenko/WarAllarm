@@ -830,6 +830,15 @@ public sealed class SourceHub
         }
     }
 
+    /// Найкорисніші канали (бот «📡 Джерела»): хто дав найбільше підтверджених цілей.
+    public List<(string user, Stat s)> Top(int top = 8)
+    {
+        lock (_gate)
+            return _stats.Where(p => p.Value.Threats > 0)
+                .OrderByDescending(p => p.Value.Confirmed).ThenByDescending(p => p.Value.Threats)
+                .Take(top).Select(p => (p.Key, p.Value)).ToList();
+    }
+
     /// JSON для state.sources (застосунок/API).
     public string Json(DateTime now)
     {

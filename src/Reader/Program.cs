@@ -662,7 +662,7 @@ if (args.Length >= 1 && args[0].Equals("channeltest", StringComparison.OrdinalIg
     var png = await BuildBotMapPng(channel: true);
     var poster = new ChannelPoster(ct!, cn!);
     await poster.Post(
-        "🔔 Тест WarAlarm — карта загроз.\nОбласті: 🔴 офіційна тривога · 🟡 часткова. Наші цілі — точками.\n\n🤖 Авто-дані · перевіряйте офіційні джерела",
+        "🔔 <b>Тест WarAlarm</b> — карта загроз\n🔴 офіційна тривога · 🟡 часткова · силуети — цілі\n\n<i>🤖 WarAlarm · звіряйтесь з офіційними джерелами</i>",
         png);
     Console.WriteLine(png is null ? "⚠ карта не згенерувалась (надіслано лише текст)." : "✅ Надіслано: карта + текст.");
     return;
@@ -698,11 +698,11 @@ if (!string.IsNullOrWhiteSpace(botToken))
         StatusAt: StatusAt,
         RiskAt: RiskAt,
         AlarmAt: AlarmAt,
-        MapPng: () => BuildBotMapPng(),
+        MapPng: (lat, lon, name) => name.Length == 0 ? BuildBotMapPng(channel: true) : BuildBotMapPng(at: (lat, lon), name: name),
         Ai: BuildBotAi,
         Stats: BuildBotStats,
-        Alerts: BuildBotAlerts,
-        Night: async () => { var (from, to) = NightSummary.Window(DateTime.Now); var r = await BuildNight(from, to); return (r.png, r.plain); },
+        Alerts: BuildBotAlertsAt,
+        Night: async () => { var (from, to) = NightSummary.Window(DateTime.Now); var r = await BuildNight(from, to); return (r.png, r.html); },
         Sources: BuildSourcesText,
         TargetsNear: TargetsNear,
         TargetInfo: TargetInfo);
@@ -733,6 +733,8 @@ DateTime? lastLaunch = null;   // 🚀 коли востаннє поперед�
 DateTime? lastBallistic = null; // ☄ коли востаннє будили через балістику (хаб джерел)
 var kyivOff = new SortedSet<int>(); // 🔌 черги Києва, які ЗАРАЗ без світла (з постів єСвітло)
 string? kyivOffAt = null;           // час останнього перемикання черг («11:30»)
+long? mapPostId = null;             // 🗺 «жива» карта в каналі (перемальовуємо її, а не постимо нову)
+var mapPostAt = DateTime.MinValue;  // коли в канал востаннє йшла карта (окремо чи з тривогою)
 
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
@@ -825,7 +827,7 @@ async Task RunNightLoop(ChannelPoster? channel)
             Ui.Line(ConsoleColor.Magenta, "🌙 Готово: night.png · цілей-точок " + d.Points.Count + " · вибухів " + d.Impacts.Count + " · пусків ~" + d.Launched);
             if (post)
             {
-                if (channel is not null) await channel.Post(html, png);
+                if (channel is not null) await channel.Post(html, png, silent: true);
                 await Alert(new AlarmInfo(now.ToString("HH:mm:ss"), "WarAlarm", "🌙 Підсумок ночі", plain, ThreatKind.Unknown, Urgent: false, Info: true));
             }
         }
@@ -833,10 +835,13 @@ async Task RunNightLoop(ChannelPoster? channel)
     }
 }
 
-// Карта в канал раз на 10 хв — але лише коли є що показати (цілі або тривоги),
-// щоб не постити порожню карту під час повного спокою.
+// Карта в канал раз на 10 хв — але лише коли є що показати (цілі або тривоги).
+// Проти спаму: одна «жива» карта, яку ми ПЕРЕМАЛЬОВУЄМО (editMessageMedia) до години;
+// новий пост (без звуку) — лише раз на годину і лише коли щось летить. Коли в повітрі
+// нікого і тривоги ті самі (Крим/Луганщина горять завжди) — карту не чіпаємо.
 async Task RunMapLoop(ChannelPoster channel)
 {
+    string lastKey = "";
     while (true)
     {
         await Task.Delay(TimeSpan.FromMinutes(10));
@@ -845,7 +850,17 @@ async Task RunMapLoop(ChannelPoster channel)
             var snap = await OfficialAlerts.FetchFull();
             int liveN = AirborneNow(tracker.Active.Where(t => t.Pos is not null).Sum(t => t.Amount)); // бортів у повітрі (карта або оцінка моніторів)
             if (liveN == 0 && snap.RedUa.Count == 0 && snap.YellowUa.Count == 0) continue;
-            await channel.Post(MapCaption(snap, liveN), await BuildBotMapPng(channel: true));
+            var key = string.Join(",", snap.RedUa.OrderBy(x => x)) + "|" + string.Join(",", snap.YellowUa.OrderBy(x => x));
+            if (liveN == 0 && key == lastKey) continue;          // нічого нового
+            lastKey = key;
+            var png = await BuildBotMapPng(channel: true);
+            if (png is null) continue;
+            var caption = MapCaption(snap, liveN);
+            if (mapPostId is { } mid && DateTime.Now - mapPostAt < TimeSpan.FromHours(1)
+                && await channel.EditPhoto(mid, png, caption)) continue;   // оновили ту саму карту
+            if (liveN == 0 || DateTime.Now - mapPostAt < TimeSpan.FromMinutes(30)) continue; // тиша / карта була з тривогою
+            mapPostId = await channel.Post(caption, png, silent: true);
+            mapPostAt = DateTime.Now;
         }
         catch (Exception ex) { Console.Error.WriteLine("⚠ maploop: " + ex.Message); }
     }
@@ -857,6 +872,10 @@ async Task RunAlertsLoop(ChannelPoster? channel)
     var prevRed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     var prevActive = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // області з тривогою (полігони)
     bool seeded = false, activeSeeded = false;
+    // Каскад тривог/відбоїв (області вмикаються одна за одною 1–3 хв) — не серія постів,
+    // а ОДИН пост, який доповнюємо редагуванням. Нове велике місто — завжди новий пост (зі звуком).
+    (long id, List<string> regions, DateTime at, bool photo)? alarmPost = null, clearPost = null;
+    var cascade = TimeSpan.FromMinutes(3);
     while (true)
     {
         try
@@ -913,9 +932,36 @@ async Task RunAlertsLoop(ChannelPoster? channel)
                 foreach (var r in newly) dayRed[r] = dayRed.GetValueOrDefault(r) + 1; // для зведення
                 // Тривога / відбій → перемальовуємо й постимо карту разом із текстом.
                 if (newly.Count > 0)
-                    await channel.Post(BuildAlarmPost(newly, snap), await BuildBotMapPng(channel: true));
+                {
+                    bool bigNew = newly.Any(r => BigLabel(r) != r);
+                    if (alarmPost is { } ap && DateTime.Now - ap.at < cascade && !bigNew)
+                    {   // каскад: дописуємо області в той самий пост
+                        ap.regions.AddRange(newly.Where(r => !ap.regions.Contains(r)));
+                        await channel.Edit(ap.id, BuildAlarmPost(ap.regions, snap), ap.photo);
+                    }
+                    else if (await BuildBotMapPng(channel: true) is var png
+                             && await channel.Post(BuildAlarmPost(newly, snap), png) is { } id)
+                    {
+                        alarmPost = (id, newly.ToList(), DateTime.Now, png is not null);
+                        mapPostId = null; mapPostAt = DateTime.Now; // свіжа карта вже в каналі
+                    }
+                    clearPost = null;
+                }
                 else if (cleared.Count > 0)
-                    await channel.Post(BuildClearPost(cleared, nowRed.Count), await BuildBotMapPng(channel: true));
+                {
+                    if (clearPost is { } cp && DateTime.Now - cp.at < cascade && nowRed.Count > 0)
+                    {
+                        cp.regions.AddRange(cleared.Where(r => !cp.regions.Contains(r)));
+                        await channel.Edit(cp.id, BuildClearPost(cp.regions, nowRed.Count), cp.photo);
+                    }
+                    else if (await BuildBotMapPng(channel: true) is var png
+                             && await channel.Post(BuildClearPost(cleared, nowRed.Count), png) is { } id)
+                    {
+                        clearPost = (id, cleared.ToList(), DateTime.Now, png is not null);
+                        mapPostId = null; mapPostAt = DateTime.Now;
+                    }
+                    alarmPost = null;
+                }
                 prevRed = nowRed;
             }
             else prevRed = nowRed;
@@ -938,7 +984,7 @@ async Task RunDailyDigest(ChannelPoster channel)
         if (!postedToday && now.Hour >= 9)
         {
             postedToday = true;
-            try { await channel.Post(BuildDigest(), null); } catch (Exception ex) { Console.Error.WriteLine("⚠ digest: " + ex.Message); }
+            try { await channel.Post(BuildDigest(), null, silent: true); } catch (Exception ex) { Console.Error.WriteLine("⚠ digest: " + ex.Message); }
             dayRed.Clear(); daySeen.Clear();
         }
     }
@@ -960,12 +1006,21 @@ string BuildDigest()
             byKind.OrderByDescending(k => k.Value).Select(k => $"{KindShortEnum(k.Key)} {k.Value}"))));
     if (announces == 0 && byKind.Count == 0) sb.AppendLine("😌 Доба була відносно спокійною.");
     sb.AppendLine();
-    sb.Append("🕊 Бережіть себе 🇺🇦 · автозведення WarAlarm");
+    sb.Append("<i>🕊 Бережіть себе 🇺🇦 · автозведення WarAlarm</i>");
     return sb.ToString();
 }
 
 // HTML-екранування динамічного тексту для постів у канал (parse_mode=HTML).
 static string H(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+// Єдиний підпис постів у каналі (курсивом, щоб не відволікав від суті).
+const string ChannelFoot = "<i>🤖 WarAlarm · звіряйтесь з офіційними джерелами</i>";
+// Цитата з чужого каналу без «хвоста»: підписи («✙ Розвідка неба ✙ ✙Підтримати канал✙»),
+// посилання, @згадки — у нашому пості це шум.
+static string CleanQuote(string s)
+{
+    var t = Regex.Replace(s, @"[✙✚].*$|(?i)підтримати\s+канал.*$|підписатис[ья].*$|https?://\S+|@\w+", " ");
+    return Regex.Replace(t, @"\s{2,}", " ").Trim(' ', '|', '·', '-', '—');
+}
 // Згадка про роботу ППО в пості локального каналу («працює ППО», «робота ППО», зенітки).
 static bool PpoMention(string s) => Regex.IsMatch(s.ToLowerInvariant(), @"\bппо\b|протиповітрян|зенітн");
 
@@ -1033,25 +1088,32 @@ static string BuildAlertsJson(OfficialAlerts.Snapshot s)
 static string BigLabel(string ua) =>
     ua.Contains("Київ") ? "КИЇВ" : ua.Contains("Харків") ? "ХАРКІВ" : ua.Contains("Дніпро") ? "ДНІПРО" : ua;
 
+// Список областей коротко: «Київ, Харківська, Сумська» (+ «і ще N», щоб не було стіни тексту).
+static string RegionList(IEnumerable<string> regions, int max = 10)
+{
+    var l = regions.Select(ShortReg).ToList();
+    return H(string.Join(", ", l.Take(max))) + (l.Count > max ? $" і ще {l.Count - max}" : "");
+}
+
 static string BuildAlarmPost(List<string> newly, OfficialAlerts.Snapshot s)
 {
     var sb = new StringBuilder();
     if (s.RedUa.Count + s.YellowUa.Count >= 18)
     {
-        sb.AppendLine("🚨🚨 <b>МАСШТАБНА ТРИВОГА</b> — майже вся Україна!");
+        sb.AppendLine("🚨🚨 <b>МАСШТАБНА ТРИВОГА</b> — майже вся Україна");
         sb.AppendLine("🛫 Схоже на зліт МіГ-31К або балістику. Усі в укриття!");
         sb.AppendLine();
     }
-    var big = newly.Where(r => r.Contains("Київ") || r.Contains("Харків") || r.Contains("Дніпро"))
-                   .Select(BigLabel).Distinct().ToList();
+    var big = newly.Where(r => BigLabel(r) != r).Select(BigLabel).Distinct().ToList();
     if (big.Count > 0)
-        sb.AppendLine("🚨 <b>" + H(string.Join(" · ", big)) + "</b> — тривога!");
+        sb.AppendLine("🚨 <b>" + H(string.Join(" · ", big)) + " — ТРИВОГА!</b>");
     sb.AppendLine("🔴 <b>Повітряна тривога</b>");
-    sb.AppendLine("📍 " + H(string.Join(", ", newly.Select(ShortReg))));
+    sb.AppendLine("📍 " + RegionList(newly));
     sb.AppendLine();
-    sb.AppendLine($"🗺 По країні: 🔴 {s.RedUa.Count} обл · 🟡 {s.YellowUa.Count} обл");
-    sb.AppendLine("⚠️ Прямуйте в укриття, бережіть себе 🇺🇦");
-    sb.Append("🤖 WarAlarm · звіряйтесь з офіційними джерелами");
+    sb.AppendLine($"🇺🇦 По країні: 🔴 {s.RedUa.Count} · 🟡 {s.YellowUa.Count} обл.");
+    sb.AppendLine("➤ Прямуйте в укриття. Бережіть себе 🇺🇦");
+    sb.AppendLine();
+    sb.Append(ChannelFoot);
     return sb.ToString();
 }
 
@@ -1065,16 +1127,15 @@ static string MapCaption(OfficialAlerts.Snapshot s, int targets)
     var sb = new StringBuilder();
     if (mass)
     {
-        sb.AppendLine("⚠️ <b>МАСШТАБНА ТРИВОГА</b> — майже вся Україна одночасно.");
+        sb.AppendLine("⚠️ <b>МАСШТАБНА ТРИВОГА</b> — майже вся Україна одночасно");
         sb.AppendLine("🛫 Так буває при зльоті МіГ-31К або балістиці. Будьте в укритті.");
         sb.AppendLine();
     }
-    sb.AppendLine("🗺 <b>Карта тривог</b>");
-    sb.AppendLine($"🔴 {red} обл · 🟡 {yel} обл · 🛸 у повітрі: ~{targets}");
-    if (red > 0)
-        sb.AppendLine("🔥 Тривога: " + H(string.Join(", ", s.RedUa.Take(12).Select(ShortReg)))
-            + (red > 12 ? "…" : ""));
-    sb.Append("🤖 Авто · звіряйтесь з офіційними джерелами");
+    sb.AppendLine($"🗺 <b>Карта тривог</b> · {DateTime.Now:HH:mm}");
+    sb.AppendLine($"🔴 {red} · 🟡 {yel} обл. · 🛸 у повітрі ~{targets}");
+    if (red > 0) sb.AppendLine("🔥 " + RegionList(s.RedUa, 12));
+    sb.AppendLine();
+    sb.Append(ChannelFoot);
     return sb.ToString();
 }
 
@@ -1083,25 +1144,35 @@ static string BuildClearPost(List<string> cleared, int remaining)
     var sb = new StringBuilder();
     if (remaining == 0)
     {
-        sb.AppendLine("🟢 <b>ВІДБІЙ</b> — по всій країні чисто! 🕊");
-        sb.AppendLine("✅ " + H(string.Join(", ", cleared.Select(ShortReg))));
-        sb.Append("🤖 WarAlarm · бережіть себе 🇺🇦");
+        sb.AppendLine("🟢 <b>ВІДБІЙ по всій країні</b> 🕊");
+        sb.AppendLine("✅ " + RegionList(cleared));
+        sb.AppendLine();
+        sb.Append("<i>🤖 WarAlarm · бережіть себе 🇺🇦</i>");
         return sb.ToString();
     }
-    sb.AppendLine("🟢 <b>ВІДБІЙ</b>");
-    sb.AppendLine("✅ " + H(string.Join(", ", cleared.Select(ShortReg))));
+    sb.AppendLine("🟢 <b>Відбій</b>");
+    sb.AppendLine("✅ " + RegionList(cleared));
     sb.AppendLine();
-    sb.AppendLine($"Ще під тривогою: 🔴 {remaining} обл.");
-    sb.Append("🤖 WarAlarm");
+    sb.AppendLine($"🔴 Ще під тривогою: {remaining} обл.");
+    sb.AppendLine();
+    sb.Append(ChannelFoot);
     return sb.ToString();
 }
 
-// Живі новини: щохвилини дивимось активні цілі; коли картина ЗМІНИЛАСЬ і минуло
-// ≥2 хв від минулого посту — публікуємо дайджест (по типах, з місцями) + карту.
+// Живі новини: ОДНА «жива дошка» цілей, яку ми редагуємо, поки картина змінюється.
+// Раніше кожна зміна була новим постом (26.10: ~110 постів/год, 40% — дослівні повтори).
+// Новий пост (зі звуком) — лише коли сталося важливе: нове велике місто під нальотом,
+// новий «💥 Гучно / ❗ На підльоті / ⚠️ Над… / 🛡 ППО», або дошка застаріла (30 хв) чи її
+// засипало іншими постами. Решта — тихе редагування того самого поста.
 async Task RunThreatNews(ChannelPoster channel)
 {
-    string lastKey = "";
-    var lastPost = DateTime.MinValue;
+    long? liveId = null;
+    string liveCore = "";
+    var liveAt = DateTime.MinValue;   // коли дошку запостили
+    var lastChange = DateTime.MinValue;
+    var lastActive = DateTime.MinValue;
+    var liveCities = new HashSet<string>();
+    var liveHot = new HashSet<string>();
     while (true)
     {
         // Швидко: реактивні цілі перетинають місто за ~30 с, тож перевіряємо
@@ -1110,30 +1181,52 @@ async Task RunThreatNews(ChannelPoster channel)
         try
         {
             var active = tracker.Active.Where(t => t.Pos is not null).ToList();
-            if (active.Count == 0) continue;
+            if (active.Count == 0)
+            {
+                // Небо чисте ≥2 хв → закриваємо дошку підсумком «тихо» (редагуванням, без нового поста).
+                if (liveId is { } done && DateTime.Now - lastActive > TimeSpan.FromMinutes(2))
+                {
+                    await channel.Edit(done, liveCore + $"✅ <b>Цілей у повітрі більше не видно</b> · {DateTime.Now:HH:mm}\n\n" + ChannelFoot);
+                    liveId = null; liveCore = ""; liveCities.Clear(); liveHot.Clear();
+                }
+                continue;
+            }
+            lastActive = DateTime.Now;
             foreach (var t in active) daySeen.Add($"{t.Kind}|{t.LastPlace}"); // для зведення
-            // Стадія у ключі: перехід наближається→приліт→далі має дати НОВИЙ пост
-            // (для живих коротких оновлень на Київ/Харків: «💥 Гучно», «🇺🇦 Далі на…»).
-            var key = string.Join("|", active
-                .Select(t => $"{t.Kind}:{t.LastPlace}:{t.Amount}:{t.Stage}")
-                .OrderBy(x => x));
-            if (key == lastKey) continue;                                  // нічого нового
-            if (DateTime.Now - lastPost < TimeSpan.FromSeconds(20)) continue; // не спамимо
-            lastKey = key;
-            lastPost = DateTime.Now;
             // Налёт на велике місто (Київ/Харків/Дніпро) → короткий формат; інакше — по областях.
             var raidCities = active.Select(NearBigCity).Where(c => c != null).Distinct().ToList();
             // Міста, де щойно (≤3 хв) згадали роботу ППО — для банера «🛡 Працює ППО».
             var ppoNow = new HashSet<string>(
                 ppoSeen.Where(kv => DateTime.Now - kv.Value < TimeSpan.FromMinutes(3)).Select(kv => kv.Key));
-            var post = raidCities.Count > 0
+            var core = raidCities.Count > 0
                 ? BuildCityRaidPost(active, raidCities!, ppoNow)
                 : BuildOblastPost(active, AirborneNow(active.Sum(t => t.Amount)));
-            await channel.Post(post, null); // текст; карта — окремо (10 хв)
+            if (core == liveCore) continue;                                     // нічого нового
+            if (DateTime.Now - lastChange < TimeSpan.FromSeconds(20)) continue; // не частіше за 20 с
+            lastChange = DateTime.Now;
+
+            var cities = raidCities.Select(c => c!).ToHashSet();
+            var hot = core.Split('\n').Where(l => l.StartsWith("💥") || l.StartsWith("❗") || l.StartsWith("⚠️") || l.StartsWith("🛡")).ToHashSet();
+            // Важливе: нове місто під нальотом — одразу; новий «💥/❗/⚠️» — не частіше ніж раз
+            // на хвилину (ціль «над районом» перебирає райони — це не привід дзенькати щоразу).
+            bool important = !cities.IsSubsetOf(liveCities)
+                || (!hot.IsSubsetOf(liveHot) && DateTime.Now - liveAt > TimeSpan.FromMinutes(1));
+            bool buried = channel.LastId != liveId && DateTime.Now - liveAt > TimeSpan.FromMinutes(5);
+            bool stale = DateTime.Now - liveAt > TimeSpan.FromMinutes(30);
+            var text = core + LiveFoot();
+
+            if (liveId is not { } id || important || buried || stale || !await channel.Edit(id, text))
+            {
+                liveId = await channel.Post(text, null, silent: !important); // текст; карта — окремо (10 хв)
+                liveAt = DateTime.Now;
+            }
+            liveCore = core; liveCities = cities; liveHot = hot;
         }
         catch (Exception ex) { Console.Error.WriteLine("⚠ threatnews: " + ex.Message); }
     }
 }
+
+static string LiveFoot() => $"<i>🕒 {DateTime.Now:HH:mm} · оновлюється · 🤖 WarAlarm</i>";
 
 static string KindShort(ThreatKind k) => k switch
 {
@@ -1163,19 +1256,19 @@ static string? NearBigCity(Threat t)
     return null;
 }
 
-// Звичайний формат (вся Україна): згруповано по областях —  «🛩 БпЛА на Луцьк».
+// Звичайний формат (вся Україна): згруповано по областях — «🛩 БпЛА → Луцьк».
+// Без підпису: дошка сама додає рядок «🕒 оновлено» (RunThreatNews).
 static string BuildOblastPost(List<Threat> active, int airborne = -1)
 {
     var sb = new StringBuilder();
     var byRegion = active.Where(t => t.Pos is not null)
         .GroupBy(t => OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon))
         .OrderByDescending(g => g.Sum(t => t.Amount))
-        .Take(12).ToList();
+        .ToList();
     int total = airborne >= 0 ? airborne : active.Where(t => t.Pos is not null).Sum(t => t.Amount);
-    sb.Append("🛸 <b>У повітрі зараз: ~").Append(total).AppendLine("</b>");
-    sb.AppendLine("(рух по областях)");
+    sb.Append("🛸 <b>У повітрі ~").Append(total).AppendLine("</b> · рух по областях");
     sb.AppendLine();
-    foreach (var g in byRegion)
+    foreach (var g in byRegion.Take(10))
     {
         sb.Append("📍 <b>").Append(H(g.Key)).AppendLine("</b>");
         var seen = new HashSet<string>();
@@ -1184,13 +1277,13 @@ static string BuildOblastPost(List<Threat> active, int airborne = -1)
         {
             var place = t.LastPlace.Length > 0 ? t.LastPlace : g.Key;
             if (!seen.Add($"{t.Kind}|{place}")) continue;
-            if (lines++ >= 8) { sb.AppendLine("   …"); break; }
-            sb.Append("   ").Append(ThreatParser.Icon(t.Kind)).Append(' ').Append(KindShort(t.Kind))
+            if (lines++ >= 6) { sb.AppendLine("…"); break; }
+            sb.Append(ThreatParser.Icon(t.Kind)).Append(' ').Append(KindShort(t.Kind))
               .Append(t.Amount > 1 ? $" ×{t.Amount}" : "").Append(" → ").AppendLine(H(place));
         }
         sb.AppendLine();
     }
-    sb.Append("🤖 Авто · звіряйтесь з офіційними джерелами");
+    if (byRegion.Count > 10) sb.AppendLine($"…і ще {byRegion.Count - 10} обл.\n");
     return sb.ToString();
 }
 
@@ -1217,7 +1310,6 @@ static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSe
         }
         sb.AppendLine();
     }
-    sb.Append("🤖 WarAlarm");
     return sb.ToString();
 }
 
@@ -1235,31 +1327,36 @@ static string RaidLine(Threat t)
     };
 }
 
-// Статус по ТОЧЦІ (місто користувача): ймовірність + найближчі цілі.
+// Статус по ТОЧЦІ (місто користувача) для бота (HTML): тихо / ймовірність + найближчі цілі.
 string StatusAt(double lat, double lon)
 {
     var pt = (lat, lon);
     var list = tracker.Active.Where(t => t.Pos is not null).ToList();
     var a = RiskModel.For(pt, list.Where(t => !t.Approx).Select(t => (t, t.Amount)).ToList());
     var sb = new StringBuilder();
-    sb.AppendLine($"🎯 Ймовірність удару: {a.Percent}% — {a.Verdict}");
     var near = list.Select(t => (t, km: ThreatGeo.Km(t.Pos!.Value, pt)))
                    .OrderBy(x => x.km).Take(6).ToList();
     if (near.Count == 0 || near[0].km > 70)
-        sb.AppendLine("🟢 Активних цілей поруч немає.");
+    {
+        sb.AppendLine("🟢 <b>Тихо</b> — поруч (70 км) цілей немає");
+        if (a.Percent > 0) sb.AppendLine($"🎯 Ймовірність удару: {a.Percent}% · {H(a.Verdict.ToLowerInvariant())}");
+    }
     else
     {
-        sb.AppendLine("\nНайближчі цілі:");
+        sb.AppendLine($"{RiskDot(a.Percent)} <b>Ймовірність удару: {a.Percent}%</b> — {H(a.Verdict.ToLowerInvariant())}");
+        sb.AppendLine("\n<b>Найближчі цілі</b>");
         foreach (var (t, km) in near.Where(x => x.km <= 250))
-            sb.AppendLine($"• {ThreatTracker.Label(t)} — {km:0} км, {ThreatTracker.StageLabel(t.Stage)}"
-                + (t.LastPlace.Length > 0 ? $", біля {t.LastPlace}" : ""));
+            sb.AppendLine($"{ThreatParser.Icon(t.Kind)} {H(ThreatTracker.Label(t))}{(t.Amount > 1 ? $" ×{t.Amount}" : "")} — <b>{km:0} км</b> · {ThreatTracker.StageLabel(t.Stage)}"
+                + (t.LastPlace.Length > 0 ? $"\n      📍 {H(t.LastPlace)}" : ""));
     }
     if (AviationFeed.At(lat, lon) is { } av)
-        sb.AppendLine($"\n✈ {(av.Planes ? "Тактична авіація" : "Авіація")}{(av.Kab ? " · загроза КАБ" : "")} над твоєю областю"
+        sb.AppendLine($"\n✈ <b>{(av.Planes ? "Тактична авіація" : "Авіація")}{(av.Kab ? " · загроза КАБ" : "")}</b> над твоєю областю"
             + $" (востаннє {av.Last:HH:mm}, каналів: {av.Srcs.Count}). КАБ летить 40–70 км — тримайся укриття.");
-    if (AlarmEtaText(lat, lon) is { } eta) sb.AppendLine("\n" + eta);
+    if (AlarmEtaText(lat, lon) is { } eta) sb.AppendLine("\n" + H(eta));
     return sb.ToString();
 }
+
+static string RiskDot(int percent) => percent >= 50 ? "🔴" : percent >= 25 ? "🟠" : percent >= 10 ? "🟡" : "🟢";
 
 // ⏰ «Коли орієнтовно тривога тут»: найраніше, коли ціль або група пуску, летячи типовим
 // маршрутом, зайде в область місця або підійде ближче 50 км (тоді її зазвичай і оголошують).
@@ -1311,7 +1408,7 @@ string? AlarmEtaText(double lat, double lon)
 // Малює поточну карту загроз у PNG: області за ОФІЦІЙНОЮ тривогою (red/yellow),
 // цілі — детальні силуети за курсом (як у застосунку), міста з підписами.
 // channel=true → нейтральний заголовок для каналу (без дому й «ймовірності»).
-async Task<byte[]?> BuildBotMapPng(bool channel = false)
+async Task<byte[]?> BuildBotMapPng(bool channel = false, (double lat, double lon)? at = null, string? name = null)
 {
     var live = tracker.Active.Where(t => t.Pos is not null).ToList();
     var snap = await OfficialAlerts.FetchFull();
@@ -1321,8 +1418,10 @@ async Task<byte[]?> BuildBotMapPng(bool channel = false)
         return MapImage.Render((HomeLat, HomeLon), live, "WarAlarm · Карта тривог", subtitle, snap.ByPolygon,
             showHome: false, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
     }
-    var a = RiskModel.For((HomeLat, HomeLon), live.Where(t => !t.Approx).Select(t => (t, t.Amount)).ToList());
-    return MapImage.Render((HomeLat, HomeLon), live, $"WarAlarm · {MyCity}",
+    // at — місто користувача бота (своя точка й своя ймовірність); інакше — дім.
+    var home = at ?? (HomeLat, HomeLon);
+    var a = RiskModel.For(home, live.Where(t => !t.Approx).Select(t => (t, t.Amount)).ToList());
+    return MapImage.Render(home, live, $"WarAlarm · {name ?? MyCity}",
         $"Ймовірність удару: {a.Percent}% — {a.Verdict}", snap.ByPolygon,
         showHome: true, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
 }
@@ -1333,26 +1432,26 @@ static string KindName(string cat) => cat switch
     "kab" => "КАБ", "avia" => "Авіація", _ => "Інше",
 };
 
-// Детальна ймовірність по ТОЧЦІ: відсоток + типи + головні чинники.
+// Детальна ймовірність по ТОЧЦІ (бот, HTML): відсоток + типи + головні чинники.
 string RiskAt(double lat, double lon)
 {
     var list = tracker.Active.Where(t => t.Pos is not null && !t.Approx).Select(t => (t, t.Amount)).ToList();
     var a = RiskModel.For((lat, lon), list);
     var sb = new StringBuilder();
-    sb.AppendLine($"🎯 Ймовірність удару: {a.Percent}% — {a.Verdict}");
+    sb.AppendLine($"{RiskDot(a.Percent)} <b>Ймовірність удару: {a.Percent}%</b> — {H(a.Verdict.ToLowerInvariant())}");
     if (a.ByKind.Count > 0)
     {
-        sb.AppendLine("\nЗа типами:");
+        sb.AppendLine("\n<b>За типами</b>");
         foreach (var kv in a.ByKind.OrderByDescending(k => k.Value))
-            sb.AppendLine($"• {KindName(kv.Key)}: {kv.Value}%");
+            sb.AppendLine($"• {KindName(kv.Key)} — {kv.Value}%");
     }
     if (a.Factors.Count > 0)
     {
-        sb.AppendLine("\nГоловні чинники:");
+        sb.AppendLine("\n<b>Головні чинники</b>");
         foreach (var f in a.Factors.Take(4))
-            sb.AppendLine($"• {f.label} — {f.distKm:0} км ({f.percent}%)");
+            sb.AppendLine($"• {H(f.label)} — {f.distKm:0} км ({f.percent}%)");
     }
-    if (a.Percent == 0) sb.AppendLine("Наразі прямих загроз не видно.");
+    if (a.Percent == 0) sb.AppendLine("\n🟢 Прямих загроз зараз не видно.");
     return sb.ToString();
 }
 
@@ -1378,25 +1477,36 @@ string RiskAt(double lat, double lon)
 async Task<string> BuildBotAi()
 {
     if (advisor is null)
-        return "🤖 ІІ не налаштовано. Додай  ai_api_key=...  у secrets.local.txt.";
+        return "🤖 ШІ-аналіз не налаштовано (немає ai_api_key у secrets.local.txt).";
     var reply = await advisor.Analyze(BuildSituation());
-    return reply is { Length: > 0 } ? "🤖 " + reply : "ІІ не відповів — перевір ключ/мережу.";
+    return reply is { Length: > 0 } ? "🤖 <b>ШІ-аналіз</b> · " + DateTime.Now.ToString("HH:mm") + "\n\n" + H(reply.Trim())
+                                    : "😔 ШІ не відповів — спробуй трохи згодом.";
 }
 
-// Аналітика з журналу alarms.csv: сьогодні / тиждень / усього / пік / за типами.
 // ── 🛰 Ціль детально / стеження (бот) ───────────────────────────────────────
-// Найближчі до точки цілі (до 250 км): (id, опис) — для «🛰 Цілі» у боті.
+// Найближчі до точки цілі (до 250 км): (id, короткий HTML-рядок) — для «🛰 Цілі» у боті.
 List<(string id, string text)> TargetsNear(double lat, double lon, int n) =>
     tracker.Active.Where(t => t.Pos is not null)
         .Select(t => (t, km: ThreatGeo.Km(t.Pos!.Value, (lat, lon))))
         .Where(x => x.km <= 250).OrderBy(x => x.km).Take(n)
-        .Select(x => (x.t.Id, TargetText(x.t, lat, lon))).ToList();
+        .Select(x => (x.t.Id, TargetLine(x.t, x.km))).ToList();
 
-// Поточний опис цілі за id (null — ціль знята / зникла з радарів).
-string? TargetInfo(string id, double lat, double lon) =>
-    tracker.Active.FirstOrDefault(t => t.Id == id) is { Pos: not null } t ? TargetText(t, lat, lon) : null;
+// «🛩 <b>Шахед ×3</b> — 38 км · підліт ~25 хв ⏎ 📍 Бровари · наближається»
+string TargetLine(Threat t, double km)
+{
+    var eta = km / ThreatGeo.SpeedKmh(t.Kind, t.Ammo) * 60;
+    return $"{ThreatParser.Icon(t.Kind)} <b>{H(ThreatTracker.Label(t))}{(t.Amount > 1 ? $" ×{t.Amount}" : "")}</b> — {km:0} км"
+         + (t.Launch ? "" : $" · підліт ~{(eta < 1 ? "&lt;1" : eta.ToString("0"))} хв")
+         + $"\n      📍 {H(t.LastPlace.Length > 0 ? t.LastPlace : "місце уточнюється")} · {ThreatTracker.StageLabel(t.Stage)}";
+}
 
-string TargetText(Threat t, double lat, double lon)
+// Поточна картка цілі за id + її стадія (null — ціль знята / зникла з радарів).
+(string text, string stage)? TargetInfo(string id, double lat, double lon) =>
+    tracker.Active.FirstOrDefault(t => t.Id == id) is { Pos: not null } t
+        ? (TargetText(t, lat, lon, html: true), ThreatTracker.StageLabel(t.Stage)) : null;
+
+// html=true — для бота: екрановано, перший рядок жирним.
+string TargetText(Threat t, double lat, double lon, bool html = false)
 {
     var km = ThreatGeo.Km(t.Pos!.Value, (lat, lon));
     var spd = ThreatGeo.SpeedKmh(t.Kind, t.Ammo);
@@ -1422,14 +1532,20 @@ string TargetText(Threat t, double lat, double lon)
     if (srcs.Length > 0) lines.Add($"📡 джерела ({srcs.Length}): {string.Join(", ", srcs.Take(5).Select(s => "@" + s))}");
     var quiet = (DateTime.Now - t.LastUpdate).TotalMinutes;
     lines.Add($"🕒 оновлено {t.LastUpdate:HH:mm:ss}{(quiet >= 3 ? $" — {quiet:0} хв без нових даних, позиція неточна" : "")}");
+    if (html)
+    {
+        lines = lines.Select(H).ToList();
+        lines[0] = "<b>" + lines[0] + "</b>";
+    }
     return string.Join("\n", lines);
 }
 
+// Аналітика з журналу alarms.csv (бот, HTML): сьогодні / тиждень / усього / пік / за типами.
 string BuildBotStats()
 {
     if (!File.Exists("alarms.csv")) return "📈 Ще немає даних — журнал зʼявиться після перших тривог.";
     var rows = File.ReadAllLines("alarms.csv").Select(l => l.Split(',')).Where(c => c.Length >= 5).ToList();
-    if (rows.Count == 0) return "📈 Журнал порожній.";
+    if (rows.Count == 0) return "📈 Журнал поки порожній — тихо 🟢";
     var today = DateTime.Now.ToString("yyyy-MM-dd");
     var weekAgo = DateTime.Now.AddDays(-6).ToString("yyyy-MM-dd");
     bool IsAlarm(string[] c) => c[4] is "alarm" or "urgent";
@@ -1442,22 +1558,38 @@ string BuildBotStats()
         if (c[1].Length >= 2 && int.TryParse(c[1].AsSpan(0, 2), out var h)) hours[h % 24]++;
     int peak = 0; for (int i = 1; i < 24; i++) if (hours[i] > hours[peak]) peak = i;
     var sb = new StringBuilder();
-    sb.AppendLine("📈 Аналітика тривог:");
-    sb.AppendLine($"• Сьогодні: {todayA}");
-    sb.AppendLine($"• За тиждень: {week}");
-    sb.AppendLine($"• Усього: {total} (прильотів: {impacts})");
-    if (total > 0) sb.AppendLine($"• Найнебезпечніша година: {peak:00}:00");
+    sb.AppendLine($"📈 <b>Аналітика тривог</b> · {H(MyCity)}");
+    sb.AppendLine();
+    sb.AppendLine($"📅 Сьогодні: <b>{todayA}</b> · за тиждень: <b>{week}</b>");
+    sb.AppendLine($"🗂 Усього: {total} · прильотів: {impacts}");
+    if (total > 0) sb.AppendLine($"⏰ Найнебезпечніша година: <b>{peak:00}:00</b>");
     var byType = rows.Where(IsAlarm).GroupBy(c => c[3]).OrderByDescending(g => g.Count()).Take(4).ToList();
     if (byType.Count > 0)
     {
-        sb.AppendLine("• За типами:");
-        foreach (var g in byType) sb.AppendLine($"   {g.Key} — {g.Count()}");
+        sb.AppendLine("\n<b>За типами</b>");
+        foreach (var g in byType) sb.AppendLine($"• {H(g.Key)} — {g.Count()}");
     }
     return sb.ToString();
 }
 
-// Офіційні тривоги по областях (free feed vadimklimenko) — чи є тривога у твоїй.
-Task<string> BuildBotAlerts() => OfficialAlerts.Summary(MyCity, MyOblast);
+// Офіційні тривоги для бота (HTML): область користувача + країна (free feed vadimklimenko).
+async Task<string> BuildBotAlertsAt(double lat, double lon)
+{
+    var snap = await OfficialAlerts.FetchFull();
+    var poly = OblastGeo.PolyName(lat, lon);
+    var region = H(OblastGeo.Region(lat, lon));
+    var lvl = poly is not null && snap.ByPolygon.TryGetValue(poly, out var l) ? l : null;
+    var sb = new StringBuilder($"🚨 <b>Офіційні тривоги</b> · {DateTime.Now:HH:mm}\n\n");
+    sb.AppendLine(lvl switch
+    {
+        "red"    => $"🔴 <b>{region} — ТРИВОГА!</b>\n➤ Прямуй в укриття.",
+        "yellow" => $"🟡 <b>{region}</b> — тривога в частині області",
+        _        => $"🟢 <b>{region}</b> — тривоги немає",
+    });
+    sb.AppendLine($"\n🇺🇦 По країні: 🔴 {snap.RedUa.Count} · 🟡 {snap.YellowUa.Count} обл.");
+    if (snap.RedUa.Count > 0) sb.AppendLine("🔥 " + RegionList(snap.RedUa, 12));
+    return sb.ToString();
+}
 
 // Рассылает тревогу во все подключённые каналы (падение одного не роняет остальные).
 async Task Alert(AlarmInfo info)
@@ -1916,7 +2048,7 @@ async Task OnUpdate(Update update)
                                       + (etaHome is null ? "" : "\n\n" + etaHome),
                                       ThreatKind.Drone, Urgent: false, Info: true));
             if (channelPoster is not null)
-                await channelPoster.Post($"🚀 <b>{H(head)}</b>\n{H(string.Join("\n", rows))}\n\n⚠️ Летять на Україну — стежте за картою.\n🤖 WarAlarm", null);
+                await channelPoster.Post($"<b>{H(head)}</b>\n{H(string.Join("\n", rows))}\n\n⚠️ Летять на Україну — стежте за картою.\n\n{ChannelFoot}", null);
             return;
         }
         if (LaunchFeed.ParseAirborne(m.message) is int air)
@@ -1955,7 +2087,7 @@ async Task OnUpdate(Update update)
             await Notify("UA", new AlarmInfo(time, src, $"🚀 {head} — прямують на Україну! {txt}", oneLine, drones ? ThreatKind.Drone : ThreatKind.Missile, true, Silent: false), clear: false);
             if (channelPoster is not null)
                 await channelPoster.Post(
-                    $"🚀 <b>УВАГА — {H(head)}</b>\n{H(txt)}\n\n⚠️ Прямують на Україну — очікуйте появу на карті. Будьте на зв'язку.\n🤖 WarAlarm", null);
+                    $"🚀 <b>УВАГА — {H(head)}</b>\n<blockquote>{H(CleanQuote(txt))}</blockquote>\n⚠️ Прямують на Україну — очікуйте появу на карті.\n\n{ChannelFoot}", null);
         }
         // не return — у пості можуть бути й цілі; хай далі теж розпарситься
     }
@@ -2000,7 +2132,7 @@ async Task OnUpdate(Update update)
             SetPower(kyivOff.Count > 0, "Київ");
             await Alert(new AlarmInfo(time, src, head, string.Join("\n", lines), ThreatKind.Unknown, Urgent: false, Power: true));
             if (channelPoster is not null)
-                await channelPoster.Post($"💡 <b>Світло в Києві{H(at)}</b>\n{H(string.Join("\n", lines))}\n🤖 WarAlarm", null);
+                await channelPoster.Post($"💡 <b>Світло в Києві{H(at)}</b>\n{H(string.Join("\n", lines))}\n\n<i>🤖 WarAlarm</i>", null, silent: true);
             return;
         }
 
@@ -2013,7 +2145,7 @@ async Task OnUpdate(Update update)
             SetPower(off, area);
             await Alert(new AlarmInfo(time, src, $"{icon} {word} — {area}", oneLine, ThreatKind.Unknown, Urgent: false, Power: true)); // пуш + консоль
             if (channelPoster is not null) // і в канал (район без «твій»)
-                await channelPoster.Post($"{icon} <b>{H(word)} — {H(pe.Area)}</b>\n{H(msg)}\n🤖 WarAlarm", null);
+                await channelPoster.Post($"{icon} <b>{H(word)} — {H(pe.Area)}</b>\n{H(CleanQuote(msg))}\n\n<i>🤖 WarAlarm</i>", null, silent: true);
         }
         else
             Ui.Line(ConsoleColor.DarkGray, $"💡 [{time}] {src} · {(pe.Kind == PowerKind.Schedule ? "графік відключень" : "новина про світло")} (тихо)");
@@ -2169,14 +2301,24 @@ async Task HandleHub(SourceInfo si, string text, string src, string time, int ms
     }
 }
 
-// 📡 Відповідь бота «Джерела»: скільки каналів, хто що дав.
+// 📡 Відповідь бота «Джерела» (HTML): скільки каналів, хто дав найбільше.
 string BuildSourcesText()
 {
-    var j = hub.Report(12);
-    return $"📡 Джерела моніторингу: {SourceCatalog.All.Count} каналів (neptun.in.ua/dzherela)\n"
-         + $"Чекають підтвердження: {hub.Pending}\n\n"
-         + (j.Length > 0 ? j : "Поки що тихо — повідомлень з каналів не було.")
-         + "\nПравило: офіційні/розвідка й місцеві про свій регіон — одразу; інші — після 2-го джерела.";
+    var top = hub.Top(8);
+    var sb = new StringBuilder($"📡 <b>Джерела</b> · {SourceCatalog.All.Count} каналів моніторингу\n");
+    if (hub.Pending > 0) sb.AppendLine($"⏳ Чекають підтвердження: {hub.Pending}");
+    sb.AppendLine();
+    if (top.Count == 0) sb.AppendLine("🤫 Поки що тихо — цілей з каналів ще не було.");
+    else
+    {
+        sb.AppendLine("<b>Хто дав найбільше</b>");
+        for (int i = 0; i < top.Count; i++)
+            sb.AppendLine($"{i + 1}. @{H(top[i].user)} — ✅ {top[i].s.Confirmed} · 🥇 {top[i].s.First} · 🎯 {top[i].s.Threats}");
+        sb.AppendLine("<i>✅ підтверджено · 🥇 першим · 🎯 цілей</i>");
+    }
+    sb.AppendLine();
+    sb.Append("ℹ️ Офіційні, розвідка й місцеві про свій регіон — одразу; решта — після 2-го джерела.");
+    return sb.ToString();
 }
 
 // Оффлайн-прогін хаба на зібраних постах: показує, що він робить з кожним.

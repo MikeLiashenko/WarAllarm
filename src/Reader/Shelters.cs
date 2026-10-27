@@ -48,21 +48,27 @@ public static class Shelters
         catch { return "Не вдалося отримати дані про укриття зараз (мережа/сервіс). Спробуй пізніше."; }
 
         if (found.Count == 0)
-            return "😔 Поблизу не знайшов позначених укриттів у відкритій карті (OSM).\n"
+            return "😔 <b>Поблизу не знайшов позначених укриттів</b> у відкритій карті (OSM).\n\n"
                  + "Найнадійніше — підземка, підвали, паркінги, «правило двох стін». Знай своє найближче укриття заздалегідь.";
 
         var top = found.OrderBy(x => x.km).Take(6).ToList();
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("🏠 Найближчі укриття:");
+        sb.AppendLine("🏠 <b>Найближчі укриття</b>");
+        sb.AppendLine();
+        int i = 0;
         foreach (var s in top)
         {
             int m = (int)Math.Round(s.km * 1000);
-            var link = $"https://www.google.com/maps/dir/?api=1&destination={L(s.lat)},{L(s.lon)}&travelmode=walking";
-            sb.AppendLine($"• {s.name} — {m} м\n  {link}");
+            // Назва — посилання на піший маршрут (а не довгий URL окремим рядком).
+            var link = $"https://www.google.com/maps/dir/?api=1&amp;destination={L(s.lat)},{L(s.lon)}&amp;travelmode=walking";
+            sb.AppendLine($"{++i}. <a href=\"{link}\">{H(s.name)}</a> — {m} м");
         }
-        sb.Append("⚠️ Дані з OSM, можуть бути неповні. Знай своє укриття заздалегідь.");
+        sb.AppendLine();
+        sb.Append("<i>Натисни назву — маршрут пішки. Дані OSM можуть бути неповні: знай своє укриття заздалегідь.</i>");
         return sb.ToString();
     }
+
+    static string H(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     static string Label(JsonElement tags)
     {
