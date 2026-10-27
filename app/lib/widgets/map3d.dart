@@ -898,11 +898,14 @@ class _Map3DPainter extends CustomPainter {
         _text(canvas, left < 1 ? '<1 хв' : '${left.round()} хв', air.o + const Offset(20, -14), 11, color, bold: true);
       }
     } else if (!m.launch && t.heading != null && t.headingKnown && !t.down) {
-      final lead = math.min(60.0, speedKmPerMin(t) * 10);
-      final q = moveKm(m.lat, m.lon, m.heading, lead);
-      _dashed(canvas, air.o, cam.proj(q.lat, q.lon, z).o, Paint()
-        ..strokeWidth = 1.3
-        ..color = color.withValues(alpha: 0.65));
+      // Never past the all-clear border / out of Ukraine.
+      final lead = allowedLeadKm(m.lat, m.lon, m.heading, math.min(60.0, speedKmPerMin(t) * 10));
+      if (lead >= 3) {
+        final q = moveKm(m.lat, m.lon, m.heading, lead);
+        _dashed(canvas, air.o, cam.proj(q.lat, q.lon, z).o, Paint()
+          ..strokeWidth = 1.3
+          ..color = color.withValues(alpha: 0.65));
+      }
     }
 
     // Silence: where it may be by now (it doesn't fly straight) — a faint ground ring.

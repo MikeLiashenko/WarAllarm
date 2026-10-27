@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'ukraine_oblasts.dart';
+import 'ukraine_raions.dart';
 
 /// Point-in-oblast lookup over the same polygon set the map draws
 /// ([kOblastsJson]). Used to attach the official (red/yellow) alert level of a
@@ -11,10 +12,15 @@ class OblastLookup {
   final List<_Poly> _polys;
 
   static OblastLookup? _instance;
-  static OblastLookup get instance => _instance ??= _build();
+  static OblastLookup get instance => _instance ??= _build(kOblastsJson);
 
-  static OblastLookup _build() {
-    final raw = jsonDecode(kOblastsJson) as List<dynamic>;
+  /// The same lookup over raion (district) polygons — names are 'X район', as in
+  /// the official alert feed. For «is this point under an alarm» on partial oblasts.
+  static OblastLookup? _raions;
+  static OblastLookup get raions => _raions ??= _build(kRaionsJson);
+
+  static OblastLookup _build(String json) {
+    final raw = jsonDecode(json) as List<dynamic>;
     final polys = <_Poly>[];
     for (final o in raw) {
       if (o is! Map) continue;
@@ -54,6 +60,7 @@ class OblastLookup {
   /// Even-odd across all rings handles the Kyiv-oblast hole automatically.
   String? nameAt(double lat, double lon) {
     for (final poly in _polys) {
+      if (!poly.mayContain(lat, lon)) continue;
       var inside = false;
       for (final ring in poly.rings) {
         for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -73,5 +80,19 @@ class OblastLookup {
 class _Poly {
   final String name;
   final List<List<List<double>>> rings; // [ring][point][lon,lat]
-  _Poly(this.name, this.rings);
+  _Poly(this.name, this.rings) {
+    for (final r in rings) {
+      for (final p in r) {
+        if (p[0] < _minLon) _minLon = p[0];
+        if (p[0] > _maxLon) _maxLon = p[0];
+        if (p[1] < _minLat) _minLat = p[1];
+        if (p[1] > _maxLat) _maxLat = p[1];
+      }
+    }
+  }
+
+  // Bounding box — route checks probe hundreds of points per target.
+  double _minLon = 999, _maxLon = -999, _minLat = 999, _maxLat = -999;
+  bool mayContain(double lat, double lon) =>
+      lat >= _minLat && lat <= _maxLat && lon >= _minLon && lon <= _maxLon;
 }

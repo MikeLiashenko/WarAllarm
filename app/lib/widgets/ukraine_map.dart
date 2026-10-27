@@ -870,8 +870,11 @@ class _MapPainter extends CustomPainter {
       }
 
       // Course prediction: dashed line to where it's heading (+ city when zoomed).
-      if (known && spd > 0 && !dimTargets) {
-        final lead = math.min(55.0, spd * 10);
+      // Never past the all-clear border / out of Ukraine.
+      final lead = known && spd > 0 && !dimTargets
+          ? allowedLeadKm(lat, lon, t.heading!, math.min(55.0, spd * 10))
+          : 0.0;
+      if (lead >= 3) {
         final pd = _moveKm(lon, lat, t.heading!, lead);
         final ps = _toScreen(fit.project(pd.dx, pd.dy));
         _dashedLine(canvas, scr, ps,

@@ -139,6 +139,21 @@ void main() {
       expect(OblastLookupProbe.oblastAt(m.lat, m.lon), 'Poltava');
     });
 
+    test('partial alarm: stops at the border of the alarmed raion', () {
+      // Харківщина: тривога лише в Харківському районі; шахед летить на схід, до Куп'янська.
+      setMotionAlarmOblasts({'Kharkiv'}, whole: {}, raions: {'Харківський район'});
+      final d = MapTarget(
+          id: 'kh', label: 'Шахед', cat: 'shahed', lat: 49.99, lon: 36.23, kmh: 185,
+          seenMs: seen, route: const [[49.99, 36.23], [49.71, 37.62]]);
+      final m = motionOf(d, seen + 20 * 60000); // 20 хв × ~2.6 км/хв ≈ 52 км — далі межі району
+      expect(OblastLookup.raions.nameAt(m.lat, m.lon), 'Харківський район');
+      expect(m.lon, greaterThan(36.3)); // але до межі таки долетів
+      // Курс-пунктир теж не за межу.
+      final lead = allowedLeadKm(49.99, 36.5, 100, 55);
+      final end = moveKm(49.99, 36.5, 100, lead);
+      expect(OblastLookup.raions.nameAt(end.lat, end.lon), 'Харківський район');
+    });
+
     test('never flies out of Ukraine (Odesa → west stops before Moldova)', () {
       // A reactive drone over Odesa with a real westward course: 20 min × 7 km/min would
       // put it deep in Moldova; it must stop at the border instead.

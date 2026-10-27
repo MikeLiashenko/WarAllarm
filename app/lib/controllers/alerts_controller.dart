@@ -44,7 +44,9 @@ class AlertsController extends ChangeNotifier {
       _oblastWhole = snap.oblastWhole;
       _ok = true;
       _at = DateTime.now();
-      setMotionAlarmOblasts(_levels.keys.toSet()); // прогноз польоту не заходить у зони відбою
+      // Прогноз польоту не заходить у зону відбою — до межі району, якщо тривога часткова.
+      setMotionAlarmOblasts(_levels.keys.toSet(),
+          whole: _oblastWhole.keys.toSet(), raions: _raions.keys.toSet());
     } catch (_) {
       _ok = false;
       setMotionAlarmOblasts(null);

@@ -91,10 +91,59 @@ const double kRouteMin = 20;
 /// so the predicted flight stops at the edge of an all-clear oblast.
 Set<String>? motionAlarmOblasts;
 int _zonesVersion = 0;
-void setMotionAlarmOblasts(Set<String>? zones) {
+
+/// Raion-level split of [motionAlarmOblasts]: oblasts alarmed as a WHOLE, and the
+/// alarmed raions ('X район') of the rest. Null/empty → oblast level only.
+Set<String>? _alarmWhole;
+Set<String>? _alarmRaions;
+
+void setMotionAlarmOblasts(Set<String>? zones, {Set<String>? whole, Set<String>? raions}) {
   motionAlarmOblasts = zones;
+  _alarmWhole = whole;
+  _alarmRaions = raions?.map(_napo).toSet();
   _zonesVersion++;
   _limitCache.clear();
+}
+
+String _napo(String s) => s.replaceAll('’', "'").replaceAll('ʼ', "'").replaceAll('`', "'");
+
+/// Is this point (inside oblast [obl]) under an official alarm right now? An oblast
+/// with only some raions alarmed counts only in those raions — a drone must not fly
+/// on into the all-clear part. Unknown alert data → true (nothing to stop at).
+bool _inAlarm(String obl, double lat, double lon) {
+  final zones = motionAlarmOblasts;
+  if (zones == null || zones.isEmpty) return true;
+  if (!zones.contains(obl)) return false;
+  final whole = _alarmWhole, raions = _alarmRaions;
+  if (whole == null || raions == null || raions.isEmpty || whole.contains(obl)) return true;
+  final r = OblastLookup.raions.nameAt(lat, lon);
+  return r == null || raions.contains(_napo(r));
+}
+
+/// Would a target at [lat],[lon] still be somewhere it may fly: inside Ukraine and
+/// under alarm (or it was already outside — launched from Russia / over the sea).
+bool motionAllowed(double fromLat, double fromLon, double lat, double lon) {
+  final lookup = OblastLookup.instance;
+  final to = lookup.nameAt(lat, lon);
+  if (to == null) return lookup.nameAt(fromLat, fromLon) == null;
+  return _inAlarm(to, lat, lon) || !_inAlarmAt(fromLat, fromLon);
+}
+
+/// How far along [heading] a course line may reach without crossing the all-clear
+/// border or leaving Ukraine (≤ [maxKm], 3-km steps).
+double allowedLeadKm(double lat, double lon, double heading, double maxKm) {
+  var ok = 0.0;
+  for (var km = 3.0; km <= maxKm; km += 3) {
+    final p = moveKm(lat, lon, heading, km);
+    if (!motionAllowed(lat, lon, p.lat, p.lon)) break;
+    ok = km;
+  }
+  return ok;
+}
+
+bool _inAlarmAt(double lat, double lon) {
+  final o = OblastLookup.instance.nameAt(lat, lon);
+  return o != null && _inAlarm(o, lat, lon);
 }
 
 final Map<String, double> _limitCache = {};
@@ -127,7 +176,9 @@ double _alarmLimitKm(MapTarget t, List<List<double>> route) {
     }
     wasIn = true;
     leftAt = null;
-    if (zones != null && zones.isNotEmpty && !zones.contains(name)) {
+    // Stop at the border of the all-clear zone — an oblast without alarm, or the
+    // all-clear raions of a partially alarmed one.
+    if (zones != null && zones.isNotEmpty && !_inAlarm(name, p.lat, p.lon)) {
       lim = math.max(0, d - 4);
       break;
     }
@@ -225,12 +276,15 @@ TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
   if (t.heading != null && t.headingKnown && !t.down && !frozen) {
     // Real course: creep along it for at most [kCreepMin] minutes, at ~70 % of the
     // speed (turns and zig-zags make the straight-line progress shorter).
-    final m = moveKm(t.lat, t.lon, t.heading!, math.min(30.0, spd * 0.7 * math.min(quiet, kCreepMin)));
-    // Never creep out of Ukraine (Odesa oblast → Moldova / Romania).
-    final lookup = OblastLookup.instance;
-    if (lookup.nameAt(m.lat, m.lon) != null || lookup.nameAt(t.lat, t.lon) == null) {
-      lat = m.lat;
-      lon = m.lon;
+    // Never creep out of Ukraine (Odesa oblast → Moldova / Romania) or over the
+    // all-clear border: stop at the last point that is still allowed.
+    for (var km = math.min(30.0, spd * 0.7 * math.min(quiet, kCreepMin)); km > 0; km -= 2) {
+      final m = moveKm(t.lat, t.lon, t.heading!, km);
+      if (motionAllowed(t.lat, t.lon, m.lat, m.lon)) {
+        lat = m.lat;
+        lon = m.lon;
+        break;
+      }
     }
   }
   // After that it could be anywhere within this much — shown as a ring.
