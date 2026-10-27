@@ -62,11 +62,28 @@ class RtdbService {
     StreamSubscription<String>? sub;
     http.Client? streamClient;
     bool closed = false;
+    Timer? watchdog;
+    var lastLine = DateTime.now();
 
     // Local cache we mutate as SSE patch/put events arrive.
     dynamic cache;
 
-    Future<void> connect() async {
+    late Future<void> Function() connect;
+
+    // Drop the current connection (if any) and dial again in a few seconds.
+    void reconnect() {
+      sub?.cancel();
+      sub = null;
+      streamClient?.close();
+      streamClient = null;
+      if (closed) return;
+      Future<void>.delayed(const Duration(seconds: 3), () {
+        if (!closed) connect();
+      });
+    }
+
+    connect = () async {
+      lastLine = DateTime.now();
       try {
         streamClient = http.Client();
         final request = http.Request('GET', _uri(path))
@@ -82,6 +99,7 @@ class RtdbService {
             .transform(utf8.decoder)
             .transform(const LineSplitter())
             .listen((line) {
+          lastLine = DateTime.now(); // any line, incl. Firebase's keep-alive (~every 30 s)
           if (line.startsWith('event:')) {
             currentEvent = line.substring(6).trim();
           } else if (line.startsWith('data:')) {
@@ -92,33 +110,34 @@ class RtdbService {
               if (!closed) controller.add(cache);
             }
           }
-        }, onError: (Object e) {
-          _scheduleReconnect(closed, connect);
-        }, onDone: () {
-          _scheduleReconnect(closed, connect);
-        });
+        }, onError: (Object e) => reconnect(), onDone: reconnect);
       } catch (e) {
-        _scheduleReconnect(closed, connect);
+        reconnect();
       }
-    }
+    };
 
     controller = StreamController<dynamic>(
-      onListen: connect,
+      onListen: () {
+        connect();
+        // A half-open connection (after sleep / Wi-Fi switch) gives neither data nor
+        // an error — the app sat on «дані застарілі» forever. Firebase sends a
+        // keep-alive every ~30 s, so 75 s of silence means the link is dead: redial.
+        watchdog = Timer.periodic(const Duration(seconds: 15), (_) {
+          if (!closed && DateTime.now().difference(lastLine) > const Duration(seconds: 75)) {
+            lastLine = DateTime.now();
+            reconnect();
+          }
+        });
+      },
       onCancel: () async {
         closed = true;
+        watchdog?.cancel();
         await sub?.cancel();
         streamClient?.close();
       },
     );
 
     return controller.stream;
-  }
-
-  void _scheduleReconnect(bool closed, Future<void> Function() connect) {
-    if (closed) return;
-    Future<void>.delayed(const Duration(seconds: 3), () {
-      if (!closed) connect();
-    });
   }
 
   /// Applies an RTDB SSE `put`/`patch` payload to the local [read] cache.
