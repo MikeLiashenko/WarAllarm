@@ -19,6 +19,9 @@ import '../models/map_target.dart';
 ///   post and never into an oblast without an alarm; every new post puts it
 ///   where the channel says and it flies on from there. When it has stopped,
 ///   [uncertKm] — a ring of where it may be — grows until the next post.
+/// * **orbit** (a drone over a city): the channel says it circles («кружляє», «над
+///   містом»), or it reached the city at the end of its route — it just keeps
+///   circling the city ([orbiting]) until the next post.
 class TargetMotion {
   const TargetMotion({
     required this.lat,
@@ -31,6 +34,7 @@ class TargetMotion {
     this.flightMin,
     this.uncertKm = 0,
     this.quietMin = 0,
+    this.orbiting = false,
   });
 
   final double lat;
@@ -51,6 +55,9 @@ class TargetMotion {
 
   /// Minutes since the last report of this target.
   final double quietMin;
+
+  /// Circling over a city.
+  final bool orbiting;
 
   bool get isFlight => progress != null;
 }
@@ -219,6 +226,22 @@ double routeLengthKm(List<List<double>> r) {
 /// the uncertainty ring grows.
 const double kCreepMin = 4;
 
+/// Circle over a city: radius, km (FPV much tighter) and time of one lap.
+const double kOrbitKm = 8;
+const double kOrbitFpvKm = 3;
+const double kOrbitLapMin = 3;
+
+/// A point on the circle around ([lat], [lon]). Radius grows from 0 by [flownKm], so
+/// the marker comes off its route smoothly; the phase differs by target, so several
+/// drones over one city don't sit on top of each other.
+TargetMotion _orbit(MapTarget t, double lat, double lon, double flownKm, int nowMs, double quiet) {
+  final radius = math.min(t.cat == 'fpv' ? kOrbitFpvKm : kOrbitKm, flownKm);
+  final phase = t.id.hashCode % 360;
+  final ang = (phase + nowMs / (kOrbitLapMin * 60000) * 360) % 360;
+  final p = moveKm(lat, lon, ang, radius);
+  return TargetMotion(lat: p.lat, lon: p.lon, heading: (ang + 90) % 360, quietMin: quiet, orbiting: true);
+}
+
 TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
   final spd = speedKmPerMin(t);
   final from = t.from, to = t.to;
@@ -265,6 +288,10 @@ TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
     final p = alongRoute(route, frozen ? 0 : spd * 0.85 * quiet);
     return TargetMotion(lat: p.lat, lon: p.lon, heading: p.heading, quietMin: quiet.toDouble());
   }
+  // Over a city: just circles it.
+  if (t.orbit && !t.down && !frozen) {
+    return _orbit(t, t.lat, t.lon, spd * 0.85 * quiet, nowMs, quiet.toDouble());
+  }
   if (route.length >= 2 && !t.down && !frozen) {
     // Typical route (to Kyiv / west, or along the real course): fly it for up to
     // [kRouteMin] minutes after the post at ~85 % speed, never past the edge of an
@@ -272,6 +299,11 @@ TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
     // where the channel says it is and flies on from there).
     final want = spd * 0.85 * math.min(quiet, kRouteMin);
     final lim = _alarmLimitKm(t, route);
+    final total = routeLengthKm(route);
+    // Reached the city at the end of its route: circles there until the next post.
+    if (want >= total && lim >= total - 4) {
+      return _orbit(t, route.last[0], route.last[1], spd * 0.85 * quiet - total, nowMs, quiet.toDouble());
+    }
     final d = math.min(want, lim);
     final p = alongRoute(route, d);
     final stopped = quiet >= kRouteMin || lim < want;

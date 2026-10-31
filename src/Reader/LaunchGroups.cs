@@ -14,6 +14,7 @@ public sealed class LaunchGroup
     public required string Origin;
     public int N, Left;
     public bool Reactive;
+    public string Via = "";                 // «на Київ» / «на захід»
     public DateTime T0;
     public required List<(double lat, double lon)> Route;
     public double Kmh => Reactive ? 500 : 185;
@@ -38,12 +39,19 @@ public static class LaunchGroups
         lock (Gate)
             foreach (var i in b.Items)
             {
-                if (TypicalRoutes.FromOrigin(i.Origin) is not { } route) continue;
-                Groups.Add(new LaunchGroup
+                // Через Славутич дві дороги: група ділиться навпіл (одинак — типово на Київ).
+                var branches = TypicalRoutes.Branches(i.Origin);
+                int left = i.N;
+                for (int k = 0; k < branches.Count && left > 0; k++)
                 {
-                    Id = $"L{++_seq}:{i.Origin}{(i.Reactive ? ":R" : "")}", Origin = i.Origin,
-                    N = i.N, Left = i.N, Reactive = i.Reactive, T0 = at, Route = route,
-                });
+                    int n = k == branches.Count - 1 ? left : (left + 1) / 2;
+                    left -= n;
+                    Groups.Add(new LaunchGroup
+                    {
+                        Id = $"L{++_seq}:{i.Origin}{(i.Reactive ? ":R" : "")}", Origin = i.Origin, Via = branches[k].via,
+                        N = n, Left = n, Reactive = i.Reactive, T0 = at, Route = branches[k].route,
+                    });
+                }
             }
     }
 
@@ -78,6 +86,7 @@ public static class LaunchGroups
                 var g = Groups[i];
                 if (i > 0) sb.Append(',');
                 sb.Append("{\"id\":\"").Append(g.Id).Append("\",\"origin\":\"").Append(g.Origin).Append('"');
+                sb.Append(",\"via\":\"").Append(g.Via).Append('"');
                 sb.Append(",\"n\":").Append(g.Left).Append(",\"reactive\":").Append(g.Reactive ? "true" : "false");
                 sb.Append(",\"kmh\":").Append(N(g.Kmh * 0.85));
                 sb.Append(",\"t0\":").Append(((DateTimeOffset)g.T0).ToUnixTimeMilliseconds());

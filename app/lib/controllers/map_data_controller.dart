@@ -246,6 +246,12 @@ class MapDataController extends ChangeNotifier {
   int _launchedTs = 0;
   String _launchedAt = '';
   String _launchOrigins = '';
+  // 🛫 Зліт МіГ-31К (носій «Кинжалів»): показуємо, поки не сів, але не довше години.
+  bool _carrierUp = false;
+  int _carrierTs = 0;
+  bool get mig31Up =>
+      _carrierUp && DateTime.now().millisecondsSinceEpoch - _carrierTs < 3600 * 1000;
+  DateTime get mig31At => DateTime.fromMillisecondsSinceEpoch(_carrierTs);
   /// Остання хвиля пусків (показуємо 2 год).
   bool get hasRecentLaunch =>
       _launched > 0 &&
@@ -341,9 +347,10 @@ class MapDataController extends ChangeNotifier {
       if (kmh * (now - t0) / 3600000 >= routeLengthKm(route)) continue;
       final reactive = g['reactive'] == true;
       final origin = (g['origin'] ?? '').toString();
+      final via = (g['via'] ?? '').toString(); // через Славутич дві дороги: на Київ і на захід
       out.add(MapTarget(
         id: 'launch:${g['id']}',
-        label: 'Пуск з $origin${reactive ? ' (реакт.)' : ''}',
+        label: 'Пуск з $origin${reactive ? ' (реакт.)' : ''}${via.isNotEmpty ? ' $via' : ''}',
         cat: 'shahed',
         lat: route[0][0],
         lon: route[0][1],
@@ -419,6 +426,10 @@ class MapDataController extends ChangeNotifier {
 
     final outlook = data['outlook'];
     if (outlook is Map) _outlook = Map<String, dynamic>.from(outlook);
+
+    final carrier = data['carrier'];
+    _carrierUp = carrier is Map && carrier['up'] == true;
+    _carrierTs = carrier is Map ? (carrier['ts'] as num?)?.toInt() ?? 0 : 0;
 
     final air = data['air'];
     if (air is Map) {

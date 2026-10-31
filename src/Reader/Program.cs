@@ -114,6 +114,7 @@ bool IsLaunchTitle(string? t) => t is { Length: > 0 } && launchTitles.Any(x => t
 int airReported = 0;                         // 🚀 «у повітрі» за оцінкою моніторів (@ukraine_pyxx)
 DateTime airReportedAt = DateTime.MinValue;
 LaunchBatch? lastBatch = null;               // остання хвиля пусків
+DateTime? carrierUp = null;                  // 🛫 коли злетів МіГ-31К (null — сів або не злітав)
 // Єдиний підпис постів у каналі (курсивом, щоб не відволікав від суті).
 const string ChannelFoot = "<i>🤖 WarAlarm · дані приблизні</i>";
 var launchLog = new List<(DateTime at, LaunchBatch b)>(); // 🌙 усі хвилі — для «що вже пущено цього вечора»
@@ -176,7 +177,7 @@ string BuildSituation()
     sb.AppendLine($"Активні цілі ({active.Count}), від найближчої:");
     foreach (var t in active.Take(12))
         sb.AppendLine($"- {ThreatTracker.Label(t)}: біля {t.LastPlace}, {t.DistKm:0} км від дому, "
-            + $"ETA {(t.EtaMin is { } e ? $"~{e:0} хв" : "невідомо")}, стадія «{ThreatTracker.StageLabel(t.Stage)}», напрямок {t.Dir}.");
+            + $"ETA {(t.EtaMin is { } e ? $"~{e:0} хв" : "невідомо")}, стадія «{ThreatTracker.StageLabel(t)}», напрямок {t.Dir}.");
     return sb.ToString();
 }
 
@@ -431,12 +432,49 @@ if (args.Length >= 1 && args[0].Equals("course", StringComparison.OrdinalIgnoreC
     return;
 }
 
+// ── Тест сленгу (оффлайн): що розуміємо з живих постів.   dotnet run -- slang
+if (args.Length >= 1 && args[0].Equals("slang", StringComparison.OrdinalIgnoreCase))
+{
+    Console.WriteLine("── Пуски і зліт ──");
+    foreach (var post in new[] { "Повторные пуски КАБ на Приколотное/Бурлук⚠️", "Пуски КАБ по Сумщині", "Пуск ракет з Ту-95", "Зафіксовано пуск 5 крилатих ракет",
+        "Зліт МіГ-31К!", "МиГ-31К в воздухе", "взлет миг31к", "Пуск Кинджала", "Зліт Ту-95 з Оленьї", "Запуски РСЗО по восточной части области", "Авиация заходит на пуски КАБ по Волчанскому району" })
+    {
+        var (head, kind, advice) = Slang.LaunchInfo(post, LaunchCount(post));
+        Console.WriteLine($"{(LaunchMention(post) ? "✅" : "··")} {post,-54} → {head} [{kind}] {advice}");
+    }
+    Console.WriteLine($"\nМіГ сів: {string.Join(", ", new[] { "МіГ-31К сів", "Відбій по МіГ-31", "Посадка МиГ-31К", "Зліт МіГ-31К" }.Select(p => $"«{p}»={Slang.CarrierLanded(p)}"))}");
+    Console.WriteLine("\n── Мінус ──");
+    foreach (var post in new[] { "-1", "-1х.", "мінус", "Минус.", "також мінус", "наче мінус", "Цей мінус.", "Мінус 2", "Мінус 1 🫡", "Мінусяра🫡", "Вже мінус", "Італмас ВПАВ", "Шахеда нема більше", "збили",
+        "Кажуть мінус світло на лівому", "Ще відео мінусяри", "Та херня. У меня минус такой что твой покажется не заметным", "-15 на вулиці зараз" })
+        Console.WriteLine($"{post,-58} → {(Slang.ShotCount(post) is { } n ? $"збито ×{n}" : "—")}");
+    Console.WriteLine($"Той що на Долинське – мінус → {Slang.ShotPlace("Той що на Долинське – мінус")}");
+    Console.WriteLine("\n── Хаб: «шахед → мінус → кружляє» ──");
+    var dh = new SourceHub();
+    var si = SourceCatalog.Get("dnipro_alerts")!;
+    var tt = new ThreatTracker((HomeLat, HomeLon));
+    var t0 = DateTime.Now;
+    int sec = 0;
+    foreach (var post in new[] { "Далее Синельникове⚠️", "Реактив на Дніпро", "кружляє містом", "Дніпро все ще червоний 🟥кружляє містом", "2х реактивних кружляють над Дніпром", "Реактивний 🛵 на Павлоград", "Почав кружляти", "Шахед на Самар", "Мінус", "Цей мінус.\n\nРеактив на Кривий Ріг" })
+    {
+        var at = t0.AddSeconds(sec += 150);
+        var r = dh.Process(si, post, at);
+        foreach (var e in r.Confirmed) tt.IngestUa(e.Ev, at, (e.Place, e.Pos.lat, e.Pos.lon));
+        foreach (var s in r.Statuses) { if (s.Circling) tt.MarkCircling(s.Pos, s.Kind, at); else tt.MarkShot(s.Pos, s.Kind, s.Shot, at); }
+        Console.WriteLine($"{post.Replace("\n", " ⏎ "),-44} → {r.Verdict} {string.Join("; ", r.Confirmed.Select(e => $"{e.Ev.Kind} {e.Place}×{e.Ev.Count}"))}"
+            + $"{string.Join("", r.Statuses.Select(s => s.Circling ? " [кружляє]" : $" [мінус {s.Place}]"))}\n     цілі: {string.Join(" | ", tt.Active.Select(x => $"{ThreatTracker.Label(x)} {x.PlaceLabel} · {ThreatTracker.StageLabel(x)}{(x.Orbit ? " 🔄" : "")}"))}");
+    }
+    Console.WriteLine("\n── Формати ──");
+    foreach (var post in new[] { "✈️Харківщина:\n→Харків/околиці (2х кружляє).\n\n✈️Чернігівщина:\n→Чернігів/Мена/Березна (3х).\n→Ріпки/Славутич/Чернігівщина.", "Вільнянськ уважно по БпЛА.", "Звичайний шахед навпроти Коблево 15км від берегу", "реактивний зі сторони Березни до Чернігова.", "Шахед около Ольшан", "Балалайка на Суми", "обидві турби на Дніпро", "Над с.Рівне не встановлений БпЛА" })
+        Console.WriteLine($"{post.Replace("\n", " ⏎ ")}\n     → {string.Join("; ", ThreatParser.Parse(SourceHub.Clean(post)).Select(e => $"{e.Kind} {(e.Count > 1 ? $"{e.Count}× " : "")}{e.Oblast}/{e.City}{(Slang.Circling(e.Raw) ? " 🔄" : "")}"))}");
+    return;
+}
+
 // ── Тест груп пуску (оффлайн): пост про пуск → групи летять типовим маршрутом;
 //    справжні цілі поблизу «забирають» дрони з групи.   dotnet run -- launches
 if (args.Length >= 1 && args[0].Equals("launches", StringComparison.OrdinalIgnoreCase))
 {
     var t0 = DateTime.Now;
-    var b = LaunchFeed.ParseLaunch("18:35 по пусках шахедів:\n8 штук реактивних з Орла\n12 штук з Криму\n6 штук Курськ")!;
+    var b = LaunchFeed.ParseLaunch("18:35 по пусках шахедів:\n8 штук реактивних з Орла\n12 штук з Криму\n6 штук Курськ\n10 штук Брянськ")!;
     LaunchGroups.Add(b, t0);
     Console.WriteLine($"Бот, дім ({HomeLat:0.00},{HomeLon:0.00}):\n{AlarmEtaText(HomeLat, HomeLon) ?? "(нічого не летить сюди)"}\n");
     Console.WriteLine("Бот:\n" + string.Join("\n", b.Items.Select(i => $"• {i.Origin} — {i.N}{(i.Reactive ? " (реакт.)" : "")}{LaunchRouteHint(i)}")) + "\n");
@@ -445,7 +483,7 @@ if (args.Length >= 1 && args[0].Equals("launches", StringComparison.OrdinalIgnor
         {
             var p = g.PosAt(t0.AddHours(h));
             var (along, pass) = TypicalRoutes.Closest(g.Route, (HomeLat, HomeLon));
-            Console.WriteLine($"+{h:0} год  {g.Origin,-6}{(g.Reactive ? " реакт." : "       ")} ×{g.Left,-3} → ({p.lat:0.00},{p.lon:0.00})"
+            Console.WriteLine($"+{h:0} год  {g.Origin,-6}{(g.Reactive ? " реакт." : "       ")} ×{g.Left,-3} {g.Via,-9} → ({p.lat:0.00},{p.lon:0.00})"
                 + $" · біля {NearestCity(p)} · маршрут {g.LengthKm:0} км · до дому ~{along / g.Kmh / 0.85:0.0} год (повз за {pass:0} км)");
         }
     // Справжні цілі там, де мала б бути група з Криму через 2 год → забирають з неї.
@@ -453,24 +491,28 @@ if (args.Length >= 1 && args[0].Equals("launches", StringComparison.OrdinalIgnor
     LaunchGroups.Absorb(crimea.PosAt(t0.AddHours(2)), 5, t0.AddHours(2));
     Console.WriteLine($"\nПісля 5 справжніх цілей біля розрахункової точки кримської групи: ×{LaunchGroups.Active.FirstOrDefault(g => g.Origin == "Крим")?.Left}");
     Console.WriteLine("\nМаршрути справжніх цілей (без курсу):");
-    foreach (var (name, p) in new[] { ("Суми", (50.91, 34.80)), ("Полтава", (49.59, 34.55)), ("Миколаїв", (46.97, 32.0)), ("Житомир", (50.25, 28.66)), ("Бровари", (50.51, 30.79)),
+    foreach (var (name, p) in new[] { ("Чернігів", (51.49, 31.29)), ("Шостка", (51.87, 33.48)), ("Славутич", (51.52, 30.72)), ("Іванків", (50.93, 29.90)), ("Коростень", (50.95, 28.64)),
+                                      ("Суми", (50.91, 34.80)), ("Полтава", (49.59, 34.55)), ("Миколаїв", (46.97, 32.0)), ("Житомир", (50.25, 28.66)), ("Бровари", (50.51, 30.79)),
                                       ("Одеса", (46.48, 30.73)), ("Б.-Дністровський", (46.19, 30.35)), ("Ізмаїл", (45.35, 28.84)) })
         Console.WriteLine($"  {name,-9} → {(TypicalRoutes.FromPosition(p, null, false) is { } r ? string.Join(" → ", r.Skip(1).Select(NearestCity)) : "— (далі маршруту нема)")}");
     // Відомий курс на захід з Одещини — не далі кордону (раніше +150 км — у Молдову/Румунію).
-    foreach (var (name, p, h) in new[] { ("Одеса→Зх", (46.48, 30.73), 270.0), ("Ізмаїл→Пн", (45.35, 28.84), 0.0), ("Рені→Зх", (45.46, 28.28), 270.0) })
+    foreach (var (name, p, h) in new[] { ("Чернігів→Зх", (51.49, 31.29), 272.0), ("Славутич→Пд", (51.52, 30.72), 190.0), ("Славутич→ПдЗх", (51.52, 30.72), 255.0), ("Одеса→Зх", (46.48, 30.73), 270.0), ("Ізмаїл→Пн", (45.35, 28.84), 0.0), ("Рені→Зх", (45.46, 28.28), 270.0) })
         Console.WriteLine($"  {name,-9} курс {h:0}° → {(TypicalRoutes.FromPosition(p, h, true) is { } r ? $"до ({r[^1].lat:0.00},{r[^1].lon:0.00}), {TypicalRoutes.LengthKm(r):0} км, в Україні: {OblastGeo.InUkraine(r[^1].lat, r[^1].lon)}" : "— (одразу кордон)")}");
     return;
 }
 // «→ на Київ, біля тебе ~через 1,5 год» — куди типово йде група з цього місця пуску (оцінка).
 string LaunchRouteHint(LaunchItem i)
 {
-    if (TypicalRoutes.FromOrigin(i.Origin) is not { } route) return "";
-    var end = ThreatGeo.Km(route[^1], TypicalRoutes.Kyiv) < 30 ? "на Київ" : "на захід";
-    var (along, pass) = TypicalRoutes.Closest(route, tracker.Home);
-    double hours = along / ((i.Reactive ? 500 : 185) * 0.85);
-    return pass <= 60
-        ? $" → {end}, біля тебе ~через {(hours < 1 ? $"{hours * 60:0} хв" : $"{hours:0.#} год")} (оцінка)"
-        : $" → типово {end}";
+    var branches = TypicalRoutes.Branches(i.Origin);
+    if (branches.Count == 0) return "";
+    var near = branches.Select(b => (b.via, c: TypicalRoutes.Closest(b.route, tracker.Home)))
+                       .Where(x => x.c.passKm <= 60).OrderBy(x => x.c.alongKm).ToList();
+    if (near.Count > 0)
+    {
+        double hours = near[0].c.alongKm / ((i.Reactive ? 500 : 185) * 0.85);
+        return $" → {near[0].via}, біля тебе ~через {(hours < 1 ? $"{hours * 60:0} хв" : $"{hours:0.#} год")} (оцінка)";
+    }
+    return branches.Count > 1 ? " → типово через Славутич: на Київ або на захід" : $" → типово {branches[0].via}";
 }
 string NearestCity((double lat, double lon) p) =>
     Cities.All.Take(400).MinBy(c => ThreatGeo.Km((c.lat, c.lon), p)) is var c && ThreatGeo.Km((c.lat, c.lon), p) < 60 ? c.name : $"({p.lat:0.0},{p.lon:0.0})";
@@ -1321,7 +1363,9 @@ static bool LaunchMention(string s)
     var l = s.ToLowerInvariant();
     bool strong = Regex.IsMatch(l,
           @"ракетн\w*\s+небезпек"
-        + @"|(пуск|запуск|запустил|старт|злет|піднял|зафіксован\w*\s+пуск)\w*[^.\n]{0,40}(ракет|каб|крилат|шахед|шахід|бпла|дрон|геран|мопед|ударн|носі|міг|ту-?\d|су-?\d)"
+        + @"|(пуск|запуск|запустил|старт|зл[іе]т|взл[её]т|вил[ье]т|вылет|піднял|поднял|зафіксован\w*\s+пуск)\w*[^.\n]{0,40}(ракет|каб|крилат|крылат|кинжал|кинджал|шахед|шахід|бпла|дрон|геран|мопед|балалайк|ударн|носі|рсзо|рсзв|м[іи]г|mig|ту-?\d|су-?\d)"
+        + @"|(?:м[іи]г|mig)[-\s]?31[^.\n]{0,30}(зл[іе]т|взл[её]т|піднял|поднял|в\s+повітр|в\s+воздух|в\s+небі|в\s+небе)"
+        + @"|заход\w*\s+на\s+пуск"
         + @"|(\d{1,3})\s*[^.\n]{0,15}(шахед|шахід|ударн\w*\s+бпла)[^.\n]{0,25}(запуст|пуск|курс на україн|на україн|стартув)");
     bool newsy = Regex.IsMatch(l, @"можлив|ймовірн|імовірн|ризик|погроз|навчанн|аналіт|сценарі|минул|вчора|за добу|за ніч.{0,10}(підсум|збит)|збили|збито|знищено");
     return strong && !newsy;
@@ -1335,6 +1379,8 @@ static int? LaunchCount(string s)
     if (m.Success && int.TryParse(m.Groups[1].Value, out var n) && n is > 0 and <= 1000) return n;
     var m2 = Regex.Match(l, @"пуск\w*\s*~?\s*(\d{1,3})");
     if (m2.Success && int.TryParse(m2.Groups[1].Value, out var n2) && n2 is > 0 and <= 1000) return n2;
+    var m3 = Regex.Match(l, @"(\d{1,3})\s*(?:[a-zа-яїієґ'ʼ\-]+\s+){0,1}ракет");
+    if (m3.Success && int.TryParse(m3.Groups[1].Value, out var n3) && n3 is > 0 and <= 300) return n3;
     return null;
 }
 static string ShortReg(string ua) => ua.Replace(" область", "").Replace("м. ", "").Trim();
@@ -1375,12 +1421,6 @@ static string RegionList(IEnumerable<string> regions, int max = 10)
 static string BuildAlarmPost(List<string> newly, OfficialAlerts.Snapshot s)
 {
     var sb = new StringBuilder();
-    if (s.RedUa.Count + s.YellowUa.Count >= 18)
-    {
-        sb.AppendLine("🚨🚨 <b>МАСШТАБНА ТРИВОГА</b> — майже вся Україна");
-        sb.AppendLine("🛫 Схоже на зліт МіГ-31К або балістику. Усі в укриття!");
-        sb.AppendLine();
-    }
     var big = newly.Where(r => BigLabel(r) != r).Select(BigLabel).Distinct().ToList();
     if (big.Count > 0)
         sb.AppendLine("🚨 <b>" + H(string.Join(" · ", big)) + " — ТРИВОГА!</b>");
@@ -1394,20 +1434,11 @@ static string BuildAlarmPost(List<string> newly, OfficialAlerts.Snapshot s)
     return sb.ToString();
 }
 
-// Підпис до карти в канал: пояснює обстановку (а не гола картинка). При масовій
-// тривозі майже по всій країні — окреме попередження (типова ознака зльоту МіГ-31К
-// чи балістичної загрози).
+// Підпис до карти в канал: пояснює обстановку (а не гола картинка).
 static string MapCaption(OfficialAlerts.Snapshot s, int targets)
 {
     int red = s.RedUa.Count, yel = s.YellowUa.Count;
-    bool mass = red + yel >= 18; // майже вся країна під тривогою одночасно
     var sb = new StringBuilder();
-    if (mass)
-    {
-        sb.AppendLine("⚠️ <b>МАСШТАБНА ТРИВОГА</b> — майже вся Україна одночасно");
-        sb.AppendLine("🛫 Так буває при зльоті МіГ-31К або балістиці. Будьте в укритті.");
-        sb.AppendLine();
-    }
     sb.AppendLine($"🗺 <b>Карта тривог</b> · {DateTime.Now:HH:mm}");
     sb.AppendLine($"🔴 {red} · 🟡 {yel} обл. · 🛸 у повітрі ~{targets}");
     if (red > 0) sb.AppendLine("🔥 " + RegionList(s.RedUa, 12));
@@ -1600,6 +1631,7 @@ static string RaidLine(Threat t)
         TrackStage.Passed   => p.Length > 0 ? $"🇺🇦 Далі на {H(p)}" : "🇺🇦 Пройшла далі",
         TrackStage.Overhead => p.Length > 0 ? $"⚠️ Над {H(p)}" : "⚠️ Над районом",
         TrackStage.Imminent => p.Length > 0 ? $"❗ На підльоті — {H(p)}" : "❗ На підльоті",
+        _ when t.Orbit      => p.Length > 0 ? $"🔄 Кружляє — {H(p)}" : "🔄 Кружляє",
         _                   => p.Length > 0 ? $"{ThreatParser.Icon(t.Kind)} {H(p)}" : $"{ThreatParser.Icon(t.Kind)} ціль",
     };
 }
@@ -1623,9 +1655,11 @@ string StatusAt(double lat, double lon)
         sb.AppendLine($"{RiskDot(a.Percent)} <b>Ймовірність удару: {a.Percent}%</b> — {H(a.Verdict.ToLowerInvariant())}");
         sb.AppendLine("\n<b>Найближчі цілі</b>");
         foreach (var (t, km) in near.Where(x => x.km <= 250))
-            sb.AppendLine($"{ThreatParser.Icon(t.Kind)} {H(ThreatTracker.Label(t))}{(t.Amount > 1 ? $" ×{t.Amount}" : "")} — <b>{km:0} км</b> · {ThreatTracker.StageLabel(t.Stage)}"
+            sb.AppendLine($"{ThreatParser.Icon(t.Kind)} {H(ThreatTracker.Label(t))}{(t.Amount > 1 ? $" ×{t.Amount}" : "")} — <b>{km:0} км</b> · {ThreatTracker.StageLabel(t)}"
                 + (t.LastPlace.Length > 0 ? $"\n      📍 {H(t.PlaceLabel)}" : ""));
     }
+    if (carrierUp is { } cu && DateTime.Now - cu < TimeSpan.FromMinutes(60))
+        sb.AppendLine($"\n🛫 <b>МіГ-31К у повітрі</b> (зліт о {cu:HH:mm}) — носій «Кинжалів». Будь в укритті, поки не сяде.");
     if (AviationFeed.At(lat, lon) is { } av)
         sb.AppendLine($"\n✈ <b>{(av.Planes ? "Тактична авіація" : "Авіація")}{(av.Kab ? " · загроза КАБ" : "")}</b> над твоєю областю"
             + $" (востаннє {av.Last:HH:mm}, каналів: {av.Srcs.Count}). КАБ летить 40–70 км — тримайся укриття.");
@@ -1774,13 +1808,13 @@ string TargetLine(Threat t, double km)
     var eta = km / ThreatGeo.SpeedKmh(t.Kind, t.Ammo) * 60;
     return $"{ThreatParser.Icon(t.Kind)} <b>{H(ThreatTracker.Label(t))}{(t.Amount > 1 ? $" ×{t.Amount}" : "")}</b> — {km:0} км"
          + (t.Launch ? "" : $" · підліт ~{(eta < 1 ? "&lt;1" : eta.ToString("0"))} хв")
-         + $"\n      📍 {H(t.LastPlace.Length > 0 ? t.PlaceLabel : "місце уточнюється")} · {ThreatTracker.StageLabel(t.Stage)}";
+         + $"\n      📍 {H(t.LastPlace.Length > 0 ? t.PlaceLabel : "місце уточнюється")} · {ThreatTracker.StageLabel(t)}";
 }
 
 // Поточна картка цілі за id + її стадія (null — ціль знята / зникла з радарів).
 (string text, string stage)? TargetInfo(string id, double lat, double lon) =>
     tracker.Active.FirstOrDefault(t => t.Id == id) is { Pos: not null } t
-        ? (TargetText(t, lat, lon, html: true), ThreatTracker.StageLabel(t.Stage)) : null;
+        ? (TargetText(t, lat, lon, html: true), ThreatTracker.StageLabel(t)) : null;
 
 // html=true — для бота: екрановано, перший рядок жирним.
 string TargetText(Threat t, double lat, double lon, bool html = false)
@@ -1791,7 +1825,7 @@ string TargetText(Threat t, double lat, double lon, bool html = false)
     var lines = new List<string>
     {
         $"🎯 {ThreatTracker.Label(t)}{(t.Amount > 1 ? $" ×{t.Amount}" : "")}",
-        $"📍 {t.PlaceLabel} · {ThreatTracker.StageLabel(t.Stage)}",
+        $"📍 {t.PlaceLabel} · {ThreatTracker.StageLabel(t)}",
         $"📏 {km:0} км від тебе · підліт ~{(eta < 1 ? "<1" : eta.ToString("0"))} хв (за {spd:0} км/год)",
     };
     if (t.Heading is { } h && !t.Launch)
@@ -2344,7 +2378,7 @@ async Task OnUpdate(Update update)
             Ui.Line(ConsoleColor.Yellow, $"🛸 [{time}] {src} · у повітрі зараз ~{air} (оцінка моніторів)");
             return;
         }
-        if (!LaunchMention(m.message) && !NuclearMention(m.message))
+        if (!LaunchMention(m.message) && !NuclearMention(m.message) && !Slang.CarrierLanded(m.message))
         {
             Ui.Line(ConsoleColor.DarkGray, $"·  [{time}] {src} — коментар/рух, пропуск");
             return;
@@ -2352,28 +2386,46 @@ async Task OnUpdate(Update update)
         // ракети/балістика — далі звичайним детектором пусків
     }
 
-    // ── 🚀 ПУСКИ (ракети/КАБ/ШАХЕДИ) / ракетна небезпека — попередження ──────────
+    // ── 🛫 МіГ-31К сів — загроза «Кинжалів» минула ───────────────────────────────
+    if (fromOurChannel && Slang.CarrierLanded(m.message))
+    {
+        bool wasUp = carrierUp is not null;
+        carrierUp = null;
+        MapWriter.CarrierJson = "";
+        MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+        Ui.Line(ConsoleColor.Green, $"🛬 [{time}] {src} · МіГ-31К сів");
+        if (wasUp)
+        {
+            await Notify("UA", new AlarmInfo(time, src, "🛬 МіГ-31К сів — загрози «Кинжалів» від нього вже нема", oneLine, ThreatKind.Ballistic, false, Info: true), clear: false);
+            if (channelPoster is not null)
+                await channelPoster.Post($"🛬 <b>МіГ-31К сів</b>\nЗагрози «Кинжалів» від нього вже нема. Слідкуйте за картою.\n\n{ChannelFoot}", null);
+        }
+        return;
+    }
+
+    // ── 🚀 ПУСКИ (ракети/КАБ/ШАХЕДИ) / зліт носіїв / ракетна небезпека — попередження ─
     if (fromOurChannel && LaunchMention(m.message))
     {
         bool recent = lastLaunch is { } ll && (DateTime.Now - ll) < TimeSpan.FromMinutes(3);
         lastLaunch = DateTime.Now;
-        var low = m.message.ToLowerInvariant();
-        bool drones = Regex.IsMatch(low, @"шахед|шахід|бпла|дрон|геран|мопед");
-        int? cnt = LaunchCount(m.message);
-        // Заголовок за типом: шахеди / ракети-КАБ / загальна ракетна небезпека.
-        var head = drones
-            ? (cnt is { } c ? $"ПУСК ~{c} ШАХЕДІВ" : "ПУСК ШАХЕДІВ")
-            : Regex.IsMatch(low, @"ракет|каб|крилат|міг|ту-?\d|су-?\d") ? "ПУСКИ РАКЕТ/КАБ"
-            : "РАКЕТНА НЕБЕЗПЕКА";
+        // Заголовок за типом: «ПУСКИ КАБ» або «ПУСКИ РАКЕТ», а не все разом; «ЗЛІТ МіГ-31К» — окремо.
+        var (head, lKind, advice) = Slang.LaunchInfo(m.message, LaunchCount(m.message));
+        var icon = head.StartsWith("ЗЛІТ") ? "🛫" : lKind == ThreatKind.Kab ? "💣" : "🚀";
         var txt = oneLine.Length > 200 ? oneLine[..200] : oneLine;
-        Ui.Line(ConsoleColor.Red, $"🚀 [{time}] {src} · {head} · {oneLine}");
+        Ui.Line(ConsoleColor.Red, $"{icon} [{time}] {src} · {head} · {oneLine}");
+        if (head == "ЗЛІТ МіГ-31К")
+        {
+            carrierUp = DateTime.Now;
+            MapWriter.CarrierJson = $"{{\"name\":\"МіГ-31К\",\"up\":true,\"ts\":{((DateTimeOffset)DateTime.UtcNow).ToUnixTimeMilliseconds()}}}";
+            MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+        }
         if (!recent)
         {
-            if (OperatingSystem.IsWindows()) SirenSound.PlayStage(TrackSound.Imminent, drones ? ThreatKind.Drone : ThreatKind.Missile);
-            await Notify("UA", new AlarmInfo(time, src, $"🚀 {head} — прямують на Україну! {txt}", oneLine, drones ? ThreatKind.Drone : ThreatKind.Missile, true, Silent: false), clear: false);
+            if (OperatingSystem.IsWindows()) SirenSound.PlayStage(TrackSound.Imminent, lKind);
+            await Notify("UA", new AlarmInfo(time, src, $"{icon} {head}! {advice}", txt, lKind, true, Silent: false), clear: false);
             if (channelPoster is not null)
                 await channelPoster.Post(
-                    $"🚀 <b>УВАГА — {H(head)}</b>\n<blockquote>{H(CleanQuote(txt))}</blockquote>\n⚠️ Прямують на Україну — очікуйте появу на карті.\n\n{ChannelFoot}", null);
+                    $"{icon} <b>УВАГА — {H(head)}</b>\n<blockquote>{H(CleanQuote(txt))}</blockquote>\n{H(advice)}\n\n{ChannelFoot}", null);
         }
         // не return — у пості можуть бути й цілі; хай далі теж розпарситься
     }
@@ -2517,8 +2569,24 @@ async Task HandleHub(SourceInfo si, string text, string src, string time, int ms
     MapWriter.SourcesJson = hub.Json(now); // статистика джерел свіжа з кожним повідомленням (піде з найближчим Write)
     var oneLine = text.Replace("\n", " ").Trim();
     if (oneLine.Length > 90) oneLine = oneLine[..90] + "…";
+    // «мінус», «-1», «кружляє» — про останню ціль цього каналу.
+    bool statusChanged = false;
+    foreach (var s in r.Statuses)
+    {
+        var hit = s.Circling ? tracker.MarkCircling(s.Pos, s.Kind, now) : tracker.MarkShot(s.Pos, s.Kind, s.Shot, now);
+        if (hit is null) continue;
+        statusChanged = true;
+        Ui.Line(s.Circling ? ConsoleColor.Yellow : ConsoleColor.Green,
+            $"{(s.Circling ? "🔄" : "🎯")} [{time}] {src} · {ThreatTracker.Label(hit)} · {hit.LastPlace} — {(s.Circling ? "кружляє" : hit.Down ? "збито" : $"мінус, лишилось ×{hit.Amount}")}");
+    }
+    if (r.MissilesDone)
+        statusChanged |= tracker.SweepWhere(t => t.Kind == ThreatKind.Missile && now - t.LastUpdate > TimeSpan.FromMinutes(1)).Count > 0;
+    if (statusChanged && r.Verdict != HubVerdict.Confirmed) MapWriter.Write(MapPath, tracker, MyDistrict, now);
     switch (r.Verdict)
     {
+        case HubVerdict.Status:
+            return;
+
         case HubVerdict.Noise or HubVerdict.News or HubVerdict.Unplaced:
             Ui.Line(ConsoleColor.DarkGray, $"·  [{time}] {src} — {r.Note}");
             return;
@@ -2664,6 +2732,14 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
     if (e.Signal == KhSignal.News)
     {
         Ui.Line(ConsoleColor.DarkGray, $"·  [{time}] {src} — новина/реклама, пропуск"); // пульс
+        return;
+    }
+    // «мінус», «-1», «збили» — збито ОДНУ ціль, а не відбій по місту: решта ще летить.
+    if (Slang.ShotCount(e.Raw) is { } shotN)
+    {
+        var hit = tracker.MarkShotZone(zone, shotN, DateTime.Now);
+        Ui.Line(ConsoleColor.Green, $"🎯 [{time}] {src} · мінус{(hit is null ? " (цілі на карті нема)" : $" — {ThreatTracker.Label(hit)} · {hit.LastPlace}")}");
+        if (hit is not null) MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
         return;
     }
     var (emoji, label) = KharkivMonitor.Verdict(e);

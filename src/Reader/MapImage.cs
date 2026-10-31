@@ -267,9 +267,21 @@ public static class MapImage
             }
         }
 
+        // Кружляє над містом: пунктирне коло замість курсу.
+        foreach (var (t, _) in drawn)
+        {
+            if (!t.OrbitingAt(now) || t.Down) continue;
+            var c = CatColor(CatOf(t));
+            var at = P(t.Pos!.Value.lon, t.Pos!.Value.lat);
+            float r = Math.Max(Km2Px(t.Kind == ThreatKind.Fpv ? 3 : 8), 22);
+            using (var ring = Dashed(c.WithAlpha(0xB3), 1.6f)) canvas.DrawCircle(at, r, ring);
+            labels.Add(("кружляє", new SKPoint(at.X, at.Y + r + 15), c, 13, 'c'));
+        }
+
         // Курс (лише справжній — ціль бачили в русі): пунктир на ~10 хв польоту, ≤55 км.
         foreach (var (t, _) in drawn)
         {
+            if (t.OrbitingAt(now)) continue;
             // Летить до названого міста: пунктир до нього і приціл, далі — нічого не вигадуємо.
             if (t.Approach is not null)
             {

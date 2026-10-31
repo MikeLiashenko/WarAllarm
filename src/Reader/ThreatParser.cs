@@ -53,7 +53,7 @@ public static class ThreatParser
     // шахед · герань(geran) · гербера-пастка · бандероль · мопед · FPV · молнія · шаболда ·
     // ланцет · мавік · орлан · зала · supercam.
     public const string DroneRe =
-        @"бпла|дрон|шахед|шахід|shahed|італмас|italmas|геран|geran|гербер|мопед|\bfpv\b|молні|шаболд|ланцет|мавік|mavic|орлан|\bзала\b|supercam|суперкам";
+        @"бпла|дрон|шахед|шахід|shahed|італмас|italmas|геран|geran|гербер|мопед|балалайк|косилк|газонокос|\bтурб[аиоу]\b|\bfpv\b|молні|шаболд|ланцет|мавік|mavic|орлан|\bзала\b|supercam|суперкам";
 
     // Строки-шум: подписки, ссылки, донаты, комментарии к фото, новости о прошлых ударах.
     static readonly string[] Noise =
@@ -80,7 +80,7 @@ public static class ThreatParser
         Altitude.Info? alt = null;
         void Stamp() => StampAltitude(events, prevMark, mark, alt);
 
-        foreach (var raw in post.Replace("\r", "").Split('\n'))
+        foreach (var raw in Slang.Normalize(post).Split('\n'))
         {
             var line = raw.Trim();
             if (line.Length == 0) continue;
@@ -112,10 +112,10 @@ public static class ThreatParser
                 continue;
             }
             // Авиация
-            if (low.Contains("актив") && Regex.IsMatch(line, @"(су|ту|міг|mig)[-\s]?\d", RegexOptions.IgnoreCase))
+            if (low.Contains("актив") && Regex.IsMatch(line, @"(су|ту|міг|миг|mig)[-\s]?\d", RegexOptions.IgnoreCase))
             {
-                var m = Regex.Match(line, @"((су|ту|міг|mig)[-\s]?\d+)", RegexOptions.IgnoreCase);
-                events.Add(new(ThreatKind.Aviation, null, null, 0, m.Value, line));
+                var m = Regex.Match(line, @"((су|ту|міг|миг|mig)[-\s]?\d+)", RegexOptions.IgnoreCase);
+                events.Add(new(ThreatKind.Aviation, null, null, 0, Slang.PlaneName(line) ?? m.Value, line));
                 continue;
             }
             // Заголовок-місто з двокрапкою: «Київ:» → область міста.
@@ -220,16 +220,18 @@ public static class ThreatParser
         // «над Борисполем», «у бік Білої Церкви», «через Ананьїв».
         if (!mn.Success)
             mn = Regex.Match(line,
-                @"\b(?:курсом|курс|над|біля|поблизу|в\s+районі|у\s+районі|в\s+напрямку|у\s+напрямку|напрямок|в\s+бік|у\s+бік|в\s+сторону|через|повз|по(?=\s+(?-i:[А-ЯІЇЄҐ])))\s+(.+)$",
+                @"\b(?:курсом|курс|над|біля|поблизу|в\s+районі|у\s+районі|в\s+напрямку|у\s+напрямку|напрямок|в\s+бік|у\s+бік|в\s+сторону|через|повз|(?:по|до)(?=\s+(?-i:[А-ЯІЇЄҐ])))\s+(.+)$",
                 RegexOptions.IgnoreCase);
         string? city = mn.Success ? mn.Groups[1].Value.Trim().TrimEnd('.', ' ', '!') : null;
         // Отсекаем «хвост» после названия: «на Васильків повз Борову», «на X у напрямку Y»,
         // «на Бровари з півночі», «на Вишгород/Київ»…
         if (city != null)
             city = Regex.Split(city,
-                @"\s+(?:повз|через|у напрямку|в напрямку|курс|напрямок|з півночі|з півдня|зі сходу|із заходу|низько|приблизно|знову)\b|/",
+                @"\s+(?:повз|через|у напрямку|в напрямку|курс|напрямок|з півночі|з півдня|зі сходу|із заходу|низько|приблизно|знову|кружля\w*)\b|/",
                 RegexOptions.IgnoreCase)[0].Trim();
 
+        // «5 км до Новослобідки» без засобу — не ціль (тут «до» лише відстань), нехай читає BareNames.
+        if (kind == ThreatKind.Unknown && Regex.IsMatch(line, @"\bкм\s+до\s", RegexOptions.IgnoreCase)) return null;
         if (city == null && kind == ThreatKind.Unknown) return null; // не похоже на цель
         return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, oblast, city, count, extra, line, FromOf(line));
     }

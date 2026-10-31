@@ -371,11 +371,18 @@ public static class PlaceFinder
 }
 
 /// Що зробив хаб із повідомленням.
-public enum HubVerdict { Noise, News, AllClear, Ballistic, Pending, Confirmed, Unplaced }
+public enum HubVerdict { Noise, News, AllClear, Ballistic, Pending, Confirmed, Unplaced, Status }
+
+// Статус без місця («мінус», «кружляє») — про останню ціль цього каналу.
+public sealed record HubStatus((double lat, double lon) Pos, string Place, ThreatKind Kind, int Shot, bool Circling);
 
 public sealed record HubEvent(ThreatEvent Ev, (double lat, double lon) Pos, string Place, IReadOnlyList<string> Sources, bool Fresh);
 
-public sealed record HubResult(HubVerdict Verdict, IReadOnlyList<HubEvent> Confirmed, string Note, string? ClearOblast = null);
+public sealed record HubResult(HubVerdict Verdict, IReadOnlyList<HubEvent> Confirmed, string Note, string? ClearOblast = null)
+{
+    public IReadOnlyList<HubStatus> Statuses { get; init; } = [];
+    public bool MissilesDone { get; init; } // «По ракетам мінус»
+}
 
 public sealed class SourceHub
 {
@@ -439,7 +446,7 @@ public sealed class SourceHub
     static readonly Regex Ballistic = new(
         @"балісти|баллист|балист|іскандер|искандер|(?<!\p{L})бали(?!\p{L})|високошвидкісн|высокоскоростн|(?<!\p{L})(?:швидк|скоростн)\w*\s+(?:ціл|цел)|(?<!\p{L})швидкісн\w*\s+(?:на|в|у|курс)\s",
         RegexOptions.IgnoreCase);
-    static readonly Regex NotBallistic = new(@"шахед|бпла|дрон|реактив|мопед|шаболд", RegexOptions.IgnoreCase);
+    static readonly Regex NotBallistic = new(@"шахед|бпла|дрон|реактив|мопед|балалайк|турб|шаболд", RegexOptions.IgnoreCase);
     // Явно крилата ракета — не перекласифікуємо в балістику навіть одразу після «загрози балістики».
     static readonly Regex Cruise = new(@"крилат|крылат|калібр|калибр|бандерол|х-?101|х-?55|х-?59|х-?69|х-?22|х-?32|циркон|онікс|оникс", RegexOptions.IgnoreCase);
     // Офіційне: «🚀 Харків (Харківська обл.) ⏎ Загроза застосування високошвидкісних цілей» — ціль = місто.
@@ -451,7 +458,7 @@ public sealed class SourceHub
         @"донат|дякую за підтримк|загрози не станов|не становить загроз|рекоменд\w*\s+(?:тимчасово\s+)?уника|мапа тривог|карта (?:повітряних )?тривог|сообщение от читател|цитируем текст",
         RegexOptions.IgnoreCase);
     // Тип із самого рядка, коли парсер дав лише «ціль»: «Ситуация по реактивным: 1 курсом на …».
-    static readonly Regex DroneWord = new(@"реактив|шахед|шаболд|бпла|дрон|мопед|ударн", RegexOptions.IgnoreCase);
+    static readonly Regex DroneWord = new(@"реактив|шахед|шаболд|бпла|дрон|мопед|балалайк|турб|косилк|ударн", RegexOptions.IgnoreCase);
     // «Далі/Далее Мерефа» — продовження руху. КАБ не «летить далі»: це дрон або ракета.
     static readonly Regex Continue = new(@"^\W*(?:(?:і|и|та|а)\s+)?(?:далі|далее|дальше|потім|потом|знову|опять|снова|продовжує|продолжает)\b", RegexOptions.IgnoreCase);
 
@@ -496,8 +503,46 @@ public sealed class SourceHub
         && !NotBallistic.IsMatch(clean) && clean.Length < 160
         && !Regex.IsMatch(clean, @"відбій|отбой|оцінка|чисто|ніч|ночі|за добу|випустил|застосувал|атакувал|фото|відео|вирв|після|наслідк|влуч|прил[іе]т|удар\w* по", RegexOptions.IgnoreCase);
 
-    /// Основний вхід: повідомлення з каналу каталогу.
+    // Де і яку ціль канал називав востаннє: до неї стосуються «мінус» і «кружляє» без місця.
+    readonly Dictionary<string, (string place, (double lat, double lon) pos, ThreatKind kind, DateTime at)> _lastPlaced = new(StringComparer.OrdinalIgnoreCase);
+    static readonly TimeSpan StatusTtl = TimeSpan.FromMinutes(12);
+
+    /// Основний вхід: повідомлення з каналу каталогу. Спершу — рядки-статуси («мінус», «-1»,
+    /// «кружляє»), решта поста («Цей мінус. ⏎ Реактив на Дніпро») йде у звичайний розбір.
     public HubResult Process(SourceInfo src, string text, DateTime at)
+    {
+        lock (_gate)
+        {
+            var statuses = new List<HubStatus>();
+            bool missiles = false;
+            var rest = new List<string>();
+            var lines = Clean(text).Split('\n');
+            foreach (var line in lines)
+            {
+                if (Slang.MissilesDone(line)) { missiles = true; continue; }
+                int? shot = Slang.ShotCount(line);
+                string? named = shot is null ? Slang.ShotPlace(line) : null;
+                bool circling = shot is null && named is null && Slang.CirclingStatus(line);
+                if (shot is null && named is null && !circling) { rest.Add(line); continue; }
+                if (named is not null && Locate(named, null, src, false, out _) is { } ng)
+                    statuses.Add(new((ng.lat, ng.lon), ng.name, ThreatKind.Target, 1, false));
+                else if (_lastPlaced.TryGetValue(src.User, out var lp) && at - lp.at <= StatusTtl)
+                    statuses.Add(new(lp.pos, lp.place, lp.kind, shot ?? (circling ? 0 : 1), circling));
+            }
+            // Збита ціль не чекає другого джерела, щоб знову з'явитись.
+            foreach (var s in statuses.Where(s => s.Shot > 0))
+                foreach (var k in _clusters.Where(c => c.Value.Place == s.Place && !c.Value.Confirmed).Select(c => c.Key).ToList())
+                    _clusters.Remove(k);
+            if (statuses.Count == 0 && !missiles && rest.Count == lines.Length)
+                return ProcessPost(src, text, at);
+            var body = string.Join("\n", rest);
+            var r = rest.Count > 0 ? ProcessPost(src, body, at)
+                  : new HubResult(statuses.Count > 0 || missiles ? HubVerdict.Status : HubVerdict.Noise, [], "статус без місця");
+            return r with { Statuses = statuses, MissilesDone = missiles };
+        }
+    }
+
+    HubResult ProcessPost(SourceInfo src, string text, DateTime at)
     {
         lock (_gate)
         {
@@ -505,7 +550,7 @@ public sealed class SourceHub
             st.Msgs++; st.Last = at;
             Expire(at);
 
-            var clean = Clean(text);
+            var clean = Slang.Normalize(Clean(text));
             if (clean.Length == 0 || Fundraise.IsMatch(clean) && clean.Length > 60)
             { st.Noise++; return new(HubVerdict.Noise, [], "шум"); }
             // «🗞 …» — рубрика новин (@nikalert); «удар по Новобаварському району — Терехов» — постфактум.
@@ -514,6 +559,10 @@ public sealed class SourceHub
             if (text.TrimStart().StartsWith("🗞") || Impact.IsMatch(clean) && clean.Length < 200
                 || AfterNews.IsMatch(clean) && clean.Length > 70)
             { st.News++; return new(HubVerdict.News, [], "новина (не жива загроза)"); }
+
+            // Артилерія — не повітряна ціль («Нікополь та громада ⏎ Загроза артобстрілу»).
+            if (Regex.IsMatch(clean, @"обстріл", RegexOptions.IgnoreCase) && !DroneWord.IsMatch(clean))
+            { st.News++; return new(HubVerdict.News, [], "обстріл (не ціль у повітрі)"); }
 
             // Відбій від місцевого спостерігача свого регіону / офіційного.
             if (Clear.IsMatch(clean) && clean.Length < 90)
@@ -535,7 +584,7 @@ public sealed class SourceHub
                 _ballAt = at;
                 if (ThreatParser.FromOf(clean) is { } bf && LaunchSites.Resolve(bf) is not null) _ballFrom = bf;
             }
-            if (!ballisticText && Regex.IsMatch(clean, @"^очікуємо|^чекаємо", RegexOptions.IgnoreCase))
+            if (!ballisticText && Regex.IsMatch(clean, @"^очікуємо|^чекаємо|^буде\s", RegexOptions.IgnoreCase))
             { st.Noise++; return new(HubVerdict.Noise, [], "очікування"); }
 
             // ── розбір ──
@@ -619,6 +668,7 @@ public sealed class SourceHub
                 // «Далее Мерефа» без типу, а контексту дрона нема — краще «ціль», ніж вигаданий КАБ.
                 if (kind == ThreatKind.Kab && ev.Kind != ThreatKind.Kab && Continue.IsMatch(ev.Raw)) kind = ThreatKind.Target;
                 RememberKind(src.User, kind, extra, at);
+                _lastPlaced[src.User] = (gp.name, pos, kind, at);
                 st.Threats++;
 
                 // Дрони/«ціль» в одному місці — одна ціль; ракети/КАБ — окремо.
@@ -687,10 +737,14 @@ public sealed class SourceHub
     // Прибрати підписи/емодзі-рамки, лишити суть.
     public static string Clean(string text)
     {
-        var lines = text.Replace("\r", "").Split('\n')
+        var lines = text.Replace("\r", "").Replace("🛵", " шахед ").Split('\n') // 🛵 — «мопед», тобто шахед
             .Select(l => l.Trim())
             .Where(l => l.Length > 0 && !SigLine.IsMatch(l) && !Regex.IsMatch(l, @"^[\p{So}\p{Cs}\p{P}\s‍ㅤ]+$"))
             .Select(l => Regex.Replace(l, @"^[\p{So}\p{Cs}️‍⚠‼️❗️🔴🟡🟠🟥🟧\s]+", "").Trim())
+            // Емодзі й невидимі символи всередині й наприкінці: «Далее Бавария⚠️», «Локомотив‼️».
+            // Маркери списків (◼◻▪■, блок U+25A0–25FF) лишаються — за ними BareNames впізнає список.
+            .Select(l => Regex.Replace(l, @"(?![■-◿])[\p{So}\p{Cs}\p{Cf}︎️⃣‼⁉]+", " "))
+            .Select(l => Regex.Replace(l, @"\s{2,}", " ").Trim())
             .Where(l => l.Length > 0);
         return string.Join("\n", lines).Trim();
     }
@@ -727,7 +781,8 @@ public sealed class SourceHub
     // Засоби й службові слова — не частина назви (розривають «Кушугум Балабине ФПВ»).
     static readonly Regex NotName = new(
         @"^(?:бпла|бп|рбпла|дрон\w*|шахед\w*|шахід\w*|шохєд\w*|герань\w*|геран\w*|молні\w*|ланцет\w*|фпв|fpv|каб\w*|ракет\w*|крилат\w*|бандерол\w*|реактив\w*|мопед\w*|італмас\w*|ціл[ьі]\w*|розвід\w*|ударн\w*|звич\w*|р|тг|отг|обл|область|області|район|р-н"
-        + @"|центр|центрі|центру|центр\w+ села|загроз\w*|угроз\w*|город|города|городу|транзит\w*|збил\w*|збит\w*|збиття|впал\w*|впав\w*|падає|вибух\w*|взрыв\w*|зник\w*|чути|чую|тиша|чисто|укрил\w*|увага|тривога|ситуац\w*|оновлен\w*|відбій|не|без|все|всі|пуск\w*|груп\w*|місто|штук\w*|висота|захід|схід|північ|південь|база|базар|україн\w*|країн\w*|росі\w*|рф|європ\w*|зала|орлан|мавік|червоним|жовтим|зеленим|синім|білим|помаранчевим)$",
+        + @"|центр|центрі|центру|центр\w+ села|загроз\w*|угроз\w*|город|города|городу|транзит\w*|збил\w*|збит\w*|збиття|впал\w*|впав\w*|падає|вибух\w*|взрыв\w*|зник\w*|чути|чую|тиша|чисто|укрил\w*|увага|тривога|ситуац\w*|оновлен\w*|відбій|не|без|все|всі|пуск\w*|груп\w*|місто|штук\w*|висота|захід|схід|північ|південь|база|базар|україн\w*|країн\w*|росі\w*|рф|європ\w*|зала|орлан|мавік|червоним|жовтим|зеленим|синім|білим|помаранчевим"
+        + @"|балалайк\w*|турб\w*|косилк\w*|мінус\w*|кружля\w*|обидва|обидві|обоє|оба|виліт|вильот\w*|почули|актуальн\w*|локаційн\w*|втрачен\w*|перетин\w*|острів|мости)$",
         RegexOptions.IgnoreCase);
     // Прикметник-частина назви («Нові», «Велика») сам по собі — не місце.
     static readonly Regex AdjPart = new(@"^(?:нов|стар|вел|мал|верх|нижн|біл|чорн|черв|зелен|середн|північн|південн|східн|західн)\w*$", RegexOptions.IgnoreCase);
@@ -859,8 +914,14 @@ public sealed class SourceHub
             return (OblastGeo.Region(pp.lat, pp.lon) + " (обл.)", pp.lat, pp.lon);
 
         // «Ціль на місто», «Цель на город» — місто КАНАЛУ (обласний центр), а не село Городне.
-        if (Regex.IsMatch(phrase, @"^\W*(?:на\s+|в\s+|над\s+)?(?:город|городу|міст[оау]|місті)(?!\p{L})", RegexOptions.IgnoreCase))
+        // «Над містом перехоплювачі» — це не ціль: «містом» лише в кінці фрази або перед комою.
+        if (Regex.IsMatch(phrase, @"^\W*(?:на\s+|в\s+|над\s+)?(?:(?:город|городу|міст[оау]|місті)(?!\p{L})|(?:городом|містом)\s*(?:$|[,.!]|вже\b|досі\b|ще\b))", RegexOptions.IgnoreCase))
             return src.Oblasts.Length > 0 && Capitals.TryGetValue(src.Oblasts[0], out var cap) ? ThreatGeo.Resolve(cap) : null;
+
+        // «Реактив на Київщину», «Мопед на Дніпропетровщині» — лише область: приблизна точка в ній.
+        if (Regex.Match(phrase, @"^\W*(?:(?:на|в|у|по)\s+)?([\p{L}'\-]+(?:щин|ччин)\w*)\W*$", RegexOptions.IgnoreCase) is { Success: true } om
+            && Geo.Canonical(om.Groups[1].Value) is { } oc && OblastGeo.PartPoint(oc, null) is { } op)
+            return (OblastGeo.Region(op.lat, op.lon) + " (обл.)", op.lat, op.lon);
 
         var vars = PlaceVariants(phrase, out var hint, out bool hromada, split: bare);
         if (vars.Count == 0) { hadName = false; return null; }

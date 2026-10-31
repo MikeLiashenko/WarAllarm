@@ -331,6 +331,14 @@ class _NowScreenState extends State<NowScreen> {
               'Будь ближче до укриття. Каналів: ${z.sources}'
               '${z.seenMs > 0 ? ', оновлено ${_hhmm(DateTime.fromMillisecondsSinceEpoch(z.seenMs))}' : ''}.',
         ),
+      // 🛫 МіГ-31К у повітрі — ракетна небезпека по всій країні.
+      if (data.mig31Up)
+        Notice(
+          color: AppColors.threat,
+          emoji: '🛫',
+          title: 'Зліт МіГ-31К о ${_hhmm(data.mig31At)}',
+          body: 'Носій «Кинжалів». Ракетна небезпека по всій Україні, поки він у повітрі — будьте в укритті.',
+        ),
       // 🚀 Остання хвиля пусків (з каналу моніторів через бота).
       if (data.hasRecentLaunch)
         Notice(

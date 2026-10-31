@@ -99,12 +99,14 @@ class TargetCard extends StatelessWidget {
     final rows = <(IconData, String, String)>[
       (Icons.place_outlined, m.quietMin >= 3 ? 'Востаннє бачили' : 'Де зараз',
           m.launch ? 'пуск: ${t.fromName}' : (t.place.isEmpty ? '—' : t.place)),
+      if (m.orbiting)
+        (Icons.loop_rounded, 'Рух', 'кружляє над містом'),
       if (m.uncertKm > 0)
         (Icons.blur_circular_rounded, 'Тиша', '${m.quietMin.round()} хв без даних — може бути в радіусі ~${m.uncertKm.round()} км'),
       (Icons.straighten_rounded, 'До «${place.name}»', '${km.round()} км'),
       (Icons.timer_outlined, 'Підліт', eta),
       (Icons.speed_rounded, 'Швидкість', '${kmh.round()} км/год'),
-      if (!m.launch && (t.heading != null || m.isFlight))
+      if (!m.launch && !m.orbiting && (t.heading != null || m.isFlight))
         (Icons.explore_outlined, 'Курс',
             t.headingKnown || m.isFlight
                 ? '${compassUa(m.heading)} · ${m.heading.round()}°'

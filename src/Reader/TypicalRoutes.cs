@@ -1,8 +1,9 @@
 // ── WarAlarm · типові маршрути шахедів ───────────────────────────────────────
-// Між постами каналів ціль не стоїть: шахеди йдуть знайомими коридорами — з півночі
-// (Курськ/Орел/Брянськ) через Сумщину й Чернігівщину на Київ, зі сходу через Харків і
-// Полтаву, з Азовського моря й Криму — через Запоріжжя/Миколаїв на захід (Умань →
-// Вінниця → Хмельницький → Львів). Застосунок рухає мітку цим маршрутом, а щойно канал
+// Між постами каналів ціль не стоїть: шахеди йдуть знайомими коридорами — з Курська через
+// Сумщину на Київ, з Брянщини/Орла/Смоленська через Чернігівщину до СЛАВУТИЧА, а там дві
+// дороги: на Київ (Вишгород) або на захід (Іванків → Коростень → Сарни → Луцьк → Львів);
+// зі сходу через Харків і Полтаву, з Азовського моря й Криму — через Запоріжжя/Миколаїв на
+// захід (Умань → Вінниця → Хмельницький → Львів). Застосунок рухає мітку цим маршрутом, а щойно канал
 // напише, де ціль насправді, — переставляє її туди й веде далі вже звідти.
 // Це ОЦІНКА: вона не вмикає тривогу і зупиняється на межі області без тривоги.
 
@@ -17,12 +18,40 @@ public static class TypicalRoutes
         Berdiansk = (46.76, 36.79), Zaporizhzhia = (47.84, 35.14), Kropyvnytskyi = (48.51, 32.26),
         Kherson = (46.64, 32.61), Mykolaiv = (46.97, 32.00), Voznesensk = (47.57, 31.33),
         Uman = (48.75, 30.22), Vinnytsia = (49.23, 28.47), Khmelnytskyi = (49.42, 26.99), Ternopil = (49.55, 25.59),
-        Lviv = (49.84, 24.03), Zhytomyr = (50.25, 28.66), Rivne = (50.62, 26.25);
+        Lviv = (49.84, 24.03), Zhytomyr = (50.25, 28.66), Rivne = (50.62, 26.25),
+        Slavutych = (51.52, 30.72), Vyshhorod = (50.58, 30.49), Ivankiv = (50.93, 29.90),
+        Korosten = (50.95, 28.64), Sarny = (51.34, 26.60), Lutsk = (50.75, 25.33);
 
     // Захід: «хвіст» маршруту, куди йдуть цілі з півдня й сходу.
     static readonly (double lat, double lon)[] West = { Kropyvnytskyi, Uman, Vinnytsia, Khmelnytskyi, Ternopil, Lviv };
+    // Дві дороги від Славутича.
+    static readonly (double lat, double lon)[] ToKyiv = { Vyshhorod, Kyiv };
+    static readonly (double lat, double lon)[] NorthWest = { Ivankiv, Korosten, Sarny, Lutsk, Lviv };
 
     static (double, double)[] R(params (double, double)[] p) => p;
+
+    /// Звідки шахеди йдуть через Славутич: шлях до нього (від місця пуску).
+    static (double lat, double lon)[]? ToSlavutych(string origin) => origin switch
+    {
+        "Орел" or "Брянськ" or "Навля" or "Калуга" or "Шайковка" => R(Shostka, Chernihiv, Slavutych),
+        "Смоленськ" or "Шаталово" => R(NSiverskyi, Chernihiv, Slavutych),
+        _ => null,
+    };
+
+    /// Усі типові дороги від місця пуску: через Славутич їх дві (на Київ і на захід), інакше одна.
+    public static List<(string via, List<(double lat, double lon)> route)> Branches(string origin)
+    {
+        var res = new List<(string via, List<(double lat, double lon)> route)>();
+        if (LaunchFeed.SiteCoords(origin) is not { } o) return res;
+        if (ToSlavutych(origin) is { } way)
+        {
+            res.Add(("на Київ", new[] { o }.Concat(way).Concat(ToKyiv).ToList()));
+            res.Add(("на захід", new[] { o }.Concat(way).Concat(NorthWest).ToList()));
+            return res;
+        }
+        if (FromOrigin(origin) is { } r) res.Add((ThreatGeo.Km(r[^1], Kyiv) < 30 ? "на Київ" : "на захід", r));
+        return res;
+    }
 
     /// Типовий маршрут від місця пуску (перша точка — саме місце пуску).
     public static List<(double lat, double lon)>? FromOrigin(string origin)
@@ -31,8 +60,8 @@ public static class TypicalRoutes
         (double lat, double lon)[] tail = origin switch
         {
             "Курськ" or "Халіно" or "Бєлгород" => R(Sumy, Romny, Pryluky, Brovary, Kyiv),
-            "Орел" or "Брянськ" or "Навля" or "Калуга" or "Шайковка" => R(Shostka, Nizhyn, Brovary, Kyiv),
-            "Смоленськ" or "Шаталово" => R(NSiverskyi, Chernihiv, Kyiv),
+            "Орел" or "Брянськ" or "Навля" or "Калуга" or "Шайковка" or "Смоленськ" or "Шаталово"
+                => ToSlavutych(origin)!.Concat(ToKyiv).ToArray(),
             "Воронеж" or "Ліпецьк" or "Тамбов" or "Енгельс" or "Міллерово" or "Морозовськ" or "Луганськ" or "Ростов" or "Каспій"
                 => R(Kupiansk, Kharkiv, Poltava, Lubny, Boryspil, Kyiv),
             "Донецьк" or "Макіївка" or "Горлівка" or "Таганрог"
@@ -99,16 +128,50 @@ public static class TypicalRoutes
     {
         if (ThreatGeo.Km(p, Kyiv) < 25) return null; // над Києвом — ціль уже тут
         var route = new List<(double lat, double lon)> { p };
+        // Біля Славутича курс показує, яку дорогу ціль обрала: на Київ чи на захід.
+        if (headingKnown && heading is { } h0 && ThreatGeo.Km(p, Slavutych) <= 90)
+        {
+            double Off((double lat, double lon) to) => Math.Abs(((ThreatGeo.Bearing(p, to) - h0) % 360 + 540) % 360 - 180);
+            bool beforeFork = p.lon > Slavutych.lon + 0.15;
+            if (beforeFork && Off(Slavutych) <= 45) { route.Add(Slavutych); route.AddRange(ToKyiv); return route; }
+            if (!beforeFork)
+            {
+                if (Off(Kyiv) <= 45) { route.Add(Kyiv); return route; }
+                if (Off(Korosten) <= 60)
+                {
+                    foreach (var w in NorthWest) if (w.lon < p.lon - 0.3) route.Add(w);
+                    return route.Count > 1 ? ClipToUkraine(route) : null;
+                }
+            }
+        }
         if (headingKnown && heading is { } h)
         {
             route.Add(Move(p, h, 150));
             return ClipToUkraine(route);
+        }
+        // Північ Чернігівщини й Сумщини — через Славутич (далі типово на Київ).
+        if (p.lat >= 51.3 && p.lon > Slavutych.lon + 0.15 && p.lon < 34.3)
+        {
+            route.Add(Slavutych);
+            route.AddRange(ToKyiv);
+            return route;
         }
         bool northEast = p.lat > 49.3 && p.lon > 30.9 && p.lon < 38.5;
         if (northEast)
         {
             route.Add(Kyiv);
             return route;
+        }
+        // Сам Славутич і Чорнобильщина: без курсу — типово на Київ.
+        if (p.lat >= 50.6 && p.lon >= 30.2 && p.lon <= 30.9)
+        {
+            route.Add(Kyiv);
+            return route;
+        }
+        if (p.lon < 30.2 && p.lat >= 50.6) // за Славутичем — північна дорога на захід
+        {
+            foreach (var w in NorthWest) if (w.lon < p.lon - 0.3) route.Add(w);
+            return route.Count > 1 ? ClipToUkraine(route) : null;
         }
         if (p.lon < 30.2 && p.lat > 50.0) // Житомирщина, Рівненщина — далі на захід
         {
@@ -126,7 +189,7 @@ public static class TypicalRoutes
     /// туди, далі типовим шляхом від того міста; інакше — від поточної точки.
     public static List<(double lat, double lon)>? ForTarget(Threat t)
     {
-        if (t.Pos is not { } p) return null;
+        if (t.Pos is not { } p || t.Orbit) return null; // кружляє над містом — нікуди не летить
         // «на Харків»: летить до міста й там зупиняється, поки канал не напише, куди далі.
         if (t.Approach is { } a) return new List<(double lat, double lon)> { a, p };
         if (t.CourseTo is { } c)

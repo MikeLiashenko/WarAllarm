@@ -40,6 +40,8 @@ public static class MapWriter
     public static string OutlookJson = "";
     // 📡 Хаб джерел: {"catalog":82,"active":N,"pending":N,"confirmed":N,"top":[…],"ts":ms}
     public static string SourcesJson = "";
+    // 🛫 Носій у повітрі: {"name":"МіГ-31К","up":true,"note":"…","ts":ms}.
+    public static string CarrierJson = "";
 
     static string N(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
 
@@ -108,7 +110,15 @@ public static class MapWriter
             sb.Append(",\"zone\":\"").Append(Esc(t.Zone)).Append('"');
             sb.Append(",\"cat\":\"").Append(CatOf(t)).Append('"');
             sb.Append(",\"stage\":\"").Append(t.Stage).Append('"');
-            sb.Append(",\"stageLabel\":\"").Append(Esc(ThreatTracker.StageLabel(t.Stage))).Append('"');
+            // Типовий маршрут далі (на Київ / на захід, або вздовж реального курсу): застосунок веде
+            // мітку ним між постами й зупиняє на межі області без тривоги. Новий пост — новий старт.
+            var route = t.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target && !t.Launch && !t.Down
+                && (!t.LastPlace.EndsWith("(обл.)") || t.CourseTo is not null)
+                    ? TypicalRoutes.ForTarget(t) : null;
+            // Кружляє: так написано, або летіти далі нема куди (дрон уже над Києвом).
+            bool orbit = !t.Launch && !t.Down && !t.Approx
+                && (t.Orbit || (route is null && t.Kind is ThreatKind.Drone or ThreatKind.Target));
+            sb.Append(",\"stageLabel\":\"").Append(Esc(orbit && t.Stage == TrackStage.Approaching ? "кружляє" : ThreatTracker.StageLabel(t))).Append('"');
             sb.Append(",\"icon\":\"").Append(Esc(ThreatParser.Icon(t.Kind))).Append('"');
             sb.Append(",\"lat\":").Append(N(t.Pos!.Value.lat)).Append(",\"lon\":").Append(N(t.Pos!.Value.lon));
             sb.Append(",\"dist\":").Append(t.DistKm is { } d ? N(d) : "null");
@@ -137,11 +147,8 @@ public static class MapWriter
             if (t.AltM is { } am) sb.Append(",\"alt\":").Append(N(am));
             if (t.AltNote is { Length: > 0 } an) sb.Append(",\"altNote\":\"").Append(Esc(an)).Append('"');
             if (t.Down) sb.Append(",\"down\":true");
-            // Типовий маршрут далі (на Київ / на захід, або вздовж реального курсу): застосунок веде
-            // мітку ним між постами й зупиняє на межі області без тривоги. Новий пост — новий старт.
-            if (t.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target && !t.Launch && !t.Down
-                && (!t.LastPlace.EndsWith("(обл.)") || t.CourseTo is not null)
-                && TypicalRoutes.ForTarget(t) is { } rt)
+            if (orbit) sb.Append(",\"orbit\":true");
+            else if (route is { } rt)
                 sb.Append(",\"route\":[").Append(string.Join(",", rt.Select(p => $"[{N(p.lat)},{N(p.lon)}]"))).Append(']');
             sb.Append(",\"seen\":").Append(((DateTimeOffset)t.LastUpdate).ToUnixTimeMilliseconds()); // час останнього спостереження позиції (для руху/екстраполяції)
             sb.Append(",\"place\":\"").Append(Esc(t.PlaceLabel)).Append('"');
@@ -206,6 +213,8 @@ public static class MapWriter
         sb.Append(",\"air\":").Append(AirJson.Length > 0 ? AirJson : "{}");
         // 🚀 Групи пуску в польоті (оцінка): летять типовим маршрутом, доки канали не покажуть справжні цілі.
         sb.Append(",\"launches\":").Append(LaunchGroups.Json(now));
+        // 🛫 МіГ-31К / носії у повітрі.
+        sb.Append(",\"carrier\":").Append(CarrierJson.Length > 0 ? CarrierJson : "{}");
         // ✈ Зони тактичної авіації / загрози КАБ над областями.
         sb.Append(",\"aviation\":").Append(AviationFeed.Json(now));
         sb.Append(",\"night\":").Append(NightJson.Length > 0 ? NightJson : "{}");

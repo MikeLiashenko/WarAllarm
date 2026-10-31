@@ -196,6 +196,25 @@ void main() {
       final m = motionOf(g, seen + 90 * 60000);
       expect(kmBetween(52.97, 36.06, m.lat, m.lon), greaterThan(185 / 60 * 0.85 * 60)); // > an hour of flight
     });
+
+    test('a drone over a city circles it and moves on the circle', () {
+      final d = MapTarget(id: 'o', label: 'Шахед', cat: 'shahed', lat: 49.99, lon: 36.23, kmh: 185, seenMs: seen, orbit: true);
+      final a = motionOf(d, seen + 10 * 60000), b = motionOf(d, seen + 11 * 60000);
+      expect(a.orbiting, isTrue);
+      expect(a.uncertKm, 0);
+      expect(kmBetween(49.99, 36.23, a.lat, a.lon), closeTo(kOrbitKm, 0.5));
+      expect(kmBetween(49.99, 36.23, b.lat, b.lon), closeTo(kOrbitKm, 0.5));
+      expect(kmBetween(a.lat, a.lon, b.lat, b.lon), greaterThan(5)); // a third of a lap in a minute
+    });
+
+    test('a drone that reached the city at the end of its route circles there', () {
+      final d = MapTarget(id: 'c', label: 'Шахед', cat: 'shahed', lat: 49.99, lon: 36.23, kmh: 185, seenMs: seen,
+          toPlace: true, route: const [[50.2, 36.4], [49.99, 36.23]]);
+      expect(motionOf(d, seen + 2 * 60000).orbiting, isFalse); // still on its way
+      final m = motionOf(d, seen + 15 * 60000);
+      expect(m.orbiting, isTrue);
+      expect(kmBetween(49.99, 36.23, m.lat, m.lon), closeTo(kOrbitKm, 0.5));
+    });
   });
 }
 

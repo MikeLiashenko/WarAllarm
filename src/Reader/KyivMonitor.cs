@@ -91,7 +91,7 @@ public static class KyivMonitor
             @"курс|летить|проривається|підліт|тривог|уважно|шахед|шахід|бпла|дрон|каб|реактивн");
 
         // Слабый отбой («мінус», «збили», «дорозвідка») — только если нет активной угрозы.
-        if (!activeThreat && Regex.IsMatch(low, @"\bмінус\b|збили|побили|дорозвід"))
+        if (!activeThreat && Regex.IsMatch(low, @"\bм[іи]нус\b|збили|сбили|побили|дорозвід"))
             return new(KhSignal.Clear, ThreatKind.AllClear, Array.Empty<string>(), KhTier.Unknown, null, text);
 
         var places = new List<(string name, KhTier tier)>();

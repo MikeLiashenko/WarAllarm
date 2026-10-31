@@ -72,6 +72,12 @@ public sealed class Threat
     // летить: мітка малюється там і рухається до міста з реальною швидкістю.
     public (double lat, double lon)? Approach;
 
+    // «Кружляє над Харковом»: ціль нікуди не летить — застосунок водить її колом над містом.
+    public bool Orbit;
+    /// Кружляє над містом або вже долетіла до міста, куди летіла.
+    public bool OrbitingAt(DateTime now) => Orbit || (Approach is { } a && Pos is { } p
+        && ThreatGeo.SpeedKmh(Kind, Ammo) * 0.85 / 60 * Math.Min(20, (now - LastUpdate).TotalMinutes) >= ThreatGeo.Km(a, p));
+
     /// Де малювати ціль зараз: на шляху Approach → місто, інакше просто Pos.
     public (double lat, double lon)? DrawPos(DateTime now)
     {
@@ -113,7 +119,7 @@ public sealed class ThreatTracker
             return null;
 
         bool impact = Regex.IsMatch(low, @"вибух|влучанн|приліт|прил[её]т");
-        bool passed = Regex.IsMatch(low, @"пролет|пройш|вийш|мину[вл]|подал[іи]|далі на|дальше на|транзит");
+        bool passed = Regex.IsMatch(low, @"пролет|пройш|вийш|мину[вл]|подал[іи]|далі на|дальше на|далее на|транзит");
 
         // Не угроза (чисто/новость) без импакта — пропускаем.
         if (e.Signal != KhSignal.Threat && !impact) return null;
@@ -155,6 +161,7 @@ public sealed class ThreatTracker
         // з'явилось слово удару — знімаємо позначку (ціль ескалювала з розвідки в удар).
         t.Recon = Regex.IsMatch(low, @"розвід|дорозвід")
                   && !Regex.IsMatch(low, @"вибух|влучанн|приліт|удар|шахед на|каб|ракет");
+        UpdateOrbit(t, e.Raw, pos is { } np && t.Pos is { } op && ThreatGeo.Km(np, op) <= 3, now, false);
         t.LastUpdate = now;
         foreach (var pn in e.Places) t.Hits.Add(pn);
         if (place.Length > 0) t.Hits.Add(place);
@@ -248,6 +255,14 @@ public sealed class ThreatTracker
             t!.Ammo ??= ev.Extra;
             t.Oblast = ev.Oblast ?? t.Oblast;
             t.Recon = ((ev.Extra ?? "") + " " + ev.Raw).ToLowerInvariant().Contains("розвід");
+            // Новий пост про ціль, яку вважали збитою, — отже, вона ще летить.
+            var altNow = ev.Alt ?? Altitude.Parse(ev.Raw);
+            if (t.Down && altNow is not { Down: true })
+            {
+                t.Down = false; t.AltNote = null;
+                if (t.Stage == TrackStage.Passed) t.Stage = TrackStage.Approaching;
+            }
+            UpdateOrbit(t, ev.Raw, !isNew && prevPos is { } sp && ThreatGeo.Km(sp, pos) <= 3, now, approx);
             t.LastUpdate = now;
             t.Hits.Add(ev.City ?? gp.name);
             t.Count = ev.Count > 0 ? ev.Count : 1;
@@ -275,6 +290,7 @@ public sealed class ThreatTracker
             else if (!t.HeadingKnown)
                 t.Heading = ThreatGeo.Bearing(pos, ThreatGeo.UACenter); // лише для стрілки, не для руху
             ApplyCourse(t, ev, pos, isNew, now);
+            if (t.Orbit) { t.Approach = null; t.CourseTo = null; }
             if (t.Approach is { } ap)
             {
                 t.Heading = ThreatGeo.Bearing(ap, pos);
@@ -287,11 +303,75 @@ public sealed class ThreatTracker
                 t.Heading = ThreatGeo.Bearing(pos, (dest.lat, dest.lon));
                 t.HeadingKnown = true;
                 t.CourseTo = (dest.name, dest.lat, dest.lon);
+                t.Orbit = false;
             }
             ApplyAltitude(t, ev.Alt ?? Altitude.Parse(ev.Raw), now);
             var prev = t.Stage; t.Stage = Classify(t);
             return new TrackUpdate(t, t.Stage != prev || isNew, TrackSound.None, Note(t));
         }
+    }
+
+    // Кружляє: так написано («кружляє», «над містом»), або ціль уже в цьому місці й про неї знову
+    // пишуть за ≥2 хв — отже, нікуди не полетіла. Нове місце без цих слів — знову в русі.
+    static void UpdateOrbit(Threat t, string raw, bool samePlace, DateTime now, bool approx)
+    {
+        if (t.Kind is not (ThreatKind.Drone or ThreatKind.Target or ThreatKind.Fpv) || approx) { t.Orbit = false; return; }
+        bool heading = Regex.IsMatch(raw, @"курс|далі|на\s+\p{Lu}|→", RegexOptions.None);
+        t.Orbit = Slang.Circling(raw)
+                  || (Slang.OverPlace(raw) && !heading)
+                  || (samePlace && !heading && (t.Orbit || now - t.LastUpdate >= TimeSpan.FromMinutes(2)));
+    }
+
+    /// «Мінус» від каналу: нижчаємо ×N найближчої цілі (того ж типу, якщо є), або знімаємо її.
+    public Threat? MarkShot((double lat, double lon) at, ThreatKind kind, int count, DateTime now)
+    {
+        lock (_gate)
+        {
+            // Той самий «мінус» пишуть кілька каналів: не знімаємо через нього ще й сусідню ціль.
+            var just = _active.Values.FirstOrDefault(t => t.DownAt != default && now - t.DownAt < TimeSpan.FromSeconds(90)
+                                                          && t.DrawPos(now) is { } jp && ThreatGeo.Km(jp, at) <= 15);
+            if (just is not null) return just;
+            var near = _active.Values
+                .Where(t => t.Kind is ThreatKind.Drone or ThreatKind.Target or ThreatKind.Missile or ThreatKind.Fpv
+                            && !t.Launch && !t.Down && t.DrawPos(now) is { } p && ThreatGeo.Km(p, at) <= 60)
+                .OrderBy(t => t.Kind == kind || kind == ThreatKind.Target ? 0 : 1)
+                .ThenBy(t => ThreatGeo.Km(t.DrawPos(now)!.Value, at))
+                .FirstOrDefault();
+            if (near is null) return null;
+            near.DownAt = now;
+            if (near.Amount > count) { near.Count = near.Amount - count; return near; }
+            near.Down = true; near.AltNote = "збито"; near.AltAt = now;
+            near.Orbit = false;
+            near.Stage = TrackStage.Passed;
+            near.LastUpdate = now; // ще 90 с видно, що збита, і знімаємо
+            return near;
+        }
+    }
+
+    /// «Кружляє» без місця: про найближчу до останнього місця каналу ціль.
+    public Threat? MarkCircling((double lat, double lon) at, ThreatKind kind, DateTime now)
+    {
+        lock (_gate)
+        {
+            var near = _active.Values
+                .Where(t => t.Kind is ThreatKind.Drone or ThreatKind.Target or ThreatKind.Fpv
+                            && !t.Launch && !t.Down && !t.Approx && t.Pos is { } p && ThreatGeo.Km(p, at) <= 40)
+                .OrderBy(t => t.Kind == kind ? 0 : 1).ThenBy(t => ThreatGeo.Km(t.Pos!.Value, at)).FirstOrDefault();
+            if (near is null) return null;
+            near.Orbit = true; near.Approach = null; near.CourseTo = null; near.LastUpdate = now;
+            return near;
+        }
+    }
+
+    /// «Мінус» на міському каналі: ціль цієї зони, про яку писали останньою (місця в пості нема).
+    public Threat? MarkShotZone(string zone, int count, DateTime now)
+    {
+        Threat? latest;
+        lock (_gate)
+            latest = _active.Values.Where(t => t.Zone == zone && !t.Down && !t.Launch && t.Pos is not null
+                                               && t.Kind is ThreatKind.Drone or ThreatKind.Target or ThreatKind.Missile or ThreatKind.Fpv)
+                .OrderByDescending(t => t.LastUpdate).FirstOrDefault();
+        return latest is null ? null : MarkShot(latest.Pos!.Value, latest.Kind, count, now);
     }
 
     // Звідки летить нова ціль «на X»: з названого місця пуску, інакше з боку найближчого фронту /
@@ -445,6 +525,7 @@ public sealed class ThreatTracker
             // Точне місто з всеукр. каналу — 10 хв (рухома ціль тепер оновлюється сама,
             // а не лишає «примару»); лише «центр області» — 15 хв.
             var goneAfter = t.Kind == ThreatKind.Fpv ? TimeSpan.FromMinutes(12) // ФПВ-загроза громаді — коротка, канали повторюють
+                          : t.Orbit ? TimeSpan.FromMinutes(15)                  // кружляє годинами, а пишуть не щохвилини
                           : t.LastPlace.EndsWith("(обл.)") ? TimeSpan.FromMinutes(15)
                           : t.Zone == "UA" ? TimeSpan.FromMinutes(10)
                           : TimeSpan.FromMinutes(4);
@@ -642,6 +723,10 @@ public sealed class ThreatTracker
         _                      => "знято",
     };
 
+    /// Стадія для людей: ціль, що кружляє, не «наближається».
+    public static string StageLabel(Threat t) =>
+        t.Down ? "збито" : t.Orbit && t.Stage == TrackStage.Approaching ? "кружляє" : StageLabel(t.Stage);
+
     // Строка для консоли/пуша: «🛩 Шахед · наближається · 12 км · ~4 хв · ПнСх».
     static string Note(Threat t)
     {
@@ -649,7 +734,7 @@ public sealed class ThreatTracker
         var dist = t.DistKm is { } d ? $"{d:0} км" : "?";
         var place = t.LastPlace is { Length: > 0 } ? $" [{t.LastPlace}]" : "";
         var amt = t.Amount > 1 ? $" ×{t.Amount}" : "";
-        return $"{ThreatParser.Icon(t.Kind)} {Label(t)}{amt} · {StageLabel(t.Stage)} · {dist} · {eta} · {t.Dir}{place}";
+        return $"{ThreatParser.Icon(t.Kind)} {Label(t)}{amt} · {StageLabel(t)} · {dist} · {eta} · {t.Dir}{place}";
     }
 
     public static string PublicNote(Threat t) => Note(t);

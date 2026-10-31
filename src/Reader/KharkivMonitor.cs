@@ -189,7 +189,7 @@ public static class KharkivMonitor
         var (kind, extra) = DetectKind(low);
         var places = MatchPlaces(text, low);
         bool hasThreatWord = kind != ThreatKind.Unknown
-                          || Regex.IsMatch(low, @"вибух|влучанн|приліт|ударн|бандерол|курс|загроз|пуск|далее|далі|летят|летить|заход|кружит|кружля");
+                          || Regex.IsMatch(low, @"вибух|влучанн|приліт|ударн|бандерол|курс|загроз|пуск|далее|дальше|далі|летят|летить|заход|кружит|кружат|кружля");
         bool hasImpact = Regex.IsMatch(low, @"вибух|влучанн|приліт");        // подтверждённое событие
         bool terse = text.Length <= 160 && text.Count(c => c == '\n') <= 2;
 
@@ -246,6 +246,7 @@ public static class KharkivMonitor
         if (Regex.IsMatch(l, @"розвід|развед|мавік|mavic|орлан|\bзала\b|supercam|суперкам")) return (ThreatKind.Drone, "розвідувальний");
         if (l.Contains("fpv")) return (ThreatKind.Drone, "FPV");
         if (l.Contains("петух")) return (ThreatKind.Aviation, "пуски КАБ");
+        if (Slang.PlaneName(l) is "МіГ-31К") return (ThreatKind.Aviation, "МіГ-31К"); // носій «Кинжалів», а не КАБ
         if (WeaponCatalog.Match(l) is { } w) return (w.Kind, WeaponCatalog.DisplayName(w));
         if (l.Contains("каб") || l.Contains("умпк") || l.Contains("умпб")) return (ThreatKind.Kab, null);
         if (l.Contains("балісти") || l.Contains("баллист") || Regex.IsMatch(l, @"кн-?23|точка[-\s]?у")) return (ThreatKind.Ballistic, null);
@@ -257,7 +258,7 @@ public static class KharkivMonitor
         if (Regex.IsMatch(l, @"розвід|развед|мавік|mavic|орлан|\bзала\b|supercam|суперкам")) return (ThreatKind.Drone, "розвідувальний");
         if (Regex.IsMatch(l, ThreatParser.DroneRe)) return (ThreatKind.Drone, null);
         if (l.Contains("ракет") || l.Contains("крилат") || l.Contains("кинджал") || l.Contains("іскандер") || l.Contains("циркон") || l.Contains("онікс") || Regex.IsMatch(l, @"х[-\s]?\d{2,3}|с[-\s]?300")) return (ThreatKind.Missile, null);
-        if (l.Contains("петух") || Regex.IsMatch(l, @"(су|ту|міг)[-\s]?\d")) return (ThreatKind.Aviation, "пуски КАБ");
+        if (l.Contains("петух") || Regex.IsMatch(l, @"(су|ту|міг|миг)[-\s]?\d")) return (ThreatKind.Aviation, Slang.AviationLabel(l));
         return (ThreatKind.Unknown, null);
     }
 
