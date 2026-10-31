@@ -412,6 +412,8 @@ if (args.Length >= 1 && args[0].Equals("replay", StringComparison.OrdinalIgnoreC
     return;
 }
 
+const string BallisticThreatText = "⚠️ Загроза балістики: пуску ще немає, будь ближче до укриття";
+
 // ── Як цілі рухались по журналу (оффлайн):   dotnet run -- trace <journal.jsonl> 17:10 17:25 [фільтр]
 if (args.Length >= 4 && args[0].Equals("trace", StringComparison.OrdinalIgnoreCase))
 {
@@ -458,6 +460,14 @@ if (args.Length >= 1 && args[0].Equals("slang", StringComparison.OrdinalIgnoreCa
         Console.WriteLine($"{post,-58} → {(Slang.ShotPlace(post) is { } sp ? $"{sp} ×{Slang.ShotPlaceCount(post)}" : "—")}");
     foreach (var post in new[] { "2 новые Р. Шаболды на Краснопавловку", "+2 Р. Шахед курсом на Краснопавловку", "Ещё 1 Р. Шаболда кружит", "БпЛА на Нова Дача", "3 новые шаболды на Изюм", "Реактивний на Ізюм" })
         Console.WriteLine($"{post,-58} → нова={Slang.NewTarget(post)} звичайний={Slang.PlainDrone(post)} зброя={WeaponCatalog.Match(post)?.Name}");
+    Console.WriteLine("\n── Балістика: загроза чи вже летить ──");
+    foreach (var post in new[] { "Загроза балістики з Брянська", "❗️Загроза балістики", "Загроза балістичного удару по Київському регіону", "Є попередження про можливий балістичний обстріл", "Додалась балістика з Брянська!", "Загроза пуску балістичних ракет «Іскандер-М»", "балістика", "Балістика на Київ", "Пуск балістики з Брянська", "Швидкісна на Харків!" })
+        Console.WriteLine($"{post,-58} → {(Slang.BallisticThreat(post) ? "загроза" : "ЛЕТИТЬ")}");
+    foreach (var post in new[] { "наразі без фіксації швидкісних цілей", "Наразі чисто. Без пусків балістичних ракет.", "По балістиці виходів не було, поки все ок", "Сигнал по балістиці скасовано." })
+        Console.WriteLine($"{post,-58} → відбій: {ThreatTracker.BallisticClear.IsMatch(post)}");
+    Console.WriteLine("\n── Зникла ──");
+    foreach (var post in new[] { "Більше не фіксується", "Не фіксуються⚠️", "✅ Не фіксується", "без подальшої фіксації.", "Цей не фіксується.", "Локаційно не спостерігається", "Також не спостерігається.", "Припинив існування!", "втопили мразоту", "💥 По ній мінус", "Не фіксується по Харкову" })
+        Console.WriteLine($"{post,-58} → зникла {Slang.LostCount(post)?.ToString() ?? "—"}, збито {Slang.ShotCount(post)?.ToString() ?? "—"}");
     Console.WriteLine("\n── Хаб: «шахед → мінус → кружляє» ──");
     var dh = new SourceHub();
     var si = SourceCatalog.Get("dnipro_alerts")!;
@@ -2540,6 +2550,7 @@ async Task OnUpdate(Update update)
         bool drew = false;
         foreach (var ev in events)
         {
+            if (ev.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(ev.Raw)) continue; // лише загроза: ракети ще нема
             var uu = tracker.IngestUa(ev, DateTime.Now) // на карту — вся країна
                      // «балістика з Курська» без цілі — пуск: коло досяжності з району пуску
                      ?? (ev.Kind == ThreatKind.Ballistic && ev.City == null ? tracker.IngestLaunch(ev, DateTime.Now) : null);
@@ -2583,11 +2594,11 @@ async Task HandleHub(SourceInfo si, string text, string src, string time, int ms
     bool statusChanged = false;
     foreach (var s in r.Statuses)
     {
-        var hit = s.Circling ? tracker.MarkCircling(s.Pos, s.Kind, now) : tracker.MarkShot(s.Pos, s.Kind, s.Shot, now, si.User);
+        var hit = s.Circling ? tracker.MarkCircling(s.Pos, s.Kind, now) : tracker.MarkShot(s.Pos, s.Kind, s.Shot, now, si.User, s.Lost);
         if (hit is null) continue;
         statusChanged = true;
         Ui.Line(s.Circling ? ConsoleColor.Yellow : ConsoleColor.Green,
-            $"{(s.Circling ? "🔄" : "🎯")} [{time}] {src} · {ThreatTracker.Label(hit)} · {hit.LastPlace} — {(s.Circling ? "кружляє" : hit.Down ? "збито" : $"мінус, лишилось ×{hit.Amount}")}");
+            $"{(s.Circling ? "🔄" : "🎯")} [{time}] {src} · {ThreatTracker.Label(hit)} · {hit.LastPlace} — {(s.Circling ? "кружляє" : hit.Down ? (s.Lost ? "зникла" : "збито") : $"мінус, лишилось ×{hit.Amount}")}");
     }
     if (r.MissilesDone)
         statusChanged |= tracker.SweepWhere(t => t.Kind == ThreatKind.Missile && now - t.LastUpdate > TimeSpan.FromMinutes(1)).Count > 0;
@@ -2616,7 +2627,8 @@ async Task HandleHub(SourceInfo si, string text, string src, string time, int ms
         case HubVerdict.Ballistic:
             Ui.Line(ConsoleColor.Red, $"☄ [{time}] {src} · {r.Note}");
             // Названо район пуску («з Курська») — на карту коло досяжності з точки пуску.
-            if (ThreatParser.FromOf(text) is { } bFrom
+            // «Загроза балістики» — лише попередження: ракети ще немає, кола теж.
+            if (!r.ThreatOnly && ThreatParser.FromOf(text) is { } bFrom
                 && tracker.IngestLaunch(new ThreatEvent(ThreatKind.Ballistic, null, null, 1,
                        WeaponCatalog.Match(text) is { } bw ? WeaponCatalog.DisplayName(bw) : null, text, bFrom), now) is { } lu)
             {
@@ -2630,7 +2642,7 @@ async Task HandleHub(SourceInfo si, string text, string src, string time, int ms
             if (mine && !recentBall)
             {
                 lastBallistic = now;
-                await Notify(MyCity, new AlarmInfo(time, src, "☄ ЗАГРОЗА БАЛІСТИКИ — в укриття!", oneLine, ThreatKind.Ballistic, true), clear: false);
+                await Notify(MyCity, new AlarmInfo(time, src, r.ThreatOnly ? BallisticThreatText : "☄ БАЛІСТИКА ЛЕТИТЬ — в укриття!", oneLine, ThreatKind.Ballistic, true), clear: false);
             }
             return;
 
@@ -2744,6 +2756,17 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
         Ui.Line(ConsoleColor.DarkGray, $"·  [{time}] {src} — новина/реклама, пропуск"); // пульс
         return;
     }
+    // «Загроза балістики» — попередження без цілі на карті: ракету ще не запустили.
+    if (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw))
+    {
+        Ui.Line(ConsoleColor.Red, $"☄ [{time}] {src} · загроза балістики (пуску ще нема)");
+        if (!(lastBallistic is { } lb0 && DateTime.Now - lb0 < TimeSpan.FromMinutes(5)))
+        {
+            lastBallistic = DateTime.Now;
+            await Notify(zone, new AlarmInfo(time, src, BallisticThreatText, e.Raw.Replace("\n", " ").Trim(), ThreatKind.Ballistic, true), clear: false);
+        }
+        return;
+    }
     // «мінус», «-1», «збили» — збито ОДНУ ціль, а не відбій по місту: решта ще летить.
     if (Slang.ShotCount(e.Raw) is { } shotN)
     {
@@ -2855,14 +2878,15 @@ async Task WarmStart()
                 if (e.Signal == KhSignal.News) continue;
                 var zone = kind == "kh" ? "Харків" : "Київ";
                 if (e.Signal is KhSignal.AlarmOff or KhSignal.Clear) tracker.Sweep(zone);
-                else tracker.Ingest(e, zone, when);
+                else if (!(e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw))) tracker.Ingest(e, zone, when);
             }
             else
             {
                 var events = ThreatParser.Parse(msg.message);
                 if (events.Any(x => x.Kind == ThreatKind.AllClear)) tracker.SweepUaClear(events);
                 tracker.SweepUaOblasts(events);
-                foreach (var ev in events) tracker.IngestUa(ev, when);
+                foreach (var ev in events)
+                    if (!(ev.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(ev.Raw))) tracker.IngestUa(ev, when);
             }
         }
     }

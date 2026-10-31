@@ -152,6 +152,15 @@ public sealed class ThreatTracker
             key = $"{zone}:{placeKey}:{e.Kind}";
 
         bool isNew = !_active.TryGetValue(key, out var t);
+        // Цю ціль уже веде всеукраїнський трекер: той самий дрон не малюємо вдруге.
+        if (isNew && pos is { } mp0 && e.Kind is ThreatKind.Drone or ThreatKind.Target
+            && _active.Values.Where(a => a.Zone == "UA" && a.Kind is ThreatKind.Drone or ThreatKind.Target && !a.Down && !a.Launch
+                                         && a.Pos is { } ap0 && ThreatGeo.Km(ap0, mp0) <= NearSameKm && now - a.LastUpdate <= TimeSpan.FromMinutes(5))
+                   .OrderBy(a => ThreatGeo.Km(a.Pos!.Value, mp0)).FirstOrDefault() is { } ua)
+        {
+            ua.MyArea |= e.Tier == KhTier.MyArea;
+            return new TrackUpdate(ua, false, TrackSound.None, Note(ua));
+        }
         if (isNew)
         {
             t = new Threat { Id = key, Zone = zone, Kind = e.Kind, FirstSeen = now };
@@ -240,7 +249,7 @@ public sealed class ThreatTracker
             if (!isNew && !approx && t!.LastPlace is { Length: > 0 } was && was != place)
             {
                 bool fresh = Slang.NewTarget(ev.Raw);
-                if (!fresh && now - t.LastUpdate < TimeSpan.FromSeconds(90))
+                if (!fresh && now - t.LastUpdate < TimeSpan.FromMinutes(4))
                     return new TrackUpdate(t, false, TrackSound.None, Note(t));
                 key = $"{placeKey}#{now:HHmmss}";
                 _alias[placeKey] = key;
@@ -257,6 +266,14 @@ public sealed class ThreatTracker
                 isNew = false;
             }
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
+            // Місцевий монітор уже намалював цей дрон: лишається одна мітка.
+            if (!approx && ev.Kind is ThreatKind.Drone or ThreatKind.Target)
+                foreach (var z in _active.Where(a => a.Value.Zone != "UA" && a.Value.Kind is ThreatKind.Drone or ThreatKind.Target
+                                                     && a.Value.Pos is { } zp && ThreatGeo.Km(zp, pos) <= NearSameKm).ToList())
+                {
+                    t!.MyArea |= z.Value.MyArea;
+                    _active.Remove(z.Key);
+                }
             // Балістика з названою ціллю — коло «куди могла долетіти» з місця пуску вже зайве.
             if (isNew && ev.Kind == ThreatKind.Ballistic && !approx)
                 foreach (var k in _active.Where(a => a.Value.Launch && a.Value.Kind == ThreatKind.Ballistic).Select(a => a.Key).ToList())
@@ -338,7 +355,7 @@ public sealed class ThreatTracker
     }
 
     /// «Мінус» від каналу: нижчаємо ×N найближчої цілі (того ж типу, якщо є), або знімаємо її.
-    public Threat? MarkShot((double lat, double lon) at, ThreatKind kind, int count, DateTime now, string? channel = null)
+    public Threat? MarkShot((double lat, double lon) at, ThreatKind kind, int count, DateTime now, string? channel = null, bool lost = false)
     {
         lock (_gate)
         {
@@ -359,7 +376,7 @@ public sealed class ThreatTracker
             if (near is null) return null;
             near.DownAt = now; near.DownBy = channel;
             if (near.Amount > count) { near.Count = near.Amount - count; return near; }
-            near.Down = true; near.AltNote = "збито"; near.AltAt = now;
+            near.Down = true; near.AltNote = lost ? "зникла з радарів" : "збито"; near.AltAt = now;
             near.Orbit = false;
             near.Stage = TrackStage.Passed;
             near.LastUpdate = now; // ще 90 с видно, що збита, і знімаємо
@@ -413,6 +430,18 @@ public sealed class ThreatTracker
         return (dest.lat + (from.lat - dest.lat) * k, dest.lon + (from.lon - dest.lon) * k);
     }
 
+    // Два місця ближче цього — імовірно той самий дрон, про який різні канали пишуть по-різному.
+    const double NearSameKm = 25;
+    static readonly (double lat, double lon)[] BigCities = { (50.45, 30.52), (49.99, 36.23), (48.46, 35.04), (46.48, 30.73) };
+
+    // Рядок згадує місце (за початком слова — назва відмінюється): «в бік Броварів» → Бровари.
+    static bool Mentions(string raw, string place)
+    {
+        var stem = place.Split(' ')[0];
+        stem = stem[..Math.Min(stem.Length, Math.Max(4, stem.Length - 2))];
+        return stem.Length >= 3 && Regex.IsMatch(raw, @"(?<!\p{L})" + Regex.Escape(stem), RegexOptions.IgnoreCase);
+    }
+
     static bool IsJet(string? ammo) => ammo?.Contains("реакт", StringComparison.OrdinalIgnoreCase) == true;
 
     // Траєкторія: «з X на Y» дає курс; балістика й КАБ летять від точки пуску/скиду до
@@ -464,6 +493,7 @@ public sealed class ThreatTracker
         // «2 новые шаболды», «+2 шахеди» — канал прямо каже, що це інші цілі.
         if (Slang.NewTarget(ev.Raw)) return null;
         bool jet = IsJet(ev.Extra), plain = Slang.PlainDrone(ev.Raw);
+        bool toBigCity = BigCities.Any(b => ThreatGeo.Km(b, pos) <= 5) && ThreatParser.HeadingTo(ev.Raw, ev.City);
         Threat? best = null;
         double bestKm = double.MaxValue;
         foreach (var c in _active.Values)
@@ -471,16 +501,27 @@ public sealed class ThreatTracker
             if (c.Kind != kind || c.Zone != "UA" || c.Launch || c.Approx || c.Down || c.Pos is not { } cp) continue;
             if (c.Stage is TrackStage.Impact or TrackStage.Passed) continue;
             var age = now - c.LastUpdate;
-            if (age < TimeSpan.FromSeconds(40) || age > TimeSpan.FromMinutes(12)) continue;
+            if (age > TimeSpan.FromMinutes(12)) continue;
             // Реактивний не стає звичайним шахедом, а одна ціль — трьома.
             if (jet != IsJet(c.Ammo) && (jet || plain)) continue;
             if (ev.Count > c.Amount) continue;
             double km = ThreatGeo.Km(cp, pos);
             if (km < 3) continue; // те саме місце — це не рух
-            // Відстань рахуємо від мітки: ціль «на X» може бути ще далеко від самого X.
-            double reach = ThreatGeo.SpeedKmh(c.Kind, c.Ammo) / 60 * age.TotalMinutes * 1.5 + 35;
-            if (ThreatGeo.Km(c.DrawPos(now) ?? cp, pos) > reach) continue;
-            if (c.HeadingKnown && c.Heading is { } h)
+            double fromMark = ThreatGeo.Km(c.DrawPos(now) ?? cp, pos);
+            // Той самий дрон, хоч канали назвали його по-різному й майже одночасно:
+            // «Вишгород» і «Трою/Вишгород»; «Троя» і «Бровари» поруч; «на Київ» для цілі з Українки.
+            bool samePost = age == TimeSpan.Zero;
+            bool sameDrone = (!samePost && km <= 40 && Mentions(ev.Raw, c.LastPlace))
+                             || (!samePost && km <= 15 && ev.Count <= 1)
+                             || (toBigCity && Math.Min(km, fromMark) <= 50);
+            if (!sameDrone)
+            {
+                if (age < TimeSpan.FromSeconds(40)) continue;
+                // Відстань рахуємо від мітки: ціль «на X» може бути ще далеко від самого X.
+                double reach = ThreatGeo.SpeedKmh(c.Kind, c.Ammo) / 60 * age.TotalMinutes * 1.5 + 35;
+                if (fromMark > reach) continue;
+            }
+            if (!sameDrone && c.HeadingKnown && c.Heading is { } h)
             {
                 double turn = Math.Abs(((ThreatGeo.Bearing(cp, pos) - h) % 360 + 540) % 360 - 180);
                 if (turn > 110) continue;
@@ -657,7 +698,8 @@ public sealed class ThreatTracker
     // «Чисто по балістиці», «По балістичних ракетах чисто», «по швидкісним чисто»,
     // «Наразі чисто по швидкісним цілям», «Отбой по баллистике».
     public static readonly Regex BallisticClear = new(
-        @"(?:чисто|відбій|отбой)\W{0,3}(?:\w+\s+){0,2}?(?:по\s+)?(?:балісти|баллист|швидкісн|скоростн)|(?:балісти|баллист|швидкісн|скоростн)\w*\W{0,3}(?:\w+\s+){0,2}?(?:чисто|відбій|отбой)",
+        @"(?:чисто|відбій|отбой)\W{0,3}(?:\w+\s+){0,2}?(?:по\s+)?(?:балісти|баллист|швидкісн|скоростн)|(?:балісти|баллист|швидкісн|скоростн)\w*\W{0,3}(?:\w+\s+){0,2}?(?:чисто|відбій|отбой)"
+        + @"|без\s+(?:фіксації\s+)?(?:пусків|швидкісн|балісти)|виходів\s+не\s+було|(?:балісти|швидкісн)\w*\W{0,3}(?:\w+\s+){0,1}?скасован|скасован\w*\W{0,3}(?:\w+\s+){0,2}?балісти",
         RegexOptions.IgnoreCase);
 
     // «Чисто по балістиці / по швидкісних» — уся балістика (і кола пусків) знімається одразу.

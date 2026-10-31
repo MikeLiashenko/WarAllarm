@@ -374,7 +374,7 @@ public static class PlaceFinder
 public enum HubVerdict { Noise, News, AllClear, Ballistic, Pending, Confirmed, Unplaced, Status }
 
 // Статус без місця («мінус», «кружляє») — про останню ціль цього каналу.
-public sealed record HubStatus((double lat, double lon) Pos, string Place, ThreatKind Kind, int Shot, bool Circling);
+public sealed record HubStatus((double lat, double lon) Pos, string Place, ThreatKind Kind, int Shot, bool Circling, bool Lost = false);
 
 public sealed record HubEvent(ThreatEvent Ev, (double lat, double lon) Pos, string Place, IReadOnlyList<string> Sources, bool Fresh);
 
@@ -382,6 +382,7 @@ public sealed record HubResult(HubVerdict Verdict, IReadOnlyList<HubEvent> Confi
 {
     public IReadOnlyList<HubStatus> Statuses { get; init; } = [];
     public bool MissilesDone { get; init; } // «По ракетам мінус»
+    public bool ThreatOnly { get; init; }   // «Загроза балістики»: попередження, пуску ще нема
 }
 
 public sealed class SourceHub
@@ -500,7 +501,7 @@ public sealed class SourceHub
 
     static bool IsBallisticText(string clean) =>
         (Ballistic.IsMatch(clean) || WeaponCatalog.Match(clean)?.Kind == ThreatKind.Ballistic)
-        && !NotBallistic.IsMatch(clean) && clean.Length < 160
+        && !NotBallistic.IsMatch(clean) && clean.Length < 160 && !ThreatTracker.BallisticClear.IsMatch(clean)
         && !Regex.IsMatch(clean, @"відбій|отбой|оцінка|чисто|ніч|ночі|за добу|випустил|застосувал|атакувал|фото|відео|вирв|після|наслідк|влуч|прил[іе]т|удар\w* по", RegexOptions.IgnoreCase);
 
     // Де і яку ціль канал називав востаннє: до неї стосуються «мінус» і «кружляє» без місця.
@@ -525,6 +526,13 @@ public sealed class SourceHub
                 // Спершу місце: «Ізюм мінус 2» — про Ізюм, а не про останню ціль каналу.
                 string? named = Slang.ShotPlace(line);
                 int? shot = named is null ? Slang.ShotCount(line) : null;
+                int? lost = named is null && shot is null ? Slang.LostCount(line) : null;
+                if (lost is { } gone)
+                {
+                    if (_lastPlaced.TryGetValue(src.User, out var lg) && at - lg.at <= StatusTtl)
+                        statuses.Add(new(lg.pos, lg.place, lg.kind, gone, false, Lost: true));
+                    continue;
+                }
                 bool circling = shot is null && named is null && Slang.CirclingStatus(line);
                 if (shot is null && named is null && !circling) { rest.Add(line); continue; }
                 if (named is not null && Locate(named, null, src, false, out _) is { } ng)
@@ -595,6 +603,10 @@ public sealed class SourceHub
             if (!ballisticText && Regex.IsMatch(clean, @"^очікуємо|^чекаємо|^буде\s", RegexOptions.IgnoreCase))
             { st.Noise++; return new(HubVerdict.Noise, [], "очікування"); }
 
+            // «Загроза балістики з Брянська» — попередження, а не ракета в повітрі: на карту не йде.
+            if (ballisticText && Slang.BallisticThreat(clean))
+                return new(HubVerdict.Ballistic, [], clean.Replace("\n", " ")) { ThreatOnly = true };
+
             // ── розбір ──
             string? dflt = src.Oblasts.Length == 1 ? src.Oblasts[0] : null;
             bool recentBall = at - _ballAt < TimeSpan.FromMinutes(4);
@@ -613,8 +625,9 @@ public sealed class SourceHub
                     if (e.City is { } bc && LaunchSites.FromText(bc) is not null) e = e with { City = null, From = e.From ?? bc };
                     return e.From is null && _ballFrom is { } bfr ? e with { From = bfr } : e;
                 })
-                // Балістика з названим містом («Іскандер-М на Харків») — на карту; без міста — попередження.
-                .Where(e => !(e.Kind == ThreatKind.Ballistic && e.City == null))
+                // Балістика з названим містом («Іскандер-М на Харків») — на карту; без міста або
+                // лише загроза («Підвищена загроза балістики на Київ») — попередження.
+                .Where(e => !(e.Kind == ThreatKind.Ballistic && (e.City == null || Slang.BallisticThreat(e.Raw))))
                 .ToList();
             // Офіційне «🚀 Харків (Харківська обл.) ⏎ Загроза застосування високошвидкісних цілей».
             if (events.Count == 0 && OfficialFast.Match(clean) is { Success: true } of)

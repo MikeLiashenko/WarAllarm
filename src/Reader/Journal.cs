@@ -64,8 +64,18 @@ public static class Journal
         foreach (var (key, at, text) in posts.OrderBy(p => p.at))
         {
             var ch = key[..key.LastIndexOf('#')];
-            if (SourceCatalog.Get(ch) is not { } si || !inHub.Contains((ch, int.Parse(key[(key.LastIndexOf('#') + 1)..])))) continue;
             tr.Tick(at);
+            if (at.TimeOfDay > to) break;
+            // Два київські канали йдуть не в хаб, а через місцевий монітор.
+            if (ch is "nebo_raketa" or "chyste_neboo")
+            {
+                var ke = KyivMonitor.Analyze(text);
+                if (ke.Signal == KhSignal.Threat && !(ke.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(ke.Raw))
+                    && tr.Ingest(ke, "Київ", at) is { } ku && at.TimeOfDay >= from)
+                    Console.WriteLine($"{at:HH:mm:ss} @{ch} [монітор]: {Describe(ku.Threat, at)}");
+                continue;
+            }
+            if (SourceCatalog.Get(ch) is not { } si || !inHub.Contains((ch, int.Parse(key[(key.LastIndexOf('#') + 1)..])))) continue;
             var r = hub.Process(si, text, at);
             bool show = at.TimeOfDay >= from && at.TimeOfDay <= to;
             foreach (var s in r.Statuses)
@@ -81,6 +91,9 @@ public static class Journal
                 if (filter is null || line.Contains(filter, StringComparison.OrdinalIgnoreCase)) Console.WriteLine(line);
             }
         }
+        Console.WriteLine($"── цілі наприкінці ({to}):");
+        foreach (var t in tr.Active.Where(t => t.Pos is not null && (filter is null || Describe(t, day + to).Contains(filter, StringComparison.OrdinalIgnoreCase))))
+            Console.WriteLine("   " + Describe(t, day + to));
     }
 
     static string Describe(Threat t, DateTime at) =>

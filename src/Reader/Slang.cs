@@ -135,6 +135,8 @@ public static class Slang
         new(@"^(?:" + Filler + @")(?<n>\d{1,2})\s*[хx×]?\s+мінус\w*$", O), // «2 мінуса»
         new(@"^" + Filler + @"(?:(?<n>\d{1,2})\s+)?(?:" + Target + @"\s+)?(?:збито|збили|впав|знищено|знищили|приземлили)$", O),
         new(@"^" + Target + @"\s+нема(?:є)?\s+більше$", O),
+        new(@"^" + Filler + @"(?:припинив|припинила)\s+існування$", O),
+        new(@"^" + Filler + @"(?:втопили|по\s+(?:ній|ньому|нім)\s+мінус)(?:\s+\S+){0,1}$", O),
     };
     // «мінус світло», «Ще відео мінусяри», «У меня минус такой…» — не про збиття.
     static readonly Regex NotShot = new(@"світл|свет|відео|видео|фото|такой|твой|градус|мороз|температур", O);
@@ -151,6 +153,24 @@ public static class Slang
                 return int.TryParse(m.Groups["n"].Value, out var n) && n > 0 ? n : 1;
         return null;
     }
+
+    // Ціль зникла, але не сказано, що збита: «Більше не фіксується», «без подальшої фіксації», «пропал».
+    static readonly Regex LostOne = new(@"^(?:також\s+|наразі\s+|вже\s+)?(?:цей\s+|ця\s+|він\s+|вона\s+|ціль\s+|більше\s+)*не\s+(?:фіксу\w*|спостеріга\w*)$|^без\s+подальшої\s+фіксації$|^локаційно\s+не\s+спостеріга\w*$|^(?:пропал|пропав|зник|зникла|пропала)$", O);
+    /// Скільки цілей зникло: 2 для «Не фіксуються», 1 — про одну, null — не такий пост.
+    public static int? LostCount(string line)
+    {
+        var l = Regex.Replace(Normalize(line).Trim(), @"[^\p{L}\d\s]+", " ");
+        l = Regex.Replace(l, @"\s+", " ").Trim().ToLowerInvariant();
+        return l.Length is 0 or > 48 || !LostOne.IsMatch(l) ? null : l.EndsWith("ються") ? 2 : 1;
+    }
+
+    // Балістику ще не запустили: «Загроза балістики з Брянська», «можливий балістичний обстріл»,
+    // «Загроза пуску Іскандер-М». «Балістика на Київ», «Пуск балістики» — уже летить.
+    static readonly Regex BallThreatWord = new(B + @"(?:загроз\w*|угроз\w*|попередж\w*|можлив\w*|ймовірн\w*|ризик\w*|небезпек\w*|підвищен\w*|додал\w*|сигнал\w*|тривог\w*|тревог\w*)" + E, O);
+    static readonly Regex BallThreatOfLaunch = new(B + @"(?:загроз\w*|угроз\w*)\s+(?:\w+\s+)?(?:пуск\w*|запуск\w*|застосув\w*|удар\w*)" + E, O);
+    static readonly Regex BallLaunched = new(B + @"(?:пуск\w*|запуск\w*|вихід\w*|виходи|вилетіл\w*|летить|летят|курс\w*|підліт\w*)" + E, O);
+    public static bool BallisticThreat(string? text) =>
+        text is { Length: > 0 } && (BallThreatOfLaunch.IsMatch(text) || (BallThreatWord.IsMatch(text) && !BallLaunched.IsMatch(text)));
 
     static readonly Regex Both = new(@"^(?:обидва|обидві|оба|обе|двоє|двое|два|дві|две)\s+мінус\w*$", O);
     // Лише слово «мінус»: «Сумщина — 8х», «Харків - 2» — це скільки там цілей, а «ТЕЦ-6» — назва.
