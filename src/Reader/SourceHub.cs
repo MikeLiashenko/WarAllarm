@@ -278,6 +278,51 @@ public static class PlaceFinder
         return best;
     }
 
+    /// Точка в цій області (канонічна назва: «Житомирська»). Контури спрощені, тому рахується
+    /// й село за ~15 км від межі.
+    public static bool InOblast((double lat, double lon) p, string oblast, double slackKm = 15)
+    {
+        bool Hit(double lat, double lon)
+        {
+            var r = OblastGeo.Region(lat, lon);
+            return Geo.Canonical(r) == oblast || (oblast == "Київська" && r.StartsWith("Київ"));
+        }
+        if (Hit(p.lat, p.lon)) return true;
+        for (double km = 15; km <= slackKm; km += 15)
+            for (int b = 0; b < 360; b += 45)
+            {
+                double a = b * Math.PI / 180;
+                if (Hit(p.lat + km * Math.Cos(a) / 111, p.lon + km * Math.Sin(a) / (111 * Math.Cos(p.lat * Math.PI / 180)))) return true;
+            }
+        return false;
+    }
+
+    /// Назва лише в межах області: «Житомирщина: →Вишневе» — не Вишневе під Києвом.
+    public static (string name, double lat, double lon)? FindIn(string raw, string oblast, double slackKm = 15)
+    {
+        var q = Norm(raw);
+        if (q.Length < 3 || (Geo.Canonical(q) is not null && q != "запоріжжя") || OblastWord.IsMatch(q)) return null;
+        var one = new[] { oblast };
+        var rawLow = raw.Trim().ToLowerInvariant();
+        if (Aliases.FirstOrDefault(a => (Regex.IsMatch(q, a.re) || Regex.IsMatch(rawLow, a.re)) && InOblast((a.lat, a.lon), oblast, slackKm)) is { name: not null } al)
+            return (al.name, al.lat, al.lon);
+        if (RaionGeo.Find(q, one) is { } rg && InOblast((rg.lat, rg.lon), oblast, slackKm)) return rg;
+        if (ThreatGeo.Resolve(raw) is { } g && Literal(g.name, q) && InOblast((g.lat, g.lon), oblast, slackKm)) return g;
+        bool real = CityNorm.Any(c => LiteralN(c, q));
+        (string name, double lat, double lon)? best = null;
+        double bestKey = double.MinValue;
+        for (int i = 0; i < Cities.All.Length; i++)
+        {
+            int sc = ScoreN(CityNorm[i], q);
+            if (sc == 0 || (real && !LiteralN(CityNorm[i], q))) continue;
+            var c = Cities.All[i];
+            double key = sc * 1000 - i * 0.01;
+            if (key > bestKey && InOblast((c.lat, c.lon), oblast, slackKm)) { bestKey = key; best = c; }
+        }
+        if (best is { } b) ThreatGeo.Learn(b.name, b.lat, b.lon);
+        return best;
+    }
+
     /// Знайти місце. <paramref name="region"/> — області каналу/поста (для тезок і
     /// фільтра «не за 500 км»). <paramref name="maxKm"/> — наскільки далеко від
     /// регіону може бути місце (для «голих» назв суворіше).
@@ -687,6 +732,9 @@ public sealed class SourceHub
                     var rawObl = Regex.Match(ev.Raw, @"^\W*([\p{L}'\-]{2,20})\s*:") is { Success: true } rh ? OblastHint(rh.Groups[1].Value) : null;
                     // «3 бандеролі на місто» — місто, про яке канал щойно писав.
                     bool ofCity = Regex.IsMatch(phrase, @"^(?:місто|город)\W*$", RegexOptions.IgnoreCase);
+                    // Парсер лишає перше місце з «Вишневе/Пулини»; другий варіант теж потрібен.
+                    if (ev.City is { Length: > 0 } ec && Regex.Match(ev.Raw, Regex.Escape(ec) + @"(?:\s*/\s*[^/\n;,.()]+)+") is { Success: true } alts)
+                        phrase = alts.Value;
                     if (ofCity && _lastPlaced.TryGetValue(src.User, out var lastP) && at - lastP.at <= StatusTtl)
                         g = (lastP.place, lastP.pos.lat, lastP.pos.lon);
                     else
@@ -968,6 +1016,30 @@ public sealed class SourceHub
         if (vars.Count == 0) { hadName = false; return null; }
         IReadOnlyCollection<string> region = hint is { } h ? new[] { h } : oblast is { } o ? new[] { o } : src.Oblasts;
         double maxKm = bare ? 160 : 260;
+        // Область названо в самому пості («Житомирщина: →Вишневе/Пулини»): місце шукаємо в ній. Спершу всі
+        // варіанти там; далі — назва без тезок (сусідня область); інакше — приблизно в цій області,
+        // але не однойменне село в іншій.
+        var named = hint ?? (oblast is { } o2 && !src.Oblasts.Contains(o2, StringComparer.OrdinalIgnoreCase) ? o2 : null);
+        if (named is not null)
+        {
+            foreach (var v in vars)
+            {
+                if (v.EndsWith('.')) continue;
+                if (PlaceFinder.FindIn(v, named) is { } inObl) return inObl;
+                if (named == "Харківська" && KharkivMonitor.PlaceName(v) is { } khn && PlaceFinder.FindIn(khn, named) is { } khg) return khg;
+            }
+            foreach (var v in vars)
+            {
+                if (v.EndsWith('.')) continue;
+                // «Дніпропетровщина: на Запоріжжя» — обласний центр сусідньої області.
+                if (ThreatGeo.Resolve(v) is { } cg && Capitals.Values.Contains(cg.name) && PlaceFinder.Literal(cg.name, v)) return cg;
+                if (PlaceFinder.Unique(v) is { } u0) return u0;
+            }
+            // Село прямо за межею (контури спрощені), але не тезка за 50 км.
+            foreach (var v in vars)
+                if (!v.EndsWith('.') && PlaceFinder.FindIn(v, named, 30) is { } nearObl) return nearObl;
+            return OblastGeo.PartPoint(named, null) is { } np ? (OblastGeo.Region(np.lat, np.lon) + " (обл.)", np.lat, np.lon) : null;
+        }
         bool kharkiv = region.Contains("Харківська", StringComparer.OrdinalIgnoreCase);
         if (kharkiv && KharkivMonitor.PlaceName(phrase, multiWord: true) is { } km && PlaceFinder.Find(km, region, maxKm) is { } kmg) return kmg;
         foreach (var v in vars)

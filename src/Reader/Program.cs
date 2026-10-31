@@ -460,6 +460,9 @@ if (args.Length >= 1 && args[0].Equals("slang", StringComparison.OrdinalIgnoreCa
         Console.WriteLine($"{post,-58} → {(Slang.ShotPlace(post) is { } sp ? $"{sp} ×{Slang.ShotPlaceCount(post)}" : "—")}");
     foreach (var post in new[] { "2 новые Р. Шаболды на Краснопавловку", "+2 Р. Шахед курсом на Краснопавловку", "Ещё 1 Р. Шаболда кружит", "БпЛА на Нова Дача", "3 новые шаболды на Изюм", "Реактивний на Ізюм" })
         Console.WriteLine($"{post,-58} → нова={Slang.NewTarget(post)} звичайний={Slang.PlainDrone(post)} зброя={WeaponCatalog.Match(post)?.Name}");
+    Console.WriteLine("\n── Тезки: місце в області з поста ──");
+    foreach (var (name, obl) in new[] { ("Вишневе", "Житомирська"), ("Пулини", "Житомирська"), ("Вишневе", "Київська"), ("Бровари", "Київська"), ("Київ", "Київська"), ("Гадяч", "Сумська"), ("Новоселівка", "Чернігівська") })
+        Console.WriteLine($"{obl}: {name,-14} → {(PlaceFinder.FindIn(name, obl) is { } fi ? $"{fi.name} {fi.lat:0.00},{fi.lon:0.00}" : "нема в області")}; без тезок: {(PlaceFinder.Unique(name) is { } un ? un.name : "—")}");
     Console.WriteLine("\n── Балістика: загроза чи вже летить ──");
     foreach (var post in new[] { "Загроза балістики з Брянська", "❗️Загроза балістики", "Загроза балістичного удару по Київському регіону", "Є попередження про можливий балістичний обстріл", "Додалась балістика з Брянська!", "Загроза пуску балістичних ракет «Іскандер-М»", "балістика", "Балістика на Київ", "Пуск балістики з Брянська", "Швидкісна на Харків!" })
         Console.WriteLine($"{post,-58} → {(Slang.BallisticThreat(post) ? "загроза" : "ЛЕТИТЬ")}");

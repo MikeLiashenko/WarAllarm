@@ -223,9 +223,10 @@ public sealed class ThreatTracker
         // Хаб уже знайшов точку з урахуванням області каналу — беремо її (пошук лише за назвою
         // плутає тезок: «Новоселівка» на Чернігівщині ≠ Новоселівка на Полтавщині).
         // Інакше: точне місто; якщо нема в довіднику — центр області (з заголовка поста).
+        // Область названо в пості — місто лише в ній (інакше далі піде центр області).
         var g = at
-                ?? ThreatGeo.Resolve(ev.City)
-                ?? (ev.City is { } cc ? PlaceFinder.Find(cc, ev.Oblast is { } eo ? new[] { eo } : Array.Empty<string>()) : null);
+                ?? (ev.Oblast is { } eo0 && ev.City is { } cc0 ? PlaceFinder.FindIn(cc0, eo0) ?? PlaceFinder.Unique(cc0)
+                    : ThreatGeo.Resolve(ev.City) ?? (ev.City is { } cc ? PlaceFinder.Find(cc, Array.Empty<string>()) : null));
         bool approx = false;
         // «на півночі Сумщини, курсом на Полтаву» — у тій частині області, а не над містом курсу.
         if (g is null && ev.Toward is not null && ev.Oblast is not null && OblastGeo.PartPoint(ev.Oblast, ev.Side) is { } part)
