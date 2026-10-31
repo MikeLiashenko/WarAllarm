@@ -36,6 +36,8 @@ public static class MapWriter
     public static string AirJson = "";
     // 🌙 Підсумок ночі (останній згенерований) для застосунку.
     public static string NightJson = "";
+    // 🌙 «Чого чекати цієї ночі» (вечірня оцінка загроз) для застосунку.
+    public static string OutlookJson = "";
     // 📡 Хаб джерел: {"catalog":82,"active":N,"pending":N,"confirmed":N,"top":[…],"ts":ms}
     public static string SourcesJson = "";
 
@@ -206,6 +208,7 @@ public static class MapWriter
         // ✈ Зони тактичної авіації / загрози КАБ над областями.
         sb.Append(",\"aviation\":").Append(AviationFeed.Json(now));
         sb.Append(",\"night\":").Append(NightJson.Length > 0 ? NightJson : "{}");
+        sb.Append(",\"outlook\":").Append(OutlookJson.Length > 0 ? OutlookJson : "{}");
         sb.Append(",\"sources\":").Append(SourcesJson.Length > 0 ? SourcesJson : "{}");
         // Ответ настоящего ИИ (Claude) для вкладки ШІ.
         sb.Append(",\"aiText\":\"").Append(Esc(AiText)).Append('"');

@@ -1,10 +1,10 @@
 @echo off
 title WarAlarm
-rem Reader now runs 24/7 on the Google Cloud server (deploy/deploy-server.sh). Two Readers on
-rem the same Telegram session can get it revoked — so starting here asks first.
+rem Reader now runs 24/7 on the Google Cloud server (deploy/deploy-server.sh). This PC has its own
+rem Telegram session (WTelegram.local.session), but two live Readers still double every alert.
 echo.
 echo   !!! WarAlarm Reader already runs on the SERVER (Google Cloud, 24/7).
-echo   !!! Starting it here too = two copies on one Telegram session (Telegram may revoke it).
+echo   !!! Starting it here too = two live copies: every alert and post goes out twice.
 echo   Start ONLY if the server is stopped. Type YES to start anyway:
 set /p ok=^>
 if /i not "%ok%"=="YES" exit /b

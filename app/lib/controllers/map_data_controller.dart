@@ -284,6 +284,17 @@ class MapDataController extends ChangeNotifier {
   String get nightTop => (_night['top'] ?? '').toString();
   int get nightImpacts => (_night['impacts'] as num?)?.toInt() ?? 0;
   String get nightImpactAt => (_night['impactAt'] ?? '').toString();
+
+  // 🌙 «Чого чекати цієї ночі» (вечірня оцінка загроз від моніторів).
+  Map<String, dynamic> _outlook = const {};
+  bool get hasOutlook {
+    final ts = (_outlook['ts'] as num?)?.toInt() ?? 0;
+    return ts > 0 && DateTime.now().millisecondsSinceEpoch - ts < 14 * 3600 * 1000;
+  }
+  String get outlookEvening => (_outlook['evening'] ?? '').toString();
+  List<String> get outlookLines => [
+        for (final l in (_outlook['lines'] as List? ?? const [])) l.toString(),
+      ];
   String get launchedAt => _launchedAt;
   String get launchOrigins => _launchOrigins;
 
@@ -405,6 +416,9 @@ class MapDataController extends ChangeNotifier {
 
     final night = data['night'];
     if (night is Map) _night = Map<String, dynamic>.from(night);
+
+    final outlook = data['outlook'];
+    if (outlook is Map) _outlook = Map<String, dynamic>.from(outlook);
 
     final air = data['air'];
     if (air is Map) {

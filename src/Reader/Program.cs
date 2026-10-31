@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 using TL;
 using WTelegram;
 
@@ -11,7 +12,9 @@ using WTelegram;
 try { Console.OutputEncoding = Encoding.UTF8; } catch { /* консоль без юникода — не критично */ }
 
 // ── ТВОИ НАСТРОЙКИ (settings.local.txt — меняй без пересборки) ────────────────
-var cfg = LoadConfig("settings.local.txt");
+var cfgPath = File.Exists("settings.local.txt") ? "settings.local.txt"
+            : File.Exists("src/Reader/settings.local.txt") ? "src/Reader/settings.local.txt" : "settings.local.txt";
+var cfg = LoadConfig(cfgPath);
 string MyDistrict  = cfg.GetValueOrDefault("my_district", "Салтівський"); // дом: Салтівка, 602-й мкр
 string MyOblast    = cfg.GetValueOrDefault("my_oblast", "Харківська");
 string MyCity      = cfg.GetValueOrDefault("my_city", "Харків");
@@ -111,6 +114,9 @@ bool IsLaunchTitle(string? t) => t is { Length: > 0 } && launchTitles.Any(x => t
 int airReported = 0;                         // 🚀 «у повітрі» за оцінкою моніторів (@ukraine_pyxx)
 DateTime airReportedAt = DateTime.MinValue;
 LaunchBatch? lastBatch = null;               // остання хвиля пусків
+// Єдиний підпис постів у каналі (курсивом, щоб не відволікав від суті).
+const string ChannelFoot = "<i>🤖 WarAlarm · дані приблизні</i>";
+var launchLog = new List<(DateTime at, LaunchBatch b)>(); // 🌙 усі хвилі — для «що вже пущено цього вечора»
 // Області з офіційною тривогою зараз (цикл офіційних тривог) — для «⏰ коли тривога тут».
 var ActiveAlarmOblasts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 DateTime lastBatchAt = DateTime.MinValue;
@@ -374,6 +380,20 @@ if (args.Length >= 2 && args[0].Equals("nightball", StringComparison.OrdinalIgno
         Console.WriteLine($"[{b.At:dd.MM HH:mm}] {b.Origin}{(b.Guessed ? "?" : "")} → {b.Target} ×{b.N}");
     Console.WriteLine($"Разом балістики: {nd.Ballistics.Sum(b => b.N)}");
     if (args.Length >= 3) { File.WriteAllBytes(args[2], MapImage.RenderNight(nd)); Console.WriteLine($"🖼 {args[2]}"); }
+    return;
+}
+
+// ── 🌙 Вечірній прогноз на файлі постів (оффлайн): пости через «---».   dotnet run -- outlook posts.txt
+if (args.Length >= 2 && args[0].Equals("outlook", StringComparison.OrdinalIgnoreCase))
+{
+    var at0 = DateTime.Today.AddHours(21);
+    foreach (var post in Regex.Split(File.ReadAllText(args[1]).Replace("\r", ""), @"(?m)^---\s*$"))
+    {
+        var head = post.Trim().Replace("\n", " ");
+        Console.WriteLine($"{(EveningOutlook.Ingest(post, at0) ? "🌙" : "· ")} {head[..Math.Min(60, head.Length)]}");
+    }
+    Console.WriteLine("\n" + EveningOutlook.Title(at0) + "\n" + string.Join("\n", EveningOutlook.Lines("уже пущено ~40 (Курськ, Орел)")));
+    Console.WriteLine("\nstate.outlook: " + EveningOutlook.Json(null));
     return;
 }
 
@@ -705,7 +725,7 @@ if (args.Length >= 1 && args[0].Equals("channeltest", StringComparison.OrdinalIg
     var png = await BuildBotMapPng(channel: true);
     var poster = new ChannelPoster(ct!, cn!);
     await poster.Post(
-        "🔔 <b>Тест WarAlarm</b> — карта загроз\n🔴 офіційна тривога · 🟡 часткова · силуети — цілі\n\n<i>🤖 WarAlarm · звіряйтесь з офіційними джерелами</i>",
+        "🔔 <b>Тест WarAlarm</b> — карта загроз\n🔴 офіційна тривога · 🟡 часткова · силуети — цілі\n\n<i>🤖 WarAlarm · дані приблизні</i>",
         png);
     Console.WriteLine(png is null ? "⚠ карта не згенерувалась (надіслано лише текст)." : "✅ Надіслано: карта + текст.");
     return;
@@ -714,6 +734,32 @@ if (args.Length >= 1 && args[0].Equals("channeltest", StringComparison.OrdinalIg
 using var client = new Client(Config);
 var me = await client.LoginUserIfNeeded();
 Console.WriteLine($"✅ Вошли как: {me.first_name} {me.last_name} (@{me.username})\n");
+
+// ── 🌙 Пакетна генерація ночей:  dotnet run -- nightbatch [YYYY-MM-DD-from] [YYYY-MM-DD-to]
+if (args.Length >= 1 && args[0].Equals("nightbatch", StringComparison.OrdinalIgnoreCase))
+{
+    var fromDate = args.Length >= 2 && DateTime.TryParseExact(args[1], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d1)
+        ? d1.Date : new DateTime(2026, 10, 13);
+    var toDate = args.Length >= 3 && DateTime.TryParseExact(args[2], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d2)
+        ? d2.Date : DateTime.Now.Date;
+
+    Console.WriteLine($"🌙 Генерація архіву ночей з {fromDate:dd.MM.yyyy} по {toDate:dd.MM.yyyy}...\n");
+    await BatchGenerateNights(fromDate, toDate);
+    return;
+}
+
+// ── 🌙 Генерація власного інтервалу:  dotnet run -- nightrange "2026-10-20 18:00" "2026-10-21 08:00"
+if (args.Length >= 3 && args[0].Equals("nightrange", StringComparison.OrdinalIgnoreCase))
+{
+    if (DateTime.TryParse(args[1], out var rFrom) && DateTime.TryParse(args[2], out var rTo))
+    {
+        Console.WriteLine($"🌙 Генерація періоду {rFrom:dd.MM.yyyy HH:mm} → {rTo:dd.MM.yyyy HH:mm}...\n");
+        var (png, html, plain, d) = await BuildNight(rFrom, rTo);
+        SaveNightArchive(d, png, isCustom: true);
+        Console.WriteLine($"✅ Готово!\n\n{plain}");
+    }
+    return;
+}
 
 // Час останньої будь-якої активності від Telegram (апдейт або keepalive). Сторож нижче
 // стежить за ним: якщо зв'язок «завмер» — примусово перепідключаємось. Це рятує від
@@ -747,6 +793,13 @@ if (!string.IsNullOrWhiteSpace(botToken))
         Alerts: BuildBotAlertsAt,
         Night: async () => { var (from, to) = NightSummary.Window(DateTime.Now); var r = await BuildNight(from, to); return (r.png, r.html); },
         Sources: BuildSourcesText,
+        Outlook: () =>
+        {
+            var ev = EveningOutlook.EveningOf(DateTime.Now);
+            if (!EveningOutlook.Has(ev)) return null;
+            var lines = EveningOutlook.Lines(LaunchedTonight(DateTime.Now));
+            return lines.Count == 0 ? null : $"<b>{H(EveningOutlook.Title(ev))}</b>\n\n{H(string.Join("\n", lines))}\n\n<i>За оцінками моніторів — прогноз, а не факт.</i>\n{ChannelFoot}";
+        },
         TargetsNear: TargetsNear,
         TargetInfo: TargetInfo);
     var bot = new TelegramBot(botToken, features);
@@ -782,6 +835,7 @@ var mapPostAt = DateTime.MinValue;  // коли в канал востаннє �
 // Фоновий цикл: щохвилини оновлює офіційні тривоги в state (API) і постить новини в канал.
 _ = RunAlertsLoop(channelPoster);
 _ = RunNightLoop(channelPoster); // 🌙 ранковий підсумок ночі + на запит (night.request)
+_ = RunOutlookLoop(channelPoster); // 🌙 увечері — «чого чекати цієї ночі» (канал + бот + застосунок)
 // Живі новини каналу: короткі тексти цілей + карта окремо (раз на 10 хв) + денне зведення.
 if (channelPoster is not null)
 {
@@ -841,6 +895,163 @@ async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNi
     return (MapImage.RenderNight(d), NightSummary.Caption(d, html: true), NightSummary.Caption(d, html: false), d);
 }
 
+// Зберігає ніч в архів (data/nights/index.json + PNG) і пушить в Firebase.
+void SaveNightArchive(NightSummary.Data d, byte[] png, bool isCustom)
+{
+    string repoRoot = Directory.Exists("src/Reader") ? Path.GetFullPath(".")
+                    : Directory.Exists("../Reader") ? Path.GetFullPath("../..")
+                    : Path.GetFullPath(".");
+    var dirs = new HashSet<string>
+    {
+        Path.Combine(repoRoot, "src/Reader/data/nights"),
+        Path.Combine(repoRoot, "app/data/nights"),
+        Path.Combine(repoRoot, "release/WarAlarm-Windows/data/nights"),
+        Path.Combine(repoRoot, "app/WarAlarm-Windows/data/nights")
+    };
+    string imgName = isCustom ? $"custom_{d.From:yyyyMMdd_HHmm}_{d.To:yyyyMMdd_HHmm}.png" : $"night_{d.From:yyyy-MM-dd}.png";
+    var itemJson = NightSummary.ArchiveJson(d, imgName);
+
+    foreach (var dir in dirs)
+    {
+        try
+        {
+            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllBytes(Path.Combine(dir, imgName), png);
+            if (isCustom)
+            {
+                File.WriteAllText(Path.Combine(dir, "custom.json"), itemJson);
+            }
+            else
+            {
+                var indexPath = Path.Combine(dir, "index.json");
+                var items = new List<string>();
+                var id = $"{d.From:yyyy-MM-dd}_{d.To:yyyy-MM-dd}";
+                if (File.Exists(indexPath))
+                {
+                    try
+                    {
+                        var raw = File.ReadAllText(indexPath).Trim();
+                        if (raw.StartsWith("[") && raw.EndsWith("]"))
+                        {
+                            var doc = JsonDocument.Parse(raw);
+                            foreach (var elem in doc.RootElement.EnumerateArray())
+                            {
+                                if (elem.TryGetProperty("id", out var eid) && eid.GetString() == id) continue;
+                                items.Add(elem.GetRawText());
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                items.Insert(0, itemJson);
+                File.WriteAllText(indexPath, "[\n  " + string.Join(",\n  ", items) + "\n]");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"⚠ SaveNightArchive ({dir}): {ex.Message}");
+        }
+    }
+
+    if (MapWriter.Publisher is { } pub)
+    {
+        _ = Task.Run(async () =>
+        {
+            var id = isCustom ? $"custom_{d.From:yyyyMMdd_HHmm}" : $"{d.From:yyyy-MM-dd}_{d.To:yyyy-MM-dd}";
+            await pub.Publish($"nights/{id}", itemJson);
+        });
+    }
+}
+
+async Task BatchGenerateNights(DateTime fromDate, DateTime toDate)
+{
+    var curr = fromDate.Date;
+    while (curr < toDate.Date || (curr == toDate.Date && DateTime.Now.Hour >= 8))
+    {
+        var start = curr.AddHours(18);
+        var end = curr.AddDays(1).AddHours(8);
+        Ui.Line(ConsoleColor.Cyan, $"🌙 Збираю ніч {curr:dd.MM} → {curr.AddDays(1):dd.MM} ({start:dd.MM HH:mm}→{end:dd.MM HH:mm})…");
+        try
+        {
+            var (png, html, plain, d) = await BuildNight(start, end);
+            SaveNightArchive(d, png, isCustom: false);
+            Ui.Line(ConsoleColor.Green, $"  ✅ Готово: точок {d.Points.Count}, вибухів {d.Impacts.Count}, пусків ~{d.Launched}, балістика {d.Ballistics.Sum(b => b.N)}");
+        }
+        catch (Exception ex)
+        {
+            Ui.Line(ConsoleColor.Red, $"  ❌ Помилка за {curr:dd.MM}: {ex.Message}");
+        }
+        curr = curr.AddDays(1);
+    }
+    Ui.Line(ConsoleColor.Green, "🎉 Пакетна генерація ночей завершена!");
+}
+
+
+// «🛵 вже пущено ~N (Курськ, Орел)» — хвилі з 17:00 цього вечора.
+string? LaunchedTonight(DateTime now)
+{
+    var from = EveningOutlook.EveningOf(now).AddHours(17);
+    List<LaunchBatch> bs; lock (launchLog) bs = launchLog.Where(x => x.at >= from).Select(x => x.b).ToList();
+    if (bs.Count == 0) return null;
+    var origins = bs.SelectMany(b => b.Items).GroupBy(i => i.Origin).OrderByDescending(g => g.Sum(i => i.N)).Take(4).Select(g => g.Key);
+    return $"уже пущено ~{bs.Sum(b => b.Total)} ({string.Join(", ", origins)})";
+}
+
+// 🌙 «Чого чекати цієї ночі»: о 21:15 (або щойно прийде оцінка, якщо пізніше) — пост у канал,
+// одне повідомлення в бот/пуш і картка в застосунку. Нова оцінка до 03:00 — правка того ж
+// поста (без повторного пушу). Що вже опубліковано — у outlook_posted.txt (переживає перезапуск).
+async Task RunOutlookLoop(ChannelPoster? channel)
+{
+    DateTime postedFor = DateTime.MinValue, postedUpd = DateTime.MinValue; long? postId = null;
+    try
+    {
+        var p = File.ReadAllText("outlook_posted.txt").Split('|');
+        postedFor = DateTime.ParseExact(p[0], "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        postId = long.TryParse(p[1], out var pid) ? pid : null;
+        postedUpd = DateTime.MinValue; // після перезапуску — звіримо з поточними даними
+    }
+    catch { }
+    while (true)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(15)); } catch { }
+        try
+        {
+            var now = DateTime.Now;
+            bool request = File.Exists("outlook.request");
+            if (request) { try { File.Delete("outlook.request"); } catch { } postedFor = DateTime.MinValue; }
+            var ev = EveningOutlook.EveningOf(now);
+            if (!EveningOutlook.Has(ev)) continue;
+            bool window = now.Hour >= 21 || now.Hour < 3;
+            if (!request && (!window || now.Hour == 21 && now.Minute < 15)) continue;
+            var upd = EveningOutlook.Updated;
+            if (!request && now - upd < TimeSpan.FromMinutes(2)) continue; // кілька постів поспіль — чекаємо, поки допишуть
+            var launched = LaunchedTonight(now);
+            var lines = EveningOutlook.Lines(launched);
+            if (lines.Count == 0) continue;
+            MapWriter.OutlookJson = EveningOutlook.Json(launched);
+            var title = EveningOutlook.Title(ev);
+            var html = $"<b>{H(title)}</b>\n\n{H(string.Join("\n", lines))}\n\n<i>За оцінками моніторів — прогноз, а не факт. Стежте за тривогою.</i>\n{ChannelFoot}";
+            if (postedFor != ev)
+            {
+                postId = channel is null ? null : await channel.Post(html, null, silent: false);
+                postedFor = ev; postedUpd = upd;
+                try { File.WriteAllText("outlook_posted.txt", $"{ev:yyyy-MM-dd}|{postId}"); } catch { }
+                MapWriter.Write(MapPath, tracker, MyDistrict, now);
+                Ui.Line(ConsoleColor.Magenta, "🌙 «Чого чекати цієї ночі» опубліковано");
+                await Alert(new AlarmInfo(now.ToString("HH:mm:ss"), "WarAlarm", title, string.Join("\n", lines), ThreatKind.Unknown, Urgent: false, Info: true));
+            }
+            else if (upd > postedUpd)
+            {
+                postedUpd = upd;
+                if (channel is not null && postId is { } id) await channel.Edit(id, html);
+                MapWriter.Write(MapPath, tracker, MyDistrict, now);
+                Ui.Line(ConsoleColor.Magenta, "🌙 «Чого чекати цієї ночі» оновлено");
+            }
+        }
+        catch (Exception ex) { Console.Error.WriteLine("⚠ outlook: " + ex.Message); }
+    }
+}
+
 // Ранковий підсумок о 08:30 (у канал + пуш) і генерація на запит файлом night.request
 // (вміст «post» — ще й опублікувати в канал). Результат: night.png + night.txt.
 async Task RunNightLoop(ChannelPoster? channel)
@@ -851,6 +1062,25 @@ async Task RunNightLoop(ChannelPoster? channel)
         try { await Task.Delay(TimeSpan.FromSeconds(10)); } catch { }
         try
         {
+            if (File.Exists("night_custom.request"))
+            {
+                try
+                {
+                    var req = File.ReadAllText("night_custom.request").Trim();
+                    File.Delete("night_custom.request");
+                    var sp = req.Split('|');
+                    if (sp.Length >= 2 && DateTime.TryParse(sp[0], out var cf) && DateTime.TryParse(sp[1], out var ct))
+                    {
+                        Ui.Line(ConsoleColor.Magenta, $"🌙 Запит власного періоду: {cf:dd.MM HH:mm} → {ct:dd.MM HH:mm}…");
+                        var (cpng, chtml, cplain, cd) = await BuildNight(cf, ct);
+                        SaveNightArchive(cd, cpng, isCustom: true);
+                        File.WriteAllText("night_custom.done", $"{cf:yyyy-MM-dd HH:mm}|{ct:yyyy-MM-dd HH:mm}");
+                        Ui.Line(ConsoleColor.Magenta, "🌙 Власний період готовий!");
+                    }
+                }
+                catch (Exception ex) { Console.Error.WriteLine("⚠ custom night: " + ex.Message); }
+            }
+
             var now = DateTime.Now;
             bool morning = now.Hour == 8 && now.Minute >= 30 && lastMorning != now.Date;
             bool request = File.Exists("night.request");
@@ -867,6 +1097,7 @@ async Task RunNightLoop(ChannelPoster? channel)
             var (png, html, plain, d) = await BuildNight(from, to);
             File.WriteAllBytes("night.png", png);
             File.WriteAllText("night.txt", plain);
+            SaveNightArchive(d, png, isCustom: false);
             Ui.Line(ConsoleColor.Magenta, "🌙 Готово: night.png · цілей-точок " + d.Points.Count + " · вибухів " + d.Impacts.Count + " · пусків ~" + d.Launched);
             if (post)
             {
@@ -1055,8 +1286,7 @@ string BuildDigest()
 
 // HTML-екранування динамічного тексту для постів у канал (parse_mode=HTML).
 static string H(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
-// Єдиний підпис постів у каналі (курсивом, щоб не відволікав від суті).
-const string ChannelFoot = "<i>🤖 WarAlarm · звіряйтесь з офіційними джерелами</i>";
+
 // Цитата з чужого каналу без «хвоста»: підписи («✙ Розвідка неба ✙ ✙Підтримати канал✙»),
 // посилання, @згадки — у нашому пості це шум.
 static string CleanQuote(string s)
@@ -2076,9 +2306,18 @@ async Task OnUpdate(Update update)
     // ── 🚀 Канал пусків (@ukraine_pyxx): хвилі пусків шахедів + «скільки в повітрі» ─
     if (isLaunchCh)
     {
+        // 🌙 Вечірня оцінка загроз («По загрозах на цю ніч», «Ймовірність застосування…»).
+        if (EveningOutlook.Ingest(m.message, DateTime.Now))
+        {
+            MapWriter.OutlookJson = EveningOutlook.Json(LaunchedTonight(DateTime.Now));
+            MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+            Ui.Line(ConsoleColor.Magenta, $"🌙 [{time}] {src} · оцінка загроз на ніч оновлена");
+            return;
+        }
         if (LaunchFeed.ParseLaunch(m.message) is { } lb)
         {
             lastBatch = lb; lastBatchAt = DateTime.Now; PublishAir();
+            lock (launchLog) launchLog.Add((DateTime.Now, lb));
             LaunchGroups.Add(lb, DateTime.Now); // групи вилітають на карті й летять типовим маршрутом
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
             var at = lb.When is { } w ? $" о {w}" : "";
@@ -2570,11 +2809,14 @@ async Task WarmStart()
         {
             var res = await client.Contacts_ResolveUsername(lu);
             if (res.chats.Values.OfType<Channel>().FirstOrDefault() is not { } lch) continue;
-            var hist = (await client.Messages_GetHistory(lch, limit: 25)).Messages.OfType<Message>().Reverse();
+            var hist = (await client.Messages_GetHistory(lch, limit: 40)).Messages.OfType<Message>().Reverse();
             foreach (var msg in hist)
             {
                 if (string.IsNullOrWhiteSpace(msg.message)) continue;
                 var when = msg.date.ToLocalTime();
+                // Вечірня оцінка цього вечора — і після перезапуску (інакше пост «що вночі» губився).
+                if (EveningOutlook.EveningOf(when) == EveningOutlook.EveningOf(DateTime.Now) && EveningOutlook.Ingest(msg.message, when)) continue;
+                if (LaunchFeed.ParseLaunch(msg.message) is { } b0 && when > DateTime.Now.AddHours(-14)) lock (launchLog) launchLog.Add((when, b0));
                 if (DateTime.Now - when > TimeSpan.FromHours(3)) continue; // старе — не цікаво
                 if (LaunchFeed.ParseLaunch(msg.message) is { } b) { lastBatch = b; lastBatchAt = when; }
                 else if (LaunchFeed.ParseAirborne(msg.message) is int a) { airReported = a; airReportedAt = when; }
@@ -2596,7 +2838,9 @@ async Task WarmStart()
 // ── конфиг/секреты ───────────────────────────────────────────────────────────
 string? Config(string what) => what switch
 {
-    "session_pathname"  => "WTelegram.session",             // файл сессии (в .gitignore!)
+    // Сервер (Linux) і запуски на ПК — РІЗНІ сесії. Один ключ з двох IP Telegram відкликає на обох
+    // (AUTH_KEY_DUPLICATED, 30.10: сервер лежав, поки не увійшли заново). Окрема сесія ПК просить код раз.
+    "session_pathname"  => (Directory.Exists("src/Reader") ? "src/Reader/" : "") + (OperatingSystem.IsWindows() ? "WTelegram.local.session" : "WTelegram.session"),
     "api_id"            => Secret("api_id"),
     "api_hash"          => Secret("api_hash"),
     "phone_number"      => Secret("phone_number"),
@@ -2610,7 +2854,8 @@ void LoadSecrets()
 {
     if (secrets is not null) return;
     secrets = new(StringComparer.OrdinalIgnoreCase);
-    const string path = "secrets.local.txt";
+    var path = File.Exists("secrets.local.txt") ? "secrets.local.txt"
+             : File.Exists("src/Reader/secrets.local.txt") ? "src/Reader/secrets.local.txt" : "secrets.local.txt";
     if (File.Exists(path))
         foreach (var raw in File.ReadAllLines(path))
         {

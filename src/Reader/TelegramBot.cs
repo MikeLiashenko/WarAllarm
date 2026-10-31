@@ -22,6 +22,7 @@ public sealed record BotFeatures(
     Func<double, double, Task<string>> Alerts,              // офіційні тривоги: твоя область + країна
     Func<Task<(byte[] png, string caption)>>? Night = null, // 🌙 підсумок ночі
     Func<string>? Sources = null, // 📡 які канали що дали (SourceHub)
+    Func<string?>? Outlook = null, // 🔮 чого чекати цієї ночі (null — оцінки ще нема)
     Func<double, double, int, List<(string id, string text)>>? TargetsNear = null, // 🛰 найближчі цілі (короткі рядки)
     Func<string, double, double, (string text, string stage)?>? TargetInfo = null); // 🛰 картка цілі (null — зникла)
 
@@ -72,7 +73,8 @@ public sealed class TelegramBot
     static object Inline(params object[][] rows) => new { inline_keyboard = rows };
 
     static readonly object MoreKb = Inline(
-        new[] { Btn("🎯 Ризик", "cmd:/risk"), Btn("🌙 Підсумок ночі", "cmd:/night") },
+        new[] { Btn("🔮 Що вночі", "cmd:/tonight"), Btn("🌙 Підсумок ночі", "cmd:/night") },
+        new[] { Btn("🎯 Ризик", "cmd:/risk") },
         new[] { Btn("📈 Аналітика", "cmd:/stats"), Btn("📡 Джерела", "cmd:/sources") },
         new[] { Btn("🤖 ШІ-аналіз", "cmd:/ai"), Btn("📍 Змінити місто", "cmd:/place") },
         new[] { Btn("❓ Довідка", "cmd:/help") });
@@ -271,6 +273,11 @@ public sealed class TelegramBot
             else await Send(chat, "😔 Карту зараз не вдалося намалювати. Спробуй за хвилину.");
             return;
         }
+        if (_f.Outlook is { } outlook && Match(text, cmd, "/tonight", "🔮", "що вночі", "прогноз"))
+        {
+            await Send(chat, outlook() ?? "🔮 Вечірньої оцінки загроз ще немає — монітори зазвичай пишуть її близько 21:00.");
+            return;
+        }
         if (_f.Night is { } night && Match(text, cmd, "/night", "🌙", "ніч", "ночь", "підсумок"))
         {
             var wait = await Send(chat, "🌙 Збираю підсумок ночі з каналів… (до хвилини)");
@@ -342,7 +349,7 @@ public sealed class TelegramBot
         + "🚨 Тривоги — офіційні: твоя область і країна\n"
         + "🏠 Укриття — найближчі укриття й метро\n\n"
         + "<b>☰ Ще</b>\n"
-        + "🎯 Ризик · 🌙 Підсумок ночі · 📈 Аналітика · 📡 Джерела · 🤖 ШІ-аналіз\n\n"
+        + "🎯 Ризик · 🔮 Що вночі · 🌙 Підсумок ночі · 📈 Аналітика · 📡 Джерела · 🤖 ШІ-аналіз\n\n"
         + "<b>Налаштування</b>\n"
         + "📍 /place — змінити місто" + (place is { } p ? $" (зараз: {H(p.Name)})" : "") + "\n"
         + "🔕 /stop — вимкнути сповіщення\n\n"
@@ -437,7 +444,7 @@ public sealed class TelegramBot
         {
             ("status", "📊 Що летить біля мого міста"), ("targets", "🛰 Найближчі цілі"),
             ("map", "🗺 Карта тривог"), ("alerts", "🚨 Офіційні тривоги"), ("shelter", "🏠 Укриття поруч"),
-            ("risk", "🎯 Ризик по типах"), ("night", "🌙 Підсумок ночі"), ("stats", "📈 Аналітика"),
+            ("risk", "🎯 Ризик по типах"), ("tonight", "🔮 Чого чекати цієї ночі"), ("night", "🌙 Підсумок ночі"), ("stats", "📈 Аналітика"),
             ("sources", "📡 Джерела"), ("ai", "🤖 ШІ-аналіз"), ("place", "📍 Змінити місто"),
             ("help", "❓ Довідка"), ("stop", "🔕 Вимкнути сповіщення"),
         };

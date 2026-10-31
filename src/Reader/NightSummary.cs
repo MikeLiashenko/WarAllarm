@@ -122,14 +122,14 @@ public static class NightSummary
         return now.Hour < 8 ? (from, now) : (from, now.Date.AddHours(8));
     }
 
-    // Історія каналу у вікні [from, to] (листаємо сторінками по 100, максимум ~2000 постів).
+    // Історія каналу у вікні [from, to] (листаємо сторінками по 100).
     static async Task<List<Message>> History(WTelegram.Client client, Channel ch, DateTime from, DateTime to)
     {
         var all = new List<Message>();
         int offset = 0;
-        for (int page = 0; page < 20; page++)
+        for (int page = 0; page < 40; page++)
         {
-            var res = await client.Messages_GetHistory(ch, offset_id: offset, limit: 100);
+            var res = await client.Messages_GetHistory(ch, offset_id: offset, offset_date: offset == 0 ? to.ToUniversalTime() : default, limit: 100);
             var msgs = res.Messages.OfType<Message>().ToList();
             if (msgs.Count == 0) break;
             all.AddRange(msgs);
@@ -379,7 +379,7 @@ public static class NightSummary
             sb.AppendLine($"💥 Вибухи (Київ): {d.Impacts.Count} — " + T(string.Join(", ", where)));
         }
         if (d.Launched == 0 && d.Points.Count == 0 && d.Impacts.Count == 0) sb.AppendLine("😌 Ніч була відносно спокійною.");
-        sb.Append(html ? "\n<i>🤖 WarAlarm · за даними моніторів, звіряйтесь з офіційними</i>" : "\n🤖 WarAlarm");
+        sb.Append(html ? "\n<i>🤖 WarAlarm · дані приблизні</i>" : "\n🤖 WarAlarm");
         return sb.ToString();
     }
 
@@ -395,5 +395,20 @@ public static class NightSummary
         return $"{{\"ts\":{ts},\"period\":\"{J(Period(d))}\",\"launched\":{d.Launched},\"waves\":{d.Waves.Count},"
              + $"\"maxAir\":{d.MaxAir},\"top\":\"{J(top)}\",\"impacts\":{d.Impacts.Count},\"impactAt\":\"{J(boomAt)}\","
              + $"\"ballistic\":{d.Ballistics.Sum(b => b.N)}}}";
+    }
+
+    /// Для архіву ночей (data/nights/index.json).
+    public static string ArchiveJson(Data d, string imageFile)
+    {
+        static string J(string x) => x.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
+        var id = $"{d.From:yyyy-MM-dd}_{d.To:yyyy-MM-dd}";
+        var top = string.Join(", ", d.TopOblasts(5).Select(t => t.oblast));
+        var boomAt = string.Join(", ", d.Impacts.GroupBy(i => i.Place).OrderByDescending(g => g.Count()).Take(5).Select(g => g.Key));
+        var downed = d.Official is { } o ? $"збито {o.Down}" + (o.Hits > 0 ? $", влучань {o.Hits}" : "") : "";
+        var caption = Caption(d, html: false);
+        return $"{{\"id\":\"{id}\",\"from\":\"{d.From:yyyy-MM-ddTHH:mm:ss}\",\"to\":\"{d.To:yyyy-MM-ddTHH:mm:ss}\","
+             + $"\"period\":\"{J(Period(d))}\",\"launched\":{d.Launched},\"waves\":{d.Waves.Count},\"maxAir\":{d.MaxAir},"
+             + $"\"top\":\"{J(top)}\",\"impacts\":{d.Impacts.Count},\"impactAt\":\"{J(boomAt)}\",\"ballistic\":{d.Ballistics.Sum(b => b.N)},"
+             + $"\"downed\":\"{J(downed)}\",\"image\":\"{J(imageFile)}\",\"caption\":\"{J(caption)}\"}}";
     }
 }

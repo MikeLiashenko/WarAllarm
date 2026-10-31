@@ -370,6 +370,14 @@ class _NowScreenState extends State<NowScreen> {
               'Вибухи: ${data.nightImpacts} — ${data.nightImpactAt}',
           ],
         ),
+      // 🌙 «Чого чекати цієї ночі» (вечірня оцінка загроз від моніторів).
+      if (data.hasOutlook)
+        Notice(
+          color: AppColors.night,
+          emoji: '🌙',
+          title: 'Чого чекати цієї ночі · ${data.outlookEvening}',
+          lines: data.outlookLines,
+        ),
     ];
     if (list.isEmpty) return const [];
     return [
