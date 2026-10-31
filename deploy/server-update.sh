@@ -21,10 +21,33 @@ rm -f /tmp/waralarm-server.tgz
 echo "📦 Збірка: $(cat app/BUILD_COMMIT 2>/dev/null || echo '?')"
 
 echo "🚀 Перезапуск …"
-sudo docker compose up -d --build
+# Ручні «docker compose run» тримають сесію Telegram — прибрати, інакше новий контейнер не стартує.
+sudo docker ps -aq --filter label=com.docker.compose.oneoff=True | xargs -r sudo docker rm -f
+START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+sudo docker compose up -d --build --force-recreate
 sudo docker image prune -f >/dev/null 2>&1 || true
 
-echo "⏳ Чекаю на вхід у Telegram …"
-for i in $(seq 1 40); do sudo docker compose logs 2>/dev/null | grep -q "Вошли как" && break; sleep 3; done
-sudo docker compose logs --tail 25
-echo "✅ Готово. Логи:  cd $DIR && sudo docker compose logs -f"
+# Чекаємо вхід. Якщо Telegram просить код/пароль — питаємо тут і кладемо у data/ (програма його підхопить).
+# Якщо SSH обірветься — не страшно: контейнер чекає 30 хв, код можна дописати пізніше:
+#   echo КОД | sudo tee /opt/waralarm/data/telegram_code.txt
+echo "⏳ Чекаю на вхід у Telegram (до 10 хв; FLOOD_WAIT програма перечікує сама) …"
+asked_code=0; asked_pw=0
+for i in $(seq 1 200); do
+  L="$(sudo docker compose logs --no-log-prefix --since "$START" 2>/dev/null || true)"
+  if grep -q "Вошли как" <<<"$L"; then break; fi
+  if grep -q "telegram_password.txt" <<<"$L" && [ $asked_pw = 0 ]; then
+    read -rsp "🔐 Пароль 2FA Telegram: " pw </dev/tty; echo
+    printf '%s' "$pw" | sudo tee data/telegram_password.txt >/dev/null; asked_pw=1
+  elif [ "$(grep -c "telegram_code.txt" <<<"$L")" -gt "$asked_code" ]; then
+    echo "📲 Telegram надіслав код входу (у застосунку Telegram, чат «Telegram»)."
+    read -rp "🔢 Введи код: " code </dev/tty
+    printf '%s' "$code" | sudo tee data/telegram_code.txt >/dev/null; asked_code=$((asked_code+1))
+  fi
+  sleep 3
+done
+sudo docker compose logs --tail 15
+if sudo docker compose logs --since "$START" 2>/dev/null | grep -q "Вошли как"; then
+  echo "✅ Готово, Reader працює. Логи:  cd $DIR && sudo docker compose logs -f"
+else
+  echo "⚠ Входу ще немає. Подивись логи вище або:  cd $DIR && sudo docker compose logs --tail 30"
+fi

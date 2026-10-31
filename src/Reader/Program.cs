@@ -712,6 +712,9 @@ if (args.Length >= 1 && args[0].Equals("channeltest", StringComparison.OrdinalIg
 }
 
 using var client = new Client(Config);
+// FLOOD_WAIT при вході: чекати самому (до 15 хв), а не падати — інакше рестарт контейнера
+// знову просить код і Telegram подовжує паузу.
+client.FloodRetryThreshold = 900;
 var me = await client.LoginUserIfNeeded();
 Console.WriteLine($"✅ Вошли как: {me.first_name} {me.last_name} (@{me.username})\n");
 
@@ -2600,8 +2603,8 @@ string? Config(string what) => what switch
     "api_id"            => Secret("api_id"),
     "api_hash"          => Secret("api_hash"),
     "phone_number"      => Secret("phone_number"),
-    "verification_code" => Ask("Код подтверждения из Telegram: "),
-    "password"          => Ask("Пароль 2FA (Enter, если нет): "),
+    "verification_code" => AskOrFile("Код подтверждения из Telegram: ", "telegram_code.txt"),
+    "password"          => AskOrFile("Пароль 2FA (Enter, если нет): ", "telegram_password.txt"),
     _                   => null
 };
 
@@ -2632,6 +2635,34 @@ static string? Ask(string prompt)
 {
     Console.Write(prompt);
     return Console.ReadLine();
+}
+
+// На сервері (Docker у фоні) консолі немає: тоді чекаємо, поки відповідь покладуть у файл
+// (/data/telegram_code.txt), напр. з SSH:  echo 12345 | sudo tee /opt/waralarm/data/telegram_code.txt
+// Так вхід не залежить від того, чи живе SSH-сесія, і контейнер не падає в цикл «новий код».
+static string? AskOrFile(string prompt, string file)
+{
+    Console.Write(prompt);
+    if (!Console.IsInputRedirected) return Console.ReadLine();
+    var line = Console.ReadLine();
+    if (!string.IsNullOrWhiteSpace(line)) return line.Trim();
+    Console.WriteLine($"\n⌛ Немає консолі — чекаю відповідь у файлі {Path.GetFullPath(file)} (до 30 хв) …");
+    var deadline = DateTime.UtcNow.AddMinutes(30);
+    while (DateTime.UtcNow < deadline)
+    {
+        try
+        {
+            if (File.Exists(file))
+            {
+                var v = File.ReadAllText(file).Trim();
+                File.Delete(file);
+                if (v.Length > 0) { Console.WriteLine($"📨 Відповідь з {file} отримано."); return v; }
+            }
+        }
+        catch (IOException) { }
+        Thread.Sleep(2000);
+    }
+    return null;
 }
 
 // Читает settings.local.txt (key=value) в словарь. Нет файла — пустой словарь (дефолты).
