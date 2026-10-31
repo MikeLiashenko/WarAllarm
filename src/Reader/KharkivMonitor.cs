@@ -251,7 +251,6 @@ public static class KharkivMonitor
         if (l.Contains("каб") || l.Contains("умпк") || l.Contains("умпб")) return (ThreatKind.Kab, null);
         if (l.Contains("балісти") || l.Contains("баллист") || Regex.IsMatch(l, @"кн-?23|точка[-\s]?у")) return (ThreatKind.Ballistic, null);
         if (l.Contains("молні")) return (ThreatKind.Drone, "Молнія");
-        if (l.Contains("шаболд")) return (ThreatKind.Drone, "реакт. шахед");
         if (l.Contains("fpv")) return (ThreatKind.Drone, "FPV");
         if (l.Contains("гербер")) return (ThreatKind.Drone, "гербера-пастка");
         if (l.Contains("шахед") || l.Contains("шахід") || l.Contains("геран") || l.Contains("geran")) return (ThreatKind.Drone, "шахед");

@@ -40,6 +40,53 @@ public static class Journal
     /// Прогнати пости журналу через ТЕПЕРІШНІЙ хаб (з реальним часом постів): кожен пост,
     /// що він зрозумів тоді і що розуміє зараз. Щоб правки сортувальника перевірялись на
     /// справжній ночі, а не на вигаданих прикладах.   `dotnet run -- replay [дата|файл] [вихід.txt]`
+    /// Як цілі рухались наживо: пости журналу → хаб → трекер; друкує кожне оновлення цілей,
+    /// де згадано [filter] (місце, тип). dotnet run -- trace 2026-10-31.jsonl 17:10 17:25 Краснопавлівка
+    public static void Trace(string file, TimeSpan from, TimeSpan to, string? filter)
+    {
+        var day = DateTime.TryParse(Path.GetFileNameWithoutExtension(file), out var dd) ? dd : DateTime.Today;
+        var posts = new List<(string ch, DateTime at, string text)>();
+        var inHub = new HashSet<(string, int)>();
+        foreach (var line in File.ReadLines(file))
+        {
+            try
+            {
+                var e = JsonDocument.Parse(line).RootElement;
+                var ch = e.GetProperty("ch").GetString()!; var id = e.GetProperty("id").GetInt32();
+                if (e.GetProperty("kind").GetString() == "post")
+                    posts.Add((ch + "#" + id, day + TimeSpan.Parse(e.GetProperty("t").GetString()!), e.GetProperty("text").GetString() ?? ""));
+                else inHub.Add((ch, id));
+            }
+            catch { }
+        }
+        var hub = new SourceHub();
+        var tr = new ThreatTracker((49.99, 36.23));
+        foreach (var (key, at, text) in posts.OrderBy(p => p.at))
+        {
+            var ch = key[..key.LastIndexOf('#')];
+            if (SourceCatalog.Get(ch) is not { } si || !inHub.Contains((ch, int.Parse(key[(key.LastIndexOf('#') + 1)..])))) continue;
+            tr.Tick(at);
+            var r = hub.Process(si, text, at);
+            bool show = at.TimeOfDay >= from && at.TimeOfDay <= to;
+            foreach (var s in r.Statuses)
+            {
+                var hit = s.Circling ? tr.MarkCircling(s.Pos, s.Kind, at) : tr.MarkShot(s.Pos, s.Kind, s.Shot, at, ch);
+                if (show) Console.WriteLine($"{at:HH:mm:ss} @{ch} «{text.Replace("\n", " ⏎ ")}» → {(s.Circling ? "кружляє" : $"мінус {s.Shot}")} біля {s.Place}: {(hit is null ? "цілі нема" : Describe(hit, at))}");
+            }
+            foreach (var e in r.Confirmed)
+            {
+                var t = tr.IngestUa(e.Ev, at, (e.Place, e.Pos.lat, e.Pos.lon))?.Threat;
+                if (!show || t is null) continue;
+                var line = $"{at:HH:mm:ss} @{ch} {e.Place}: {Describe(t, at)}";
+                if (filter is null || line.Contains(filter, StringComparison.OrdinalIgnoreCase)) Console.WriteLine(line);
+            }
+        }
+    }
+
+    static string Describe(Threat t, DateTime at) =>
+        $"[{t.Id}] {ThreatTracker.Label(t)} ×{t.Amount} {t.PlaceLabel} · {ThreatGeo.SpeedKmh(t.Kind, t.Ammo):0} км/г"
+        + (t.Pos is { } p && t.DrawPos(at) is { } d ? $" · мітка за {ThreatGeo.Km(d, p):0} км" : "") + (t.Down ? " · збито" : "");
+
     public static void Replay(string? date, string? outPath)
     {
         var file = date is { } d && File.Exists(d) ? d : Path.Combine(Dir, $"{date ?? DateTime.Now.ToString("yyyy-MM-dd")}.jsonl");

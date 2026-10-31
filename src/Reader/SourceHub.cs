@@ -516,16 +516,19 @@ public sealed class SourceHub
             var statuses = new List<HubStatus>();
             bool missiles = false;
             var rest = new List<string>();
-            var lines = Clean(text).Split('\n');
+            // Clean викидає рядки з самих розділових знаків, а «-» — це мінус (@Karkivw).
+            var cleaned = Clean(text);
+            var lines = (cleaned.Length == 0 && Slang.ShotCount(text) is not null ? text.Trim() : cleaned).Split('\n');
             foreach (var line in lines)
             {
                 if (Slang.MissilesDone(line)) { missiles = true; continue; }
-                int? shot = Slang.ShotCount(line);
-                string? named = shot is null ? Slang.ShotPlace(line) : null;
+                // Спершу місце: «Ізюм мінус 2» — про Ізюм, а не про останню ціль каналу.
+                string? named = Slang.ShotPlace(line);
+                int? shot = named is null ? Slang.ShotCount(line) : null;
                 bool circling = shot is null && named is null && Slang.CirclingStatus(line);
                 if (shot is null && named is null && !circling) { rest.Add(line); continue; }
                 if (named is not null && Locate(named, null, src, false, out _) is { } ng)
-                    statuses.Add(new((ng.lat, ng.lon), ng.name, ThreatKind.Target, 1, false));
+                    statuses.Add(new((ng.lat, ng.lon), ng.name, ThreatKind.Target, Slang.ShotPlaceCount(line), false));
                 else if (_lastPlaced.TryGetValue(src.User, out var lp) && at - lp.at <= StatusTtl)
                     statuses.Add(new(lp.pos, lp.place, lp.kind, shot ?? (circling ? 0 : 1), circling));
             }
@@ -533,11 +536,12 @@ public sealed class SourceHub
             foreach (var s in statuses.Where(s => s.Shot > 0))
                 foreach (var k in _clusters.Where(c => c.Value.Place == s.Place && !c.Value.Confirmed).Select(c => c.Key).ToList())
                     _clusters.Remove(k);
-            if (statuses.Count == 0 && !missiles && rest.Count == lines.Length)
-                return ProcessPost(src, text, at);
-            var body = string.Join("\n", rest);
+            var body = statuses.Count == 0 && !missiles && rest.Count == lines.Length ? text : string.Join("\n", rest);
             var r = rest.Count > 0 ? ProcessPost(src, body, at)
                   : new HubResult(statuses.Count > 0 || missiles ? HubVerdict.Status : HubVerdict.Noise, [], "статус без місця");
+            // Канал написав про місце, якого ми не знайшли: наступний «мінус» — про ту ціль, а не про
+            // попередню, тож чужу живу ціль з карти не знімаємо.
+            if (r.Verdict == HubVerdict.Unplaced) _lastPlaced.Remove(src.User);
             return r with { Statuses = statuses, MissilesDone = missiles };
         }
     }

@@ -412,6 +412,13 @@ if (args.Length >= 1 && args[0].Equals("replay", StringComparison.OrdinalIgnoreC
     return;
 }
 
+// ── Як цілі рухались по журналу (оффлайн):   dotnet run -- trace <journal.jsonl> 17:10 17:25 [фільтр]
+if (args.Length >= 4 && args[0].Equals("trace", StringComparison.OrdinalIgnoreCase))
+{
+    Journal.Trace(args[1], TimeSpan.Parse(args[2]), TimeSpan.Parse(args[3]), args.Length >= 5 ? args[4] : null);
+    return;
+}
+
 // ── Тест «де ціль, а куди летить» (оффлайн):   dotnet run -- course
 if (args.Length >= 1 && args[0].Equals("course", StringComparison.OrdinalIgnoreCase))
 {
@@ -444,17 +451,20 @@ if (args.Length >= 1 && args[0].Equals("slang", StringComparison.OrdinalIgnoreCa
     }
     Console.WriteLine($"\nМіГ сів: {string.Join(", ", new[] { "МіГ-31К сів", "Відбій по МіГ-31", "Посадка МиГ-31К", "Зліт МіГ-31К" }.Select(p => $"«{p}»={Slang.CarrierLanded(p)}"))}");
     Console.WriteLine("\n── Мінус ──");
-    foreach (var post in new[] { "-1", "-1х.", "мінус", "Минус.", "також мінус", "наче мінус", "Цей мінус.", "Мінус 2", "Мінус 1 🫡", "Мінусяра🫡", "Вже мінус", "Італмас ВПАВ", "Шахеда нема більше", "збили",
+    foreach (var post in new[] { "-", "—", "-2", "- 2", "2 мінуса", "обидва мінус", "-1", "-1х.", "мінус", "Минус.", "також мінус", "наче мінус", "Цей мінус.", "Мінус 2", "Мінус 1 🫡", "Мінусяра🫡", "Вже мінус", "Італмас ВПАВ", "Шахеда нема більше", "збили",
         "Кажуть мінус світло на лівому", "Ще відео мінусяри", "Та херня. У меня минус такой что твой покажется не заметным", "-15 на вулиці зараз" })
         Console.WriteLine($"{post,-58} → {(Slang.ShotCount(post) is { } n ? $"збито ×{n}" : "—")}");
-    Console.WriteLine($"Той що на Долинське – мінус → {Slang.ShotPlace("Той що на Долинське – мінус")}");
+    foreach (var post in new[] { "Той що на Долинське – мінус", "Ізюм мінус 2", "На Ізюм мінус 2", "Ізюм - мінус", "по Ізюму мінус", "Нова Дача мінус", "Ізюм -2", "Сумщина — 8х", "ТЕЦ-6", "Проліт на Л-3", "Ізюм - кружляє", "- 2 ударних БПЛА на Ізюм" })
+        Console.WriteLine($"{post,-58} → {(Slang.ShotPlace(post) is { } sp ? $"{sp} ×{Slang.ShotPlaceCount(post)}" : "—")}");
+    foreach (var post in new[] { "2 новые Р. Шаболды на Краснопавловку", "+2 Р. Шахед курсом на Краснопавловку", "Ещё 1 Р. Шаболда кружит", "БпЛА на Нова Дача", "3 новые шаболды на Изюм", "Реактивний на Ізюм" })
+        Console.WriteLine($"{post,-58} → нова={Slang.NewTarget(post)} звичайний={Slang.PlainDrone(post)} зброя={WeaponCatalog.Match(post)?.Name}");
     Console.WriteLine("\n── Хаб: «шахед → мінус → кружляє» ──");
     var dh = new SourceHub();
     var si = SourceCatalog.Get("dnipro_alerts")!;
     var tt = new ThreatTracker((HomeLat, HomeLon));
     var t0 = DateTime.Now;
     int sec = 0;
-    foreach (var post in new[] { "Далее Синельникове⚠️", "Реактив на Дніпро", "кружляє містом", "Дніпро все ще червоний 🟥кружляє містом", "2х реактивних кружляють над Дніпром", "Реактивний 🛵 на Павлоград", "Почав кружляти", "Шахед на Самар", "Мінус", "Цей мінус.\n\nРеактив на Кривий Ріг" })
+    foreach (var post in new[] { "Далее Синельникове⚠️", "Реактив на Дніпро", "кружляє містом", "Дніпро все ще червоний 🟥кружляє містом", "2х реактивних кружляють над Дніпром", "Реактивний 🛵 на Павлоград", "Почав кружляти", "Шахед на Самар", "Мінус", "Цей мінус.\n\nРеактив на Кривий Ріг", "2 шахеди на Самар", "-", "-", "Шахед на Кигечовку", "-" })
     {
         var at = t0.AddSeconds(sec += 150);
         var r = dh.Process(si, post, at);
@@ -2573,7 +2583,7 @@ async Task HandleHub(SourceInfo si, string text, string src, string time, int ms
     bool statusChanged = false;
     foreach (var s in r.Statuses)
     {
-        var hit = s.Circling ? tracker.MarkCircling(s.Pos, s.Kind, now) : tracker.MarkShot(s.Pos, s.Kind, s.Shot, now);
+        var hit = s.Circling ? tracker.MarkCircling(s.Pos, s.Kind, now) : tracker.MarkShot(s.Pos, s.Kind, s.Shot, now, si.User);
         if (hit is null) continue;
         statusChanged = true;
         Ui.Line(s.Circling ? ConsoleColor.Yellow : ConsoleColor.Green,

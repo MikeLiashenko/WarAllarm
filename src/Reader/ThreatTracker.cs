@@ -74,6 +74,7 @@ public sealed class Threat
 
     // «Кружляє над Харковом»: ціль нікуди не летить — застосунок водить її колом над містом.
     public bool Orbit;
+    public string? DownBy; // який канал написав останній «мінус» про цю ціль
     /// Кружляє над містом або вже долетіла до міста, куди летіла.
     public bool OrbitingAt(DateTime now) => Orbit || (Approach is { } a && Pos is { } p
         && ThreatGeo.SpeedKmh(Kind, Ammo) * 0.85 / 60 * Math.Min(20, (now - LastUpdate).TotalMinutes) >= ThreatGeo.Km(a, p));
@@ -231,15 +232,28 @@ public sealed class ThreatTracker
             // «Літин» і «Гнівань» не злипались в одну ціль із останнім ×N (губились дрони).
             // На карті вони все одно в одній точці — кластер МapWriter підсумує ×N.
             var key = approx ? $"UA:обл:{gp.name}:{(ev.City ?? "").ToLowerInvariant()}:{ev.Kind}" : $"UA:{gp.name}:{ev.Kind}";
+            var placeKey = key;
             if (_alias.TryGetValue(key, out var aliased) && _active.ContainsKey(aliased)) key = aliased;
             bool isNew = !_active.TryGetValue(key, out var t);
+            // Ціль з цього місця вже полетіла далі. Пост услід від іншого каналу (до 90 с) її не
+            // повертає назад; пізніший чи «нова шаболда» — це вже інша ціль, а не та сама мітка.
+            if (!isNew && !approx && t!.LastPlace is { Length: > 0 } was && was != place)
+            {
+                bool fresh = Slang.NewTarget(ev.Raw);
+                if (!fresh && now - t.LastUpdate < TimeSpan.FromSeconds(90))
+                    return new TrackUpdate(t, false, TrackSound.None, Note(t));
+                key = $"{placeKey}#{now:HHmmss}";
+                _alias[placeKey] = key;
+                isNew = true;
+            }
             // Нове місто — це часто ТА САМА ціль, що пролетіла далі. Раніше кожне місто
             // ставало новою міткою, а стара висіла «примарою» 15 хв без оновлень (і курсу
             // не було — лише здогадка «вглиб країни»). Тепер шукаємо попередника.
-            if (isNew && !approx && Predecessor(ev.Kind, pos, now) is { } pred)
+            if (isNew && !approx && Predecessor(ev, pos, now) is { } pred)
             {
+                _active.Remove(key);
                 t = pred;
-                _alias[key] = pred.Id;
+                _alias[placeKey] = pred.Id;
                 isNew = false;
             }
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
@@ -252,7 +266,8 @@ public sealed class ThreatTracker
                 LaunchGroups.Absorb(pos, Math.Max(1, ev.Count), now);
             var prevPos = t!.Pos;
             var drawnBefore = isNew ? null : t.DrawPos(now); // до оновлення LastUpdate: де мітка саме зараз
-            t!.Ammo ??= ev.Extra;
+            // Прямо сказано «реактивний» — швидкість уточнюємо навіть для вже відомої цілі.
+            t!.Ammo = IsJet(ev.Extra) ? ev.Extra : t.Ammo ?? ev.Extra;
             t.Oblast = ev.Oblast ?? t.Oblast;
             t.Recon = ((ev.Extra ?? "") + " " + ev.Raw).ToLowerInvariant().Contains("розвід");
             // Новий пост про ціль, яку вважали збитою, — отже, вона ще летить.
@@ -278,7 +293,7 @@ public sealed class ThreatTracker
             if (!approx && ev.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target
                 && ThreatParser.HeadingTo(ev.Raw, ev.City ?? gp.name))
             {
-                var start = drawnBefore ?? ApproachStart(ev, t, pos);
+                var start = NotFarther(drawnBefore ?? ApproachStart(ev, t, pos), pos, MaxApproachKm(t.Kind));
                 if (ThreatGeo.Km(start, pos) >= 3) t.Approach = start;
             }
             AddTrack(t, t.Approach ?? pos);
@@ -323,22 +338,26 @@ public sealed class ThreatTracker
     }
 
     /// «Мінус» від каналу: нижчаємо ×N найближчої цілі (того ж типу, якщо є), або знімаємо її.
-    public Threat? MarkShot((double lat, double lon) at, ThreatKind kind, int count, DateTime now)
+    public Threat? MarkShot((double lat, double lon) at, ThreatKind kind, int count, DateTime now, string? channel = null)
     {
         lock (_gate)
         {
+            // Ціль «на Ізюм» може бути ще далеко від міста: міряємо і до мітки, і до міста.
+            static double Off(Threat t, (double lat, double lon) at, DateTime now) =>
+                Math.Min(ThreatGeo.Km(t.DrawPos(now)!.Value, at), ThreatGeo.Km(t.Pos!.Value, at));
             // Той самий «мінус» пишуть кілька каналів: не знімаємо через нього ще й сусідню ціль.
+            // Другий «мінус» того самого каналу — це вже друга збита ціль.
             var just = _active.Values.FirstOrDefault(t => t.DownAt != default && now - t.DownAt < TimeSpan.FromSeconds(90)
-                                                          && t.DrawPos(now) is { } jp && ThreatGeo.Km(jp, at) <= 15);
+                                                          && t.DownBy != channel && t.Pos is not null && t.DrawPos(now) is not null && Off(t, at, now) <= 15);
             if (just is not null) return just;
             var near = _active.Values
                 .Where(t => t.Kind is ThreatKind.Drone or ThreatKind.Target or ThreatKind.Missile or ThreatKind.Fpv
-                            && !t.Launch && !t.Down && t.DrawPos(now) is { } p && ThreatGeo.Km(p, at) <= 60)
+                            && !t.Launch && !t.Down && t.Pos is not null && t.DrawPos(now) is not null && Off(t, at, now) <= 60)
                 .OrderBy(t => t.Kind == kind || kind == ThreatKind.Target ? 0 : 1)
-                .ThenBy(t => ThreatGeo.Km(t.DrawPos(now)!.Value, at))
+                .ThenBy(t => Off(t, at, now))
                 .FirstOrDefault();
             if (near is null) return null;
-            near.DownAt = now;
+            near.DownAt = now; near.DownBy = channel;
             if (near.Amount > count) { near.Count = near.Amount - count; return near; }
             near.Down = true; near.AltNote = "збито"; near.AltAt = now;
             near.Orbit = false;
@@ -375,15 +394,26 @@ public sealed class ThreatTracker
     }
 
     // Звідки летить нова ціль «на X»: з названого місця пуску, інакше з боку найближчого фронту /
-    // кордону; ~10 хв польоту від міста (шахед ~30 км, реактивний і ракета — до 60).
+    // кордону. Канали називають найближче місце на шляху, тому мітка не далі ~30 км від нього —
+    // і для реактивного теж: з 60 км він «летів» би до міста після того, як уже пролетів далі.
     static (double lat, double lon) ApproachStart(ThreatEvent ev, Threat t, (double lat, double lon) dest)
     {
         var from = LaunchSites.Resolve(ev.From) is { } f ? (f.lat, f.lon) : LaunchSites.NearestFront(dest);
+        return NotFarther(from, dest, MaxApproachKm(t.Kind));
+    }
+
+    static double MaxApproachKm(ThreatKind kind) => kind == ThreatKind.Missile ? 60 : 30;
+
+    // Точка [from], але не далі [km] від [dest].
+    static (double lat, double lon) NotFarther((double lat, double lon) from, (double lat, double lon) dest, double km)
+    {
         double dist = ThreatGeo.Km(from, dest);
-        if (dist < 1) return dest;
-        double k = Math.Min(1, Math.Clamp(ThreatGeo.SpeedKmh(t.Kind, t.Ammo) / 60 * 10, 20, 60) / dist);
+        if (dist <= km) return from;
+        double k = km / dist;
         return (dest.lat + (from.lat - dest.lat) * k, dest.lon + (from.lon - dest.lon) * k);
     }
+
+    static bool IsJet(string? ammo) => ammo?.Contains("реакт", StringComparison.OrdinalIgnoreCase) == true;
 
     // Траєкторія: «з X на Y» дає курс; балістика й КАБ летять від точки пуску/скиду до
     // цілі з реальною швидкістю засобу (застосунок рухає маркер уздовж From→To).
@@ -427,9 +457,13 @@ public sealed class ThreatTracker
     // інакше «Мерефа, Зміїв» в одному пості злиплись би), і реально могла долетіти:
     // відстань ≤ швидкість × час × 1.5 + 35 км (точки — центри міст, пости запізнюються). Якщо курс уже відомий — не розвертаємо
     // ціль назад (> 110°). Обираємо найближчу.
-    Threat? Predecessor(ThreatKind kind, (double lat, double lon) pos, DateTime now)
+    Threat? Predecessor(ThreatEvent ev, (double lat, double lon) pos, DateTime now)
     {
+        var kind = ev.Kind;
         if (kind is not (ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target)) return null;
+        // «2 новые шаболды», «+2 шахеди» — канал прямо каже, що це інші цілі.
+        if (Slang.NewTarget(ev.Raw)) return null;
+        bool jet = IsJet(ev.Extra), plain = Slang.PlainDrone(ev.Raw);
         Threat? best = null;
         double bestKm = double.MaxValue;
         foreach (var c in _active.Values)
@@ -438,10 +472,14 @@ public sealed class ThreatTracker
             if (c.Stage is TrackStage.Impact or TrackStage.Passed) continue;
             var age = now - c.LastUpdate;
             if (age < TimeSpan.FromSeconds(40) || age > TimeSpan.FromMinutes(12)) continue;
+            // Реактивний не стає звичайним шахедом, а одна ціль — трьома.
+            if (jet != IsJet(c.Ammo) && (jet || plain)) continue;
+            if (ev.Count > c.Amount) continue;
             double km = ThreatGeo.Km(cp, pos);
             if (km < 3) continue; // те саме місце — це не рух
+            // Відстань рахуємо від мітки: ціль «на X» може бути ще далеко від самого X.
             double reach = ThreatGeo.SpeedKmh(c.Kind, c.Ammo) / 60 * age.TotalMinutes * 1.5 + 35;
-            if (km > reach) continue;
+            if (ThreatGeo.Km(c.DrawPos(now) ?? cp, pos) > reach) continue;
             if (c.HeadingKnown && c.Heading is { } h)
             {
                 double turn = Math.Abs(((ThreatGeo.Bearing(cp, pos) - h) % 360 + 540) % 360 - 180);

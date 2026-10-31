@@ -98,6 +98,8 @@ public static class Slang
     {
         new(@"^" + Filler + @"(?:мінус|мінусик|мінусяра)(?:\s+(?<n>\d+))?(?:\s+" + Target + @")?(?:\s+\S+){0,2}$", O),
         new(@"^[-−–]\s?(?<n>\d{1,2})\s*[хx×]?$", O),
+        new(@"^[-−–]$", O), // @Karkivw, @kyiv_airdef: мінус пишуть просто рискою
+        new(@"^(?:" + Filler + @")(?<n>\d{1,2})\s*[хx×]?\s+мінус\w*$", O), // «2 мінуса»
         new(@"^" + Filler + @"(?:(?<n>\d{1,2})\s+)?(?:" + Target + @"\s+)?(?:збито|збили|впав|знищено|знищили|приземлили)$", O),
         new(@"^" + Target + @"\s+нема(?:є)?\s+більше$", O),
     };
@@ -107,19 +109,40 @@ public static class Slang
     /// Рядок цілком каже «цю збили»: скільки (за замовч. 1), інакше null.
     public static int? ShotCount(string line)
     {
-        var l = Regex.Replace(Normalize(line).Trim(), @"[^\p{L}\d\s\-−–]+", " ");
+        var l = Regex.Replace(Normalize(line).Trim().Replace('—', '–'), @"[^\p{L}\d\s\-−–]+", " ");
         l = Regex.Replace(l, @"\s+", " ").Trim().ToLowerInvariant();
         if (l.Length is 0 or > 48 || NotShot.IsMatch(l)) return null;
+        if (Both.IsMatch(l)) return 2;
         foreach (var re in Shots)
             if (re.Match(l) is { Success: true } m)
                 return int.TryParse(m.Groups["n"].Value, out var n) && n > 0 ? n : 1;
         return null;
     }
 
-    static readonly Regex ShotAt = new(@"(?:^|\s)(?:на|над|біля)\s+(?<place>.+?)\s*[—–-]\s*мінус\W*$", O);
-    /// «Той що на Долинське – мінус» → «Долинське».
+    static readonly Regex Both = new(@"^(?:обидва|обидві|оба|обе|двоє|двое|два|дві|две)\s+мінус\w*$", O);
+    // Лише слово «мінус»: «Сумщина — 8х», «Харків - 2» — це скільки там цілей, а «ТЕЦ-6» — назва.
+    const string ShotTail = @"(?:\s*[—–-]\s*|\s+)мінус\w*(?:\s+(?<n>\d{1,2}))?";
+    static readonly Regex ShotAt = new(@"(?:^|\s)(?:на|над|біля|по)\s+(?<place>.+?)(?:" + ShotTail + @")\W*$", O);
+    static readonly Regex ShotBare = new(@"^(?<place>(?-i:\p{Lu})[\p{L}'’ʼ\-]{2,}(?:\s(?-i:\p{Lu})[\p{L}'’ʼ\-]+)?)(?:" + ShotTail + @")\W*$", O);
+    static Match PlaceShot(string line)
+    {
+        var l = Normalize(line).Trim();
+        return ShotAt.Match(l) is { Success: true } m ? m : ShotBare.Match(l);
+    }
+    /// «Той що на Долинське – мінус» → «Долинське», «Ізюм мінус 2» → «Ізюм».
     public static string? ShotPlace(string line) =>
-        ShotAt.Match(Normalize(line)) is { Success: true } m ? m.Groups["place"].Value.Trim() : null;
+        PlaceShot(line) is { Success: true } m ? m.Groups["place"].Value.Trim() : null;
+    /// Скільки збито в такому пості: «Ізюм мінус 2» → 2.
+    public static int ShotPlaceCount(string line) =>
+        int.TryParse(PlaceShot(line).Groups["n"].Value, out var n) && n > 0 ? n : 1;
+
+    // «2 новые Р. Шаболды», «Новая шаболда», «+2 Р. Шахед», «Ещё 1 шахед» — це інші цілі, а не та, що летіла.
+    static readonly Regex NewWord = new(@"^\W*\+\s*\d|(?<!\p{L})(?:ще|ещё|еще)\s+\d|(?<!\p{L})нов(?:ая|ые|ых|ый|а|і|ий|их)\s+(?:р\.|шаб|шах|бпла|реакт|дрон|ціл|цел|ударн)", O);
+    public static bool NewTarget(string? text) => text is { Length: > 0 } && NewWord.IsMatch(text);
+
+    // Сказано, що це НЕ реактивний: «ударних БпЛА», «шаболды» (реактивну пишуть «Р. Шаболда»), «звичайний».
+    static readonly Regex Plain = new(@"(?<!\p{L})(?:ударн\w*|звичайн\w*|обычн\w*)|(?<!р\.\s?|р\.\s\s|реактивн\w{1,3}\s)шаболд", O);
+    public static bool PlainDrone(string? text) => text is { Length: > 0 } && Plain.IsMatch(text);
 
     /// «По ракетам мінус», «По ракетам на сейчас минус» — ракети закінчились.
     public static bool MissilesDone(string line) =>
