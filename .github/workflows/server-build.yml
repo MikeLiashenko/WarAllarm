@@ -1,0 +1,52 @@
+# Сервер без ПК: GitHub збирає Reader під Linux і кладе готовий пакет у реліз «server-latest».
+# На сервері (напр. SSH у браузері з Google Cloud Console, навіть з телефону) потім одна команда:
+#   curl -fsSL https://github.com/MikeLiashenko/WarAllarm/releases/download/server-latest/server-update.sh | bash
+name: Server build
+
+on:
+  push:
+    branches: [main, 'claude/server-build']
+    paths:
+      - 'src/Reader/**'
+      - 'Dockerfile.prebuilt'
+      - 'docker-compose.yml'
+      - 'deploy/server-update.sh'
+      - '.github/workflows/server-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: server-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Publish Reader (linux-x64)
+        run: dotnet publish src/Reader/WarAlarm.Reader.csproj -c Release -r linux-x64 --self-contained false -o pkg/app
+
+      - name: Pack (same layout as deploy/deploy-server.sh)
+        run: |
+          cp Dockerfile.prebuilt docker-compose.yml pkg/
+          echo "WARALARM_DOCKERFILE=Dockerfile.prebuilt" > pkg/.env
+          echo "$GITHUB_SHA" > pkg/app/BUILD_COMMIT
+          tar czf waralarm-server.tgz -C pkg .
+
+      - name: Publish release server-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete server-latest --yes --cleanup-tag || true
+          gh release create server-latest waralarm-server.tgz deploy/server-update.sh \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Server build ($GITHUB_REF_NAME @ ${GITHUB_SHA::7})" \
+            --notes "Оновити сервер: curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/server-latest/server-update.sh | bash"
