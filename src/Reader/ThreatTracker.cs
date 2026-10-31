@@ -65,7 +65,8 @@ public sealed class Threat
     public double? FlightMin => From is { } f && To is { } to
         ? ThreatGeo.Km(f, to) / ThreatGeo.SpeedKmh(Kind, Ammo) * 60 : null;
     // ×N = число целей строго из текста поста («2 БпЛА»), не раздувая по числу упомянутых мест
-    public int Amount => Math.Max(1, Count);
+    public int Amount => Math.Max(1, Count - Trim);
+    public int Trim; // скільки з ×N — ті самі борти, що вже пораховані на сусідніх мітках (ReconcileCounts)
 
     // «БпЛА на Харків» — ціль ЛЕТИТЬ туди, а не вже над містом. Pos лишається містом (на ньому
     // тримаються тривога, дистанція й ETA — сирена не запізнюється), а Approach — звідки вона
@@ -376,7 +377,7 @@ public sealed class ThreatTracker
                 .FirstOrDefault();
             if (near is null) return null;
             near.DownAt = now; near.DownBy = channel;
-            if (near.Amount > count) { near.Count = near.Amount - count; return near; }
+            if (near.Amount > count) { near.Count = near.Amount - count; near.Trim = 0; return near; }
             near.Down = true; near.AltNote = lost ? "зникла з радарів" : "збито"; near.AltAt = now;
             near.Orbit = false;
             near.Stage = TrackStage.Passed;
@@ -505,7 +506,7 @@ public sealed class ThreatTracker
             if (age > TimeSpan.FromMinutes(12)) continue;
             // Реактивний не стає звичайним шахедом, а одна ціль — трьома.
             if (jet != IsJet(c.Ammo) && (jet || plain)) continue;
-            if (ev.Count > c.Amount) continue;
+            if (ev.Count > Math.Max(1, c.Count)) continue;
             double km = ThreatGeo.Km(cp, pos);
             if (km < 3) continue; // те саме місце — це не рух
             double fromMark = ThreatGeo.Km(c.DrawPos(now) ?? cp, pos);
@@ -579,14 +580,37 @@ public sealed class ThreatTracker
         }
     }
 
+    // Сума ×N по області не більша за те, що про неї кажуть зведення. Мітки лишаються всі, менше
+    // стає лише ×N: «17 шахедів на Полтавщині» — це ті самі борти, що вже стоять над її містами,
+    // а «8 на Лубни» в одного каналу й «5 на Пирятин, 5 на Оржицю» в іншого — та сама група.
+    void ReconcileCounts(IReadOnlyDictionary<string, int>? listCaps)
+    {
+        foreach (var t in _active.Values) t.Trim = 0;
+        var drones = _active.Values.Where(t => t.Kind is ThreatKind.Drone or ThreatKind.Target && !t.Launch && !t.Down && t.Pos is not null);
+        foreach (var g in drones.GroupBy(t => Geo.Canonical(OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon)) ?? t.Oblast ?? ""))
+        {
+            int exact = g.Where(t => !t.LastPlace.EndsWith("(обл.)")).Sum(t => t.Amount);
+            foreach (var o in g.Where(t => t.LastPlace.EndsWith("(обл.)") && t.Amount > 1))
+                o.Trim = Math.Min(o.Amount - 1, exact);
+            if (listCaps is null || !listCaps.TryGetValue(g.Key, out var cap)) continue;
+            for (int over = g.Sum(t => t.Amount) - cap; over > 0; over--)
+            {
+                var most = g.Where(t => t.Amount > 1).MaxBy(t => t.Amount);
+                if (most is null) break;
+                most.Trim++;
+            }
+        }
+    }
+
     // ── тик по таймеру: пересчитать ETA и решить, пора ли пикнуть/сменить стадию ──
-    public List<TrackUpdate> Tick(DateTime now)
+    public List<TrackUpdate> Tick(DateTime now, IReadOnlyDictionary<string, int>? listCaps = null)
     {
         var outp = new List<TrackUpdate>();
         lock (_gate)
         {
         foreach (var k in _alias.Where(a => !_active.ContainsKey(a.Value)).Select(a => a.Key).ToList())
             _alias.Remove(k);
+        ReconcileCounts(listCaps);
         foreach (var t in _active.Values.ToList())
         {
             // Уменьшаем ETA на прошедшее время (цель летит и между постами).

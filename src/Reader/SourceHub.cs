@@ -456,6 +456,8 @@ public sealed class SourceHub
     }
     readonly Dictionary<string, Cluster> _clusters = new();
     static readonly TimeSpan Window = TimeSpan.FromMinutes(6);
+    static readonly TimeSpan ListTtl = TimeSpan.FromMinutes(15);
+    readonly List<(string obl, int sum, DateTime at)> _lists = new();
     readonly object _gate = new();
     public int Pending { get { lock (_gate) return _clusters.Values.Count(c => !c.Confirmed); } }
 
@@ -503,6 +505,9 @@ public sealed class SourceHub
     static readonly Regex Chatter = new(
         @"донат|дякую за підтримк|загрози не станов|не становить загроз|рекоменд\w*\s+(?:тимчасово\s+)?уника|мапа тривог|карта (?:повітряних )?тривог|сообщение от читател|цитируем текст",
         RegexOptions.IgnoreCase);
+    static readonly Regex Rollup = new(
+        @"(?=.*\d)(?=.*(?:щин|област))(?:.*(?<!\p{L})(?:загалом|хмара|щонайменше)(?!\p{L}))",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline);
     // Тип із самого рядка, коли парсер дав лише «ціль»: «Ситуация по реактивным: 1 курсом на …».
     static readonly Regex DroneWord = new(@"реактив|шахед|шохєд|(?<!\p{L})звич|шаболд|бпла|дрон|мопед|балалайк|турб|косилк|ударн", RegexOptions.IgnoreCase);
     // «Далі/Далее Мерефа» — продовження руху. КАБ не «летить далі»: це дрон або ракета.
@@ -636,6 +641,9 @@ public sealed class SourceHub
             { st.News++; return new(HubVerdict.News, [], "памʼять/новина"); }
             if (Chatter.IsMatch(clean))
             { st.Noise++; return new(HubVerdict.Noise, [], "подяка/порада/зведення"); }
+            // «Загалом через Сумщину, Полтавщину щонайменше 30 БПЛА» — підсумок, а не 30 дронів в одній точці.
+            if (Rollup.IsMatch(clean) && clean.Length < 250)
+            { st.Noise++; return new(HubVerdict.Noise, [], "підсумок по областях"); }
             // Балістика — лише коротке живе попередження (довга «оцінка загроз на ніч» — ні).
             // Запам'ятовуємо час і район пуску: наступна «ракета на Харків» — це вона.
             bool ballisticText = IsBallisticText(clean);
@@ -715,6 +723,13 @@ public sealed class SourceHub
             var outp = new List<HubEvent>();
             var missed = new List<string>();
             int placed = 0;
+            var perOblast = new Dictionary<string, (int items, int sum)>();
+            void CountForList(string? obl, int count)
+            {
+                if (obl is null) return;
+                var (items, sum) = perOblast.GetValueOrDefault(obl);
+                perOblast[obl] = (items + 1, sum + Math.Max(1, count));
+            }
             foreach (var ev in events)
             {
                 (string name, double lat, double lon)? g;
@@ -743,10 +758,16 @@ public sealed class SourceHub
                         if (!hadName) continue; // «Збили», «Транзит», «Центр» — статус, а не місце
                     }
                 }
-                if (g is not { } gp) { st.Unplaced++; missed.Add(phrase ?? ev.Toward ?? "?"); continue; }
+                if (g is not { } gp)
+                {
+                    st.Unplaced++; missed.Add(phrase ?? ev.Toward ?? "?");
+                    if (ev.Kind is ThreatKind.Drone or ThreatKind.Target) CountForList(ev.Oblast, ev.Count);
+                    continue;
+                }
                 placed++;
                 var pos = (gp.lat, gp.lon);
                 var placeObl = Geo.Canonical(OblastGeo.Region(gp.lat, gp.lon)) ?? ev.Oblast;
+                if (ev.Kind is ThreatKind.Drone or ThreatKind.Target) CountForList(placeObl, ev.Count);
                 var kind = ev.Kind;
                 var extra = ev.Extra;
                 if (kind == ThreatKind.Target && DroneWord.IsMatch(ev.Raw)) kind = ThreatKind.Drone;
@@ -772,7 +793,8 @@ public sealed class SourceHub
                 var w = SourceCatalog.Weight(src, placeObl);
                 bool newSrc = !c.Votes.ContainsKey(src.User);
                 c.Votes[src.User] = Math.Max(c.Votes.GetValueOrDefault(src.User), w);
-                c.MaxCount = Math.Max(c.MaxCount, ev.Count);
+                // Новіше точне число заміняє старе («8 на Лубни» → «4 на Лубни»); без числа — не зменшує.
+                c.MaxCount = ev.Count > 1 ? ev.Count : Math.Max(c.MaxCount, ev.Count);
                 // Тип: конкретніший перемагає «ціль».
                 var prevKind = c.Ev?.Kind ?? ThreatKind.Target;
                 var bestKind = prevKind == ThreatKind.Target ? kind : prevKind;
@@ -798,6 +820,9 @@ public sealed class SourceHub
                     }
                 }
             }
+            // Від трьох рядків по області — це зведення каналу: скільки бортів там зараз за його даними.
+            foreach (var (obl, (items, sum)) in perOblast)
+                if (items >= 3) _lists.Add((obl, sum, at));
             // Балістику не вдалось прив'язати до місця — лишається попередженням (пуш «в укриття»).
             if (placed == 0 && ballisticText)
                 return new(HubVerdict.Ballistic, [], clean.Replace("\n", " "));
@@ -806,6 +831,16 @@ public sealed class SourceHub
             if (placed == 0) return new(HubVerdict.Unplaced, [], "місце не знайдено: " + string.Join(" | ", missed));
             return new(outp.Count > 0 ? HubVerdict.Confirmed : HubVerdict.Pending, outp,
                 outp.Count > 0 ? "" : "чекаю підтвердження");
+        }
+    }
+
+    /// Скільки бортів у кожній області за найповнішим свіжим зведенням каналів (стеля для суми ×N).
+    public Dictionary<string, int> ListCaps(DateTime now)
+    {
+        lock (_gate)
+        {
+            _lists.RemoveAll(l => now - l.at > ListTtl);
+            return _lists.GroupBy(l => l.obl).ToDictionary(g => g.Key, g => g.Max(l => l.sum));
         }
     }
 

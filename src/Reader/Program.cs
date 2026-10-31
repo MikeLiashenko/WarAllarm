@@ -2203,7 +2203,7 @@ _ = Task.Run(async () =>
         await Task.Delay(1000);
         try
         {
-            var ups = tracker.Tick(DateTime.Now);
+            var ups = tracker.Tick(DateTime.Now, hub.ListCaps(DateTime.Now));
             bool dirty = false;
             foreach (var u in ups)
             {

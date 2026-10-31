@@ -64,7 +64,7 @@ public static class Journal
         foreach (var (key, at, text) in posts.OrderBy(p => p.at))
         {
             var ch = key[..key.LastIndexOf('#')];
-            tr.Tick(at);
+            tr.Tick(at, hub.ListCaps(at));
             if (at.TimeOfDay > to) break;
             // Два київські канали йдуть не в хаб, а через місцевий монітор.
             if (ch is "nebo_raketa" or "chyste_neboo")
@@ -91,7 +91,8 @@ public static class Journal
                 if (filter is null || line.Contains(filter, StringComparison.OrdinalIgnoreCase)) Console.WriteLine(line);
             }
         }
-        Console.WriteLine($"── цілі наприкінці ({to}):");
+        var flying = tr.Active.Where(t => t.Pos is not null && !t.Launch && !t.Down).ToList();
+        Console.WriteLine($"── цілі наприкінці ({to}): міток {flying.Count}, бортів {flying.Sum(t => t.Amount)}");
         foreach (var t in tr.Active.Where(t => t.Pos is not null && (filter is null || Describe(t, day + to).Contains(filter, StringComparison.OrdinalIgnoreCase))))
             Console.WriteLine("   " + Describe(t, day + to));
     }
