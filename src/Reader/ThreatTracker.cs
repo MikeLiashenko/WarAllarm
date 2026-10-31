@@ -66,6 +66,25 @@ public sealed class Threat
         ? ThreatGeo.Km(f, to) / ThreatGeo.SpeedKmh(Kind, Ammo) * 60 : null;
     // ×N = число целей строго из текста поста («2 БпЛА»), не раздувая по числу упомянутых мест
     public int Amount => Math.Max(1, Count);
+
+    // «БпЛА на Харків» — ціль ЛЕТИТЬ туди, а не вже над містом. Pos лишається містом (на ньому
+    // тримаються тривога, дистанція й ETA — сирена не запізнюється), а Approach — звідки вона
+    // летить: мітка малюється там і рухається до міста з реальною швидкістю.
+    public (double lat, double lon)? Approach;
+
+    /// Де малювати ціль зараз: на шляху Approach → місто, інакше просто Pos.
+    public (double lat, double lon)? DrawPos(DateTime now)
+    {
+        if (Approach is not { } a || Pos is not { } p) return Pos;
+        double dist = ThreatGeo.Km(a, p);
+        if (dist < 0.1) return p;
+        double mins = Math.Clamp((now - LastUpdate).TotalMinutes, 0, 20);
+        double f = Math.Min(1, ThreatGeo.SpeedKmh(Kind, Ammo) * 0.85 / 60 * mins / dist);
+        return (a.lat + (p.lat - a.lat) * f, a.lon + (p.lon - a.lon) * f);
+    }
+
+    /// Підпис для людей: «на Харків», якщо ще летить туди.
+    public string PlaceLabel => Approach is null ? LastPlace : "на " + LastPlace;
 }
 
 public readonly record struct TrackUpdate(Threat Threat, bool StageChanged, TrackSound Sound, string Note);
@@ -225,6 +244,7 @@ public sealed class ThreatTracker
             if (isNew && !approx && ev.Kind is ThreatKind.Drone or ThreatKind.Target)
                 LaunchGroups.Absorb(pos, Math.Max(1, ev.Count), now);
             var prevPos = t!.Pos;
+            var drawnBefore = isNew ? null : t.DrawPos(now); // до оновлення LastUpdate: де мітка саме зараз
             t!.Ammo ??= ev.Extra;
             t.Oblast = ev.Oblast ?? t.Oblast;
             t.Recon = ((ev.Extra ?? "") + " " + ev.Raw).ToLowerInvariant().Contains("розвід");
@@ -237,7 +257,16 @@ public sealed class ThreatTracker
             t.Dir = ThreatGeo.Compass(ThreatGeo.Bearing(_home, pos));
             t.EtaMin = ThreatGeo.EtaMin(pos, _home, t.Kind, t.Ammo);
             if (t.Trail.Count == 0 || t.Trail[^1].place != gp.name) t.Trail.Add((gp.name, t.DistKm, now));
-            AddTrack(t, pos);
+            // «на Харків» — ще летить: продовжуємо з того місця, де мітка зараз (повторний пост не
+            // відкидає її назад); нова ціль — за ~10 хв польоту від міста з боку пуску / фронту.
+            t.Approach = null;
+            if (!approx && ev.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target
+                && ThreatParser.HeadingTo(ev.Raw, ev.City ?? gp.name))
+            {
+                var start = drawnBefore ?? ApproachStart(ev, t, pos);
+                if (ThreatGeo.Km(start, pos) >= 3) t.Approach = start;
+            }
+            AddTrack(t, t.Approach ?? pos);
             if (prevPos is { } pp && ThreatGeo.Km(pp, pos) > 2)
             {
                 t.Heading = ThreatGeo.Bearing(pp, pos); // реальний рух між двома точками
@@ -246,6 +275,11 @@ public sealed class ThreatTracker
             else if (!t.HeadingKnown)
                 t.Heading = ThreatGeo.Bearing(pos, ThreatGeo.UACenter); // лише для стрілки, не для руху
             ApplyCourse(t, ev, pos, isNew, now);
+            if (t.Approach is { } ap)
+            {
+                t.Heading = ThreatGeo.Bearing(ap, pos);
+                t.HeadingKnown = true;
+            }
             // Курс, названий у пості («курсом на Полтаву»), — справжній напрямок.
             if (ev.Toward is { } tw && (ThreatGeo.Resolve(tw) ?? PlaceFinder.Find(tw, Array.Empty<string>())) is { } dest
                 && ThreatGeo.Km(pos, (dest.lat, dest.lon)) > 5)
@@ -258,6 +292,17 @@ public sealed class ThreatTracker
             var prev = t.Stage; t.Stage = Classify(t);
             return new TrackUpdate(t, t.Stage != prev || isNew, TrackSound.None, Note(t));
         }
+    }
+
+    // Звідки летить нова ціль «на X»: з названого місця пуску, інакше з боку найближчого фронту /
+    // кордону; ~10 хв польоту від міста (шахед ~30 км, реактивний і ракета — до 60).
+    static (double lat, double lon) ApproachStart(ThreatEvent ev, Threat t, (double lat, double lon) dest)
+    {
+        var from = LaunchSites.Resolve(ev.From) is { } f ? (f.lat, f.lon) : LaunchSites.NearestFront(dest);
+        double dist = ThreatGeo.Km(from, dest);
+        if (dist < 1) return dest;
+        double k = Math.Min(1, Math.Clamp(ThreatGeo.SpeedKmh(t.Kind, t.Ammo) / 60 * 10, 20, 60) / dist);
+        return (dest.lat + (from.lat - dest.lat) * k, dest.lon + (from.lon - dest.lon) * k);
     }
 
     // Траєкторія: «з X на Y» дає курс; балістика й КАБ летять від точки пуску/скиду до

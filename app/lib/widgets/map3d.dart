@@ -927,7 +927,7 @@ class _Map3DPainter extends CustomPainter {
             ..strokeWidth = 1
             ..color = color.withValues(alpha: 0.35));
     }
-    if (t.route.length >= 2 && (t.forecast || t.id == selectedId)) {
+    if (t.route.length >= 2 && (t.forecast || t.toPlace || t.id == selectedId)) {
       final ahead = routeAhead(t.route, m.lat, m.lon);
       for (var i = 1; i < ahead.length; i++) {
         _dashed(canvas, cam.proj(ahead[i - 1][0], ahead[i - 1][1], z).o, cam.proj(ahead[i][0], ahead[i][1], z).o,

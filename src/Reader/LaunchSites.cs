@@ -84,6 +84,13 @@ public static class LaunchSites
         return best;
     }
 
+    /// Найближчий орієнтир фронту / кордону — звідки ціль найімовірніше заходить.
+    public static (double lat, double lon) NearestFront((double lat, double lon) target)
+    {
+        var f = KabFront.MinBy(x => ThreatGeo.Km((x.lat, x.lon), target));
+        return (f.lat, f.lon);
+    }
+
     /// Точка скиду КАБ: ~55 км від цілі в бік найближчої лінії фронту / кордону.
     public static (double lat, double lon) KabRelease((double lat, double lon) target)
     {

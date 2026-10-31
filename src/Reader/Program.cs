@@ -417,13 +417,14 @@ if (args.Length >= 1 && args[0].Equals("course", StringComparison.OrdinalIgnoreC
     var tt = new ThreatTracker((HomeLat, HomeLon));
     foreach (var post in new[] {
         "БпЛА на півночі Сумщини, курсом на Полтаву", "Реактивний БпЛА з Сумщини курсом на Полтаву",
-        "БпЛА на південному сході Харківщини курсом на Лозову", "Шахед на Полтаву", "Шахед курсом на Миргород" })
+        "БпЛА на південному сході Харківщини курсом на Лозову", "Шахед на Полтаву", "Шахед курсом на Миргород",
+        "БпЛА на Харків", "Реактивний над Харковом", "Шахед в районі Ірпеня", "Шахед на Умань з Криму", "Реактивний БпЛА в напрямку Львова" })
         foreach (var ev in ThreatParser.Parse(post))
         {
             var t = tt.IngestUa(ev, DateTime.Now)?.Threat;
             if (t is null) { Console.WriteLine($"{post,-56} → (не на карту)"); continue; }
             var rt = TypicalRoutes.ForTarget(t);
-            Console.WriteLine($"{post,-56} → {t.LastPlace} ({t.Pos!.Value.lat:0.00},{t.Pos!.Value.lon:0.00})"
+            Console.WriteLine($"{post,-56} → {t.PlaceLabel}{(t.Approach is { } ap0 ? $" · мітка за {ThreatGeo.Km(ap0, t.Pos!.Value):0} км від міста" : " · уже там")} ({t.Pos!.Value.lat:0.00},{t.Pos!.Value.lon:0.00})"
                 + $" · курс {t.Heading:0}°{(t.HeadingKnown ? " реальний" : " здогадка")}{(t.CourseTo is { } c ? $" на {c.name}" : "")}"
                 + $" · маршрут: {(rt is null ? "—" : string.Join(" → ", rt.Skip(1).Select(NearestCity)))}");
         }
@@ -1623,7 +1624,7 @@ string StatusAt(double lat, double lon)
         sb.AppendLine("\n<b>Найближчі цілі</b>");
         foreach (var (t, km) in near.Where(x => x.km <= 250))
             sb.AppendLine($"{ThreatParser.Icon(t.Kind)} {H(ThreatTracker.Label(t))}{(t.Amount > 1 ? $" ×{t.Amount}" : "")} — <b>{km:0} км</b> · {ThreatTracker.StageLabel(t.Stage)}"
-                + (t.LastPlace.Length > 0 ? $"\n      📍 {H(t.LastPlace)}" : ""));
+                + (t.LastPlace.Length > 0 ? $"\n      📍 {H(t.PlaceLabel)}" : ""));
     }
     if (AviationFeed.At(lat, lon) is { } av)
         sb.AppendLine($"\n✈ <b>{(av.Planes ? "Тактична авіація" : "Авіація")}{(av.Kab ? " · загроза КАБ" : "")}</b> над твоєю областю"
@@ -1656,7 +1657,7 @@ string? AlarmEtaText(double lat, double lon)
     foreach (var t in tracker.Active)
         if (t.Pos is { } tp && t.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target
             && !t.Launch && !t.Down && (!t.Approx || t.CourseTo is not null) && TypicalRoutes.ForTarget(t) is { } r)
-            cands.Add((r, ThreatGeo.SpeedKmh(t.Kind, t.Ammo) * 0.85, $"{ThreatTracker.Label(t)} · зараз: {t.LastPlace}", false));
+            cands.Add((r, ThreatGeo.SpeedKmh(t.Kind, t.Ammo) * 0.85, $"{ThreatTracker.Label(t)} · зараз: {t.PlaceLabel}", false));
 
     (double min, string via, bool forecast)? best = null;
     foreach (var (route, kmh, via, forecast) in cands)
@@ -1773,7 +1774,7 @@ string TargetLine(Threat t, double km)
     var eta = km / ThreatGeo.SpeedKmh(t.Kind, t.Ammo) * 60;
     return $"{ThreatParser.Icon(t.Kind)} <b>{H(ThreatTracker.Label(t))}{(t.Amount > 1 ? $" ×{t.Amount}" : "")}</b> — {km:0} км"
          + (t.Launch ? "" : $" · підліт ~{(eta < 1 ? "&lt;1" : eta.ToString("0"))} хв")
-         + $"\n      📍 {H(t.LastPlace.Length > 0 ? t.LastPlace : "місце уточнюється")} · {ThreatTracker.StageLabel(t.Stage)}";
+         + $"\n      📍 {H(t.LastPlace.Length > 0 ? t.PlaceLabel : "місце уточнюється")} · {ThreatTracker.StageLabel(t.Stage)}";
 }
 
 // Поточна картка цілі за id + її стадія (null — ціль знята / зникла з радарів).
@@ -1790,7 +1791,7 @@ string TargetText(Threat t, double lat, double lon, bool html = false)
     var lines = new List<string>
     {
         $"🎯 {ThreatTracker.Label(t)}{(t.Amount > 1 ? $" ×{t.Amount}" : "")}",
-        $"📍 {t.LastPlace} · {ThreatTracker.StageLabel(t.Stage)}",
+        $"📍 {t.PlaceLabel} · {ThreatTracker.StageLabel(t.Stage)}",
         $"📏 {km:0} км від тебе · підліт ~{(eta < 1 ? "<1" : eta.ToString("0"))} хв (за {spd:0} км/год)",
     };
     if (t.Heading is { } h && !t.Launch)

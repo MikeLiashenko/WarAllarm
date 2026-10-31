@@ -236,6 +236,24 @@ public static class ThreatParser
 
     /// Звідки летить: «з Курська», «із Чернігівщини», «від Куликівки», «з акваторії Чорного моря».
     /// Напрямки з малої («з півночі») — не місце, тому пропускаємо.
+    // Слово одразу перед назвою, що означає «летить туди», а не «вже там» («над», «біля», «в районі»).
+    static readonly Regex HeadingBefore = new(@"(?:(?<!\p{L})(?:на|курс|курсом|напрямку|напрямок|направлении|бік|сторону|до|далі|далее|дальше|потім|потом)|→)\W*$", RegexOptions.IgnoreCase);
+    static readonly Regex HeadingAny = new(@"(?:(?<!\p{L})(?:на|курс\w*|напрямку|напрямок|бік|сторону|далі|далее|дальше)(?!\p{L})|→)", RegexOptions.IgnoreCase);
+    static readonly Regex AtPlace = new(@"(?<!\p{L})(?:над|біля|возле|около|поблизу|районі|районе)(?!\p{L})", RegexOptions.IgnoreCase);
+
+    /// «БпЛА на Харків», «курсом на Полтаву», «Далі Мерефа» — ціль ще летить до місця.
+    /// «над Харковом», «в районі Ірпеня», голе «Оболонь» — уже там.
+    public static bool HeadingTo(string raw, string? city)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || string.IsNullOrWhiteSpace(city)) return false;
+        var stem = city.Trim();
+        stem = stem[..Math.Min(3, stem.Length)];
+        var m = Regex.Match(raw, @"(?<!\p{L})" + Regex.Escape(stem), RegexOptions.IgnoreCase);
+        if (m.Success) return HeadingBefore.IsMatch(raw[..m.Index]);
+        // Назву написано інакше («Песочин» → Пісочин, «на город» → Харків): дивимось на весь рядок.
+        return HeadingAny.IsMatch(raw) && !AtPlace.IsMatch(raw);
+    }
+
     public static string? FromOf(string line)
     {
         var m = Regex.Match(line, @"(?:^|[\s(])(?:з|із|зі|від)\s+((?-i:[А-ЯІЇЄҐ])[\w'ʼ’-]+(?:\s+(?-i:[А-ЯІЇЄҐ])[\w'ʼ’-]+)?)", RegexOptions.IgnoreCase);

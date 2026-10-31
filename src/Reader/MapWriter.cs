@@ -131,7 +131,8 @@ public static class MapWriter
             sb.Append(",\"n\":").Append(amount);
             sb.Append(",\"heading\":").Append(t.Heading is { } h ? N(h) : "null");
             // Курс із реального руху (2 точки / «з X на Y») — лише тоді застосунок рухає маркер.
-            if (t.HeadingKnown) sb.Append(",\"hdgReal\":true");
+            if (t.HeadingKnown && t.Approach is null) sb.Append(",\"hdgReal\":true");
+            if (t.Approach is not null) sb.Append(",\"toPlace\":true"); // летить до міста: lat/lon — місто (для тривоги), мітка — на маршруті
             // Висота / падіння з тексту каналу.
             if (t.AltM is { } am) sb.Append(",\"alt\":").Append(N(am));
             if (t.AltNote is { Length: > 0 } an) sb.Append(",\"altNote\":\"").Append(Esc(an)).Append('"');
@@ -143,7 +144,7 @@ public static class MapWriter
                 && TypicalRoutes.ForTarget(t) is { } rt)
                 sb.Append(",\"route\":[").Append(string.Join(",", rt.Select(p => $"[{N(p.lat)},{N(p.lon)}]"))).Append(']');
             sb.Append(",\"seen\":").Append(((DateTimeOffset)t.LastUpdate).ToUnixTimeMilliseconds()); // час останнього спостереження позиції (для руху/екстраполяції)
-            sb.Append(",\"place\":\"").Append(Esc(t.LastPlace)).Append('"');
+            sb.Append(",\"place\":\"").Append(Esc(t.PlaceLabel)).Append('"');
             // approx = ціль лише на рівні області (без точної точки/курсу). Для таких НЕ малюємо
             // вигаданий напрямок і прогноз «→ місто?» — це виглядало як фейк під час масового нальоту.
             sb.Append(",\"approx\":").Append(t.LastPlace.EndsWith("(обл.)") ? "true" : "false");

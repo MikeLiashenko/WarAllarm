@@ -442,7 +442,7 @@ function draw(){
 
   // Гарячі зони під скупченнями.
   for(const t of threats){
-    const q = P(t.lon, t.lat), r = 22 + 5*Math.min(t.n||1, 8);
+    const mh = motionOf(t, now, null), q = P(mh.lon, mh.lat), r = 22 + 5*Math.min(t.n||1, 8);
     const g = ctx.createRadialGradient(q[0], q[1], 0, q[0], q[1], r);
     g.addColorStop(0, 'rgba(255,59,48,.16)'); g.addColorStop(1, 'rgba(255,59,48,0)');
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q[0], q[1], r, 0, 7); ctx.fill();
@@ -483,10 +483,12 @@ function draw(){
       const r = mo.uncert*kmPx;
       if(r > badgeR+4){ ctx.fillStyle = hexA(color,.05); ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill(); dashed(() => ctx.arc(x,y,r,0,7), hexA(color,.35), 1); }
     }
-    if(t.forecast && (t.route||[]).length >= 2){
+    if((t.forecast || t.toPlace) && (t.route||[]).length >= 2){
       const from0 = kmBetween(t.route[0][0], t.route[0][1], mo.lat, mo.lon);
       const ahead = [[mo.lat, mo.lon], ...t.route.slice(1).filter(p => kmBetween(t.route[0][0], t.route[0][1], p[0], p[1]) > from0+1)];
-      dashed(() => ahead.forEach((p,i) => { const q = P(p[1], p[0]); i ? ctx.lineTo(q[0],q[1]) : ctx.moveTo(q[0],q[1]); }), hexA(color,.35), 1.2);
+      dashed(() => ahead.forEach((p,i) => { const q = P(p[1], p[0]); i ? ctx.lineTo(q[0],q[1]) : ctx.moveTo(q[0],q[1]); }), hexA(color, t.toPlace ? .6 : .35), 1.2);
+      // «на Харків»: приціл на місті, куди летить.
+      if(t.toPlace){ const e = t.route[t.route.length-1], q = P(e[1], e[0]); ctx.strokeStyle = hexA(color,.8); ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(q[0], q[1], 5, 0, 7); ctx.stroke(); }
     }
     if(Array.isArray(t.trail) && t.trail.length > 1){
       ctx.strokeStyle = hexA(color,.4); ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.beginPath();

@@ -98,7 +98,7 @@ public static class MapImage
         // Гарячі зони під скупченнями цілей (червоне світіння, як у застосунку).
         using (var hot = new SKPaint { Color = new SKColor(0xFF, 0x3B, 0x30, 0x24), IsAntialias = true, MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 20) })
             foreach (var t in threats)
-                if (t.Pos is { } hpos && !t.Launch)
+                if (t.DrawPos(DateTime.Now) is { } hpos && !t.Launch)
                     canvas.DrawCircle(P(hpos.lon, hpos.lat), 22 + 5f * Math.Min(t.Amount, 8), hot);
 
         foreach (var (_, path, wlv) in obPaths)
@@ -168,6 +168,8 @@ public static class MapImage
         var zones = AviationFeed.MapZones();
         var groups = LaunchGroups.Active;
         float Km2Px(double km) => (float)(km * pxPerKm);
+        // Де мітка зараз: «на Харків» — ще на шляху до міста, а не над ним.
+        SKPoint DP(Threat t) { var q = t.DrawPos(now)!.Value; return P(q.lon, q.lat); }
 
         // Де зараз мітка польоту і скільки лишилось (хв) — та сама формула, що в застосунку.
         (SKPoint at, float heading, double left, bool landed) FlightNow(Threat t)
@@ -181,7 +183,7 @@ public static class MapImage
         }
 
         var targetPts = new List<SKPoint>();
-        targetPts.AddRange(drawn.Select(d => P(d.t.Pos!.Value.lon, d.t.Pos!.Value.lat)));
+        targetPts.AddRange(drawn.Select(d => DP(d.t)));
         targetPts.AddRange(flights.Select(t => FlightNow(t).at));
         targetPts.AddRange(launchOnly.Select(t => P(t.From!.Value.lon, t.From!.Value.lat)));
         targetPts.AddRange(zones.Select(z => P(z.lon, z.lat)));
@@ -268,6 +270,15 @@ public static class MapImage
         // Курс (лише справжній — ціль бачили в русі): пунктир на ~10 хв польоту, ≤55 км.
         foreach (var (t, _) in drawn)
         {
+            // Летить до названого міста: пунктир до нього і приціл, далі — нічого не вигадуємо.
+            if (t.Approach is not null)
+            {
+                var c0 = CatColor(CatOf(t));
+                var dst = P(t.Pos!.Value.lon, t.Pos!.Value.lat);
+                using (var dash = Dashed(c0.WithAlpha(0x99), 1.5f)) canvas.DrawLine(DP(t), dst, dash);
+                using (var aim = new SKPaint { Color = c0.WithAlpha(0xCC), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.6f }) canvas.DrawCircle(dst, 6, aim);
+                continue;
+            }
             if (!t.HeadingKnown || t.Heading is not { } hd || t.Down) continue;
             double lead = Math.Min(55, ThreatGeo.SpeedKmh(t.Kind, t.Ammo) / 60 * 10);
             var from = t.Pos!.Value;
@@ -318,7 +329,7 @@ public static class MapImage
         foreach (var (t, _) in drawn)
         {
             var cat = CatOf(t);
-            var pt = P(t.Pos!.Value.lon, t.Pos!.Value.lat);
+            var pt = DP(t);
             bool faded = t.Down || now - t.LastUpdate > TimeSpan.FromMinutes(6);
             bool near = t.Stage is TrackStage.Imminent or TrackStage.Overhead or TrackStage.Impact;
             if (faded) canvas.SaveLayer(fadeLayer);
@@ -329,7 +340,7 @@ public static class MapImage
         }
 
         // ×N: ціль або група пуску з кількома бортами.
-        var pillsToDraw = drawn.Where(d => d.n > 1).Select(d => (pt: P(d.t.Pos!.Value.lon, d.t.Pos!.Value.lat), n: d.n, c: CatColor(CatOf(d.t))))
+        var pillsToDraw = drawn.Where(d => d.n > 1).Select(d => (pt: DP(d.t), n: d.n, c: CatColor(CatOf(d.t))))
             .Concat(groups.Where(g => g.Left > 1).Select(g => (pt: P(g.PosAt(now).lon, g.PosAt(now).lat), n: g.Left, c: CatColor(g.Reactive ? "shahed_jet" : "shahed"))))
             .ToList();
 

@@ -63,6 +63,9 @@ class MapTarget {
   /// ціль): блідо на карті, не вмикає тривогу й не рахується в лічильниках.
   final bool forecast;
 
+  /// «на Харків»: [lat]/[lon] — місто, куди летить (на ньому тривога); мітка рухається [route].
+  final bool toPlace;
+
   /// Зона (тактична авіація / загроза КАБ над областю): радіус, км. 0 — звичайна ціль.
   /// Літак кружляє навколо точки; на карті — коло зони.
   final double areaKm;
@@ -105,6 +108,7 @@ class MapTarget {
     this.down = false,
     this.route = const [],
     this.forecast = false,
+    this.toPlace = false,
     this.areaKm = 0,
   });
 
@@ -116,7 +120,7 @@ class MapTarget {
         sources: sources, srcs: srcs, kmh: kmh,
         from: from, to: to, fromName: fromName, fromGuess: fromGuess,
         t0: t0, launch: launch,
-        headingKnown: headingKnown, altM: altM, altNote: altNote, down: down, route: route, forecast: forecast, areaKm: areaKm,
+        headingKnown: headingKnown, altM: altM, altNote: altNote, down: down, toPlace: toPlace, route: route, forecast: forecast, areaKm: areaKm,
       );
 
   static List<List<double>> _route(dynamic v) => v is List
@@ -159,6 +163,7 @@ class MapTarget {
       altM: d(m['alt']),
       altNote: (m['altNote'] ?? '').toString(),
       down: m['down'] == true,
+      toPlace: m['toPlace'] == true,
       route: _route(m['route']),
       trail: (m['trail'] as List<dynamic>? ?? [])
           .map((e) => [

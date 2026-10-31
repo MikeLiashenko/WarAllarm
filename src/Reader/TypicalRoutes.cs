@@ -127,6 +127,8 @@ public static class TypicalRoutes
     public static List<(double lat, double lon)>? ForTarget(Threat t)
     {
         if (t.Pos is not { } p) return null;
+        // «на Харків»: летить до міста й там зупиняється, поки канал не напише, куди далі.
+        if (t.Approach is { } a) return new List<(double lat, double lon)> { a, p };
         if (t.CourseTo is { } c)
         {
             var route = new List<(double lat, double lon)> { p, (c.lat, c.lon) };

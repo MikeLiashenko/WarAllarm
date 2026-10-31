@@ -536,7 +536,9 @@ class _MapPainter extends CustomPainter {
     // --- Hot-zone glow under target clusters ---
     if (!dimTargets) {
       for (final t in targets) {
-        final p = _toScreen(fit.project(t.lon, t.lat));
+        // Де мітка зараз: «на Харків» ще не над Харковом.
+        final hm = motionOf(t, nowMs, frozen: dimTargets);
+        final p = _toScreen(fit.project(hm.lon, hm.lat));
         canvas.drawCircle(
             p,
             22 + 5.0 * t.amount,
@@ -841,7 +843,7 @@ class _MapPainter extends CustomPainter {
       }
 
       // Where it is expected to go: launch groups always, the picked target too.
-      if (t.route.length >= 2 && (t.forecast || t.id == selectedId) && !dimTargets) {
+      if (t.route.length >= 2 && (t.forecast || t.toPlace || t.id == selectedId) && !dimTargets) {
         final ahead = routeAhead(t.route, lat, lon);
         for (var i = 1; i < ahead.length; i++) {
           _dashedLine(
