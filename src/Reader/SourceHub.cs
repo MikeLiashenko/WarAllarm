@@ -1017,8 +1017,8 @@ public sealed class SourceHub
         IReadOnlyCollection<string> region = hint is { } h ? new[] { h } : oblast is { } o ? new[] { o } : src.Oblasts;
         double maxKm = bare ? 160 : 260;
         // Область названо в самому пості («Житомирщина: →Вишневе/Пулини»): місце шукаємо в ній. Спершу всі
-        // варіанти там; далі — назва без тезок (сусідня область); інакше — приблизно в цій області,
-        // але не однойменне село в іншій.
+        // варіанти там; далі — обласний центр чи назва без тезок (сусідня область), але не однойменне
+        // село в іншій області.
         var named = hint ?? (oblast is { } o2 && !src.Oblasts.Contains(o2, StringComparer.OrdinalIgnoreCase) ? o2 : null);
         if (named is not null)
         {
@@ -1038,7 +1038,8 @@ public sealed class SourceHub
             // Село прямо за межею (контури спрощені), але не тезка за 50 км.
             foreach (var v in vars)
                 if (!v.EndsWith('.') && PlaceFinder.FindIn(v, named, 30) is { } nearObl) return nearObl;
-            return OblastGeo.PartPoint(named, null) is { } np ? (OblastGeo.Region(np.lat, np.lon) + " (обл.)", np.lat, np.lon) : null;
+            // Села нема в довіднику — не вигадуємо: центр Київщини — це майже Київ, хибна тривога.
+            return null;
         }
         bool kharkiv = region.Contains("Харківська", StringComparer.OrdinalIgnoreCase);
         if (kharkiv && KharkivMonitor.PlaceName(phrase, multiWord: true) is { } km && PlaceFinder.Find(km, region, maxKm) is { } kmg) return kmg;
