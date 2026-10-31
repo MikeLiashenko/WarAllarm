@@ -197,6 +197,9 @@ public static class ThreatParser
         // Кол-во в начале строки: «3 БпЛА» и множитель «2х/2x/2×» (формат @rozvidkaneba).
         var mc = Regex.Match(line, @"^\s*(?:(?:і\s+)?ще\s+|\+\s*)?(\d+)\s*[хx×]?\s*(?=\S)", RegexOptions.IgnoreCase); // «Ще 2 балістики», «+3»
         if (mc.Success) int.TryParse(mc.Groups[1].Value, out count);
+        // «З'явилися 2 бандеролі на Самар», «Павлоград, 4 бандеролі …» — число перед засобом усередині рядка.
+        else if (Regex.Match(line, @"(?<![\p{L}\d\-])(\d{1,2})\s*[хx×]?\s+" + Slang.Weapon, RegexOptions.IgnoreCase) is { Success: true } mw)
+            int.TryParse(mw.Groups[1].Value, out count);
 
         // Конкретний засіб зі словника («Х-101», «Іскандер-М», «реактивний», «ціль»…) —
         // і тип, і назва на карті, і швидкість для ETA. Інакше — загальне визначення.

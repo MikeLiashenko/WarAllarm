@@ -38,7 +38,16 @@ public static class Slang
         W(B + @"минус" + E, "мінус"),
         W(B + @"(?:сбили|сбит\w*)" + E, "збито"),
         W(B + @"(?:упал|упала|упало)" + E, "впав"),
+        // Числа словами перед засобом: «дві бандеролі» → «2 бандеролі», «пара шахів» → «2 шахів».
+        W(B + @"(?:одна|один)(?=\s+" + Weapon + ")", "1"),
+        W(B + @"(?:дві|две|два|двоє|двое|пара)(?=\s+" + Weapon + ")", "2"),
+        W(B + @"(?:три|троє|трое)(?=\s+" + Weapon + ")", "3"),
+        W(B + @"(?:чотири|четыре)(?=\s+" + Weapon + ")", "4"),
+        W(B + @"(?:п'ять|п’ять|пʼять|пять)(?=\s+" + Weapon + ")", "5"),
     };
+
+    // Початок слова-засобу: щоб «три» у числах не чіпати назви й інші слова.
+    public const string Weapon = @"(?:бандерол|ракет|крилат|шах|шаб|бпла|реактив|дрон|каб|ударн|звич)";
 
     static readonly Dictionary<char, char> Twins = new()
     {
@@ -55,16 +64,40 @@ public static class Slang
     // «Дніпро все ще червоний кружляє», «Харків кружляє» — місце перед дієсловом.
     static readonly Regex PlaceCircling = new(@"^\W*(?-i:(?<place>\p{Lu}[\p{L}'’ʼ\-]+))(?:\s+(?:все|ще|досі|також|червоний|жовтий))*\s+кружляє\W*$", O);
 
+    static readonly Regex ListHead = new(@"^\W*по\s+(?<jet>р\.\s*)?шабо?л?\w*\W*$", O);
+    static readonly Regex ListItem = new(@"^\W*(?<n>\d{1,2})\s*[хx×]?\s+(?:на\s+)?(?<place>\p{Lu}.*)$", O);
+
+    // «Руднівка > Суми бандероль», «Ворожба > Бобрик > Гришки рух шах» — @rdsprostir: шлях і засіб у кінці.
+    static readonly Regex Chain = new(@"^\W*[^>\n]+>\s*(?:[^>\n]+>\s*)*(?-i:(?<to>\p{Lu}[\p{L}'’ʼ\-]*(?:\s+\p{Lu}[\p{L}'’ʼ\-]*)?))(?:\s+район)?\s+(?:рух\s+)?(?<what>[\p{L}\d\s]*?" + Weapon + @"[\p{L}\s]*?)\W*$", O);
+    // «БПЛА→Київ», «КАБ→Запоріжжя/р-н», «Новий БПЛА далі→Харків» — стрілка після засобу.
+    static readonly Regex WeaponArrow = new(@"^(?<what>[^→\n]*" + Weapon + @"[^→\n]*?)\s*→\s*(?-i:(?<to>\p{Lu}.*))$", O);
+
     /// Текст поста словами, які знають парсери. Повторний виклик нічого не змінює.
     public static string Normalize(string text)
     {
         var lines = text.Replace("\r", "").Split('\n');
+        string? listOf = null;
         for (int i = 0; i < lines.Length; i++)
         {
             // Латинські двійники в кириличному слові: «Kиїв», «Xарків».
             var l = LatinTwin.Replace(lines[i], m => Twins[m.Value[0]].ToString());
             foreach (var (re, to) in Words) l = re.Replace(l, to);
-            if (Arrow.Match(l) is { Success: true } a) l = ArrowLine(a.Groups["body"].Value, a.Groups["note"].Value);
+            // «По Р. Шаболдам ⏎ 1 Змиев ⏎ 2 на Первомайский» — тип у заголовку, далі лише місця.
+            if (ListHead.Match(l) is { Success: true } lh)
+            {
+                listOf = lh.Groups["jet"].Success ? "реактивний" : "шахед";
+                lines[i] = "";
+                continue;
+            }
+            if (listOf is not null)
+            {
+                if (ListItem.Match(l) is { Success: true } li) l = $"{li.Groups["n"].Value} {listOf} на {li.Groups["place"].Value.Trim()}";
+                else listOf = null;
+            }
+            if (Chain.Match(l) is { Success: true } ch)
+                l = $"{Regex.Replace(ch.Groups["what"].Value.Trim(), B + @"шах\w*" + E, "шахед", O)} на {ch.Groups["to"].Value}";
+            else if (WeaponArrow.Match(l) is { Success: true } wa) l = $"{wa.Groups["what"].Value.Trim()} на {wa.Groups["to"].Value.Trim()}";
+            else if (Arrow.Match(l) is { Success: true } a) l = ArrowLine(a.Groups["body"].Value, a.Groups["note"].Value);
             else if (Careful.Match(l) is { Success: true } c) l = $"{c.Groups["what"].Value.Trim(' ', '.', '!')} біля {c.Groups["place"].Value}";
             else if (PlaceCircling.Match(l) is { Success: true } p) l = $"кружляє над {p.Groups["place"].Value}";
             lines[i] = l;
