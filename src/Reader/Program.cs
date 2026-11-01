@@ -2957,7 +2957,7 @@ string? Config(string what) => what switch
 {
     // Сервер (Linux) і запуски на ПК — РІЗНІ сесії. Один ключ з двох IP Telegram відкликає на обох
     // (AUTH_KEY_DUPLICATED, 30.10: сервер лежав, поки не увійшли заново). Окрема сесія ПК просить код раз.
-    "session_pathname"  => (Directory.Exists("src/Reader") ? "src/Reader/" : "") + (OperatingSystem.IsWindows() ? "WTelegram.local.session" : "WTelegram.session"),
+    "session_pathname"  => OperatingSystem.IsWindows() ? (Directory.Exists("src/Reader") ? "src/Reader/" : "") + "WTelegram.local.session" : "WTelegram.session", // на сервері завжди /data: архів ночей створює там src/Reader
     "api_id"            => Secret("api_id"),
     "api_hash"          => Secret("api_hash"),
     "phone_number"      => Secret("phone_number"),
