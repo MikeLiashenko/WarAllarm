@@ -423,6 +423,8 @@ function extras(s, now){
 
 function draw(){
   if(!fit) computeFit();
+  // Вікно ще без розміру (прихована вкладка, міні-застосунок під час відкриття): кадр пропускаємо, інакше drawImage кидає і анімація стає назавжди.
+  if(!W || !H){ fit = null; return; }
   const s = latest || {}, now = Date.now(), pulse = (now % 1600)/1600;
   drawBase(s);
   ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);

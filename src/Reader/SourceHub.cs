@@ -458,6 +458,7 @@ public sealed class SourceHub
     static readonly TimeSpan Window = TimeSpan.FromMinutes(6);
     static readonly TimeSpan ListTtl = TimeSpan.FromMinutes(15);
     readonly List<(string obl, int sum, DateTime at)> _lists = new();
+    DateTime _lastList;
     readonly object _gate = new();
     public int Pending { get { lock (_gate) return _clusters.Values.Count(c => !c.Confirmed); } }
 
@@ -823,6 +824,7 @@ public sealed class SourceHub
             // Від трьох рядків по області — це зведення каналу: скільки бортів там зараз за його даними.
             foreach (var (obl, (items, sum)) in perOblast)
                 if (items >= 3) _lists.Add((obl, sum, at));
+            if (perOblast.Values.Sum(v => v.items) >= 5 && at > _lastList) _lastList = at;
             // Балістику не вдалось прив'язати до місця — лишається попередженням (пуш «в укриття»).
             if (placed == 0 && ballisticText)
                 return new(HubVerdict.Ballistic, [], clean.Replace("\n", " "));
@@ -833,6 +835,9 @@ public sealed class SourceHub
                 outp.Count > 0 ? "" : "чекаю підтвердження");
         }
     }
+
+    /// Коли вийшло останнє велике зведення каналів (від 5 рядків із місцями).
+    public DateTime LastListAt { get { lock (_gate) return _lastList; } }
 
     /// Скільки бортів у кожній області за найповнішим свіжим зведенням каналів (стеля для суми ×N).
     public Dictionary<string, int> ListCaps(DateTime now)

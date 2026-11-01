@@ -64,7 +64,7 @@ public static class Journal
         foreach (var (key, at, text) in posts.OrderBy(p => p.at))
         {
             var ch = key[..key.LastIndexOf('#')];
-            tr.Tick(at, hub.ListCaps(at));
+            tr.Tick(at, hub.ListCaps(at), hub.LastListAt);
             if (at.TimeOfDay > to) break;
             // Два київські канали йдуть не в хаб, а через місцевий монітор.
             if (ch is "nebo_raketa" or "chyste_neboo")

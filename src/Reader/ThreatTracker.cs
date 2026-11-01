@@ -603,7 +603,7 @@ public sealed class ThreatTracker
     }
 
     // ── тик по таймеру: пересчитать ETA и решить, пора ли пикнуть/сменить стадию ──
-    public List<TrackUpdate> Tick(DateTime now, IReadOnlyDictionary<string, int>? listCaps = null)
+    public List<TrackUpdate> Tick(DateTime now, IReadOnlyDictionary<string, int>? listCaps = null, DateTime lastList = default)
     {
         var outp = new List<TrackUpdate>();
         lock (_gate)
@@ -633,6 +633,12 @@ public sealed class ThreatTracker
                           : t.LastPlace.EndsWith("(обл.)") ? TimeSpan.FromMinutes(15)
                           : t.Zone == "UA" ? TimeSpan.FromMinutes(10)
                           : TimeSpan.FromMinutes(4);
+            // Зведення виходять раз на 5–10 хв, але бувають паузи на 15+ (1.11: 17:13→17:29), і карта
+            // пустіла посеред нальоту. Поки нового зведення немає, повільну ціль із нальоту тримаємо до
+            // 20 хв; вийшло зведення, а її там нема — діє звичайний строк, тож сума не роздувається.
+            if (t.Zone == "UA" && t.Kind is ThreatKind.Drone or ThreatKind.Target && ThreatGeo.SpeedKmh(t.Kind, t.Ammo) <= 250
+                && now - lastList < TimeSpan.FromMinutes(20) && lastList <= t.LastUpdate.AddMinutes(1))
+                goneAfter = TimeSpan.FromMinutes(20);
             // «Падає» — 3 хв без нових згадок, і ціль знімаємо.
             if (t.Down && now - t.DownAt > TimeSpan.FromMinutes(3) && t.LastUpdate <= t.DownAt)
                 goneAfter = TimeSpan.Zero;
