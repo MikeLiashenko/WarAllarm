@@ -72,6 +72,16 @@ public sealed class TelegramBot
     static object Btn(string text, string data) => new { text, callback_data = data };
     static object Inline(params object[][] rows) => new { inline_keyboard = rows };
 
+    // Жива карта як міні-застосунок: та сама сторінка, що й сайт. Місто — у фрагменті URL.
+    const string MiniAppUrl = "https://mikeliashenko.github.io/WarAllarm/site/";
+    static object? LiveMapKb(long chat, Place? pl)
+    {
+        if (chat < 0) return null; // кнопки web_app працюють лише в особистих чатах
+        var url = pl is null ? MiniAppUrl
+            : MiniAppUrl + "#home=" + Uri.EscapeDataString(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{pl.Lat:0.###},{pl.Lon:0.###},{pl.Name}"));
+        return Inline(new object[] { new { text = "🗺 Відкрити живу карту", web_app = new { url } } });
+    }
+
     static readonly object MoreKb = Inline(
         new[] { Btn("🔮 Що вночі", "cmd:/tonight"), Btn("🌙 Підсумок ночі", "cmd:/night") },
         new[] { Btn("🎯 Ризик", "cmd:/risk") },
@@ -269,8 +279,8 @@ public sealed class TelegramBot
         {
             await Action(chat, "upload_photo");
             var png = await _f.MapPng(pl?.Lat ?? 0, pl?.Lon ?? 0, pl?.Name ?? ""); // без міста — карта країни
-            if (png != null) await SendPhoto(chat, png, $"🗺 <b>Карта загроз</b> · {DateTime.Now:HH:mm}\n🔴 тривога · 🟡 часткова · силуети — цілі за курсом");
-            else await Send(chat, "😔 Карту зараз не вдалося намалювати. Спробуй за хвилину.");
+            if (png != null) await SendPhoto(chat, png, $"🗺 <b>Карта загроз</b> · {DateTime.Now:HH:mm}\n🔴 тривога · 🟡 часткова · силуети — цілі за курсом", LiveMapKb(chat, pl));
+            else await Send(chat, "😔 Картинку зараз не вдалося намалювати, але жива карта працює.", LiveMapKb(chat, pl));
             return;
         }
         if (_f.Outlook is { } outlook && Match(text, cmd, "/tonight", "🔮", "що вночі", "прогноз"))
@@ -449,6 +459,8 @@ public sealed class TelegramBot
             ("help", "❓ Довідка"), ("stop", "🔕 Вимкнути сповіщення"),
         };
         await Call("setMyCommands", new { commands = cmds.Select(x => new { command = x.c, description = x.d }) });
+        // Кнопка меню біля поля вводу відкриває живу карту.
+        await Call("setChatMenuButton", new { menu_button = new { type = "web_app", text = "🗺 Карта", web_app = new { url = MiniAppUrl } } });
     }
 
     async Task<List<Upd>> GetUpdates(CancellationToken ct)
@@ -605,7 +617,7 @@ public sealed class TelegramBot
         catch { }
     }
 
-    async Task SendPhoto(long chat, byte[] png, string caption)
+    async Task SendPhoto(long chat, byte[] png, string caption, object? markup = null)
     {
         // Підпис ≤1024: ріжемо на межі рядка, щоб не розірвати <b>…</b>.
         if (caption.Length > 1000) { var cut = caption.LastIndexOf('\n', 999); caption = cut > 0 ? caption[..cut] : caption[..1000]; }
@@ -618,6 +630,7 @@ public sealed class TelegramBot
         var photo = new ByteArrayContent(png);
         photo.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
         form.Add(photo, "photo", "map.png");
+        if (markup is not null) form.Add(new StringContent(JsonSerializer.Serialize(markup)), "reply_markup");
         await Http.PostAsync($"{_api}/sendPhoto", form);
     }
 
