@@ -2,6 +2,7 @@
 //   assets/icon/waralarm_1024.png        — master PNG
 //   windows/runner/resources/app_icon.ico — exe / window / taskbar icon
 //   android/.../mipmap-*/ic_launcher.png  — launcher icons
+//   web/icons/*.png, web/favicon.png       — web app (maskable = full-bleed square)
 //
 // Run after changing the painter:  flutter test tool/render_icon_test.dart
 import 'dart:io';
@@ -12,10 +13,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:waralarm/widgets/brand_icon.dart';
 
-Future<Uint8List> _png(int px) async {
+Future<Uint8List> _png(int px, {bool square = false}) async {
   final rec = ui.PictureRecorder();
   final canvas = Canvas(rec);
-  const BrandIconPainter().paint(canvas, Size(px.toDouble(), px.toDouble()));
+  BrandIconPainter(square: square).paint(canvas, Size(px.toDouble(), px.toDouble()));
   final img = await rec.endRecording().toImage(px, px);
   final data = await img.toByteData(format: ui.ImageByteFormat.png);
   return data!.buffer.asUint8List();
@@ -58,6 +59,12 @@ void main() {
       for (final e in mip.entries) {
         File('android/app/src/main/res/mipmap-${e.key}/ic_launcher.png')
             .writeAsBytesSync(await _png(e.value));
+      }
+
+      File('web/favicon.png').writeAsBytesSync(await _png(16));
+      for (final px in [192, 512]) {
+        File('web/icons/Icon-$px.png').writeAsBytesSync(await _png(px));
+        File('web/icons/Icon-maskable-$px.png').writeAsBytesSync(await _png(px, square: true));
       }
     });
   });
