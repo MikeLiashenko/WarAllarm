@@ -67,6 +67,7 @@ public sealed class Threat
     // ×N = число целей строго из текста поста («2 БпЛА»), не раздувая по числу упомянутых мест
     public int Amount => Math.Max(1, Count - Trim);
     public int Trim; // скільки з ×N — ті самі борти, що вже пораховані на сусідніх мітках (ReconcileCounts)
+    public bool Covered; // мітка «центр області», усі борти якої вже стоять точними мітками — знімається
 
     // «БпЛА на Харків» — ціль ЛЕТИТЬ туди, а не вже над містом. Pos лишається містом (на ньому
     // тримаються тривога, дистанція й ETA — сирена не запізнюється), а Approach — звідки вона
@@ -272,6 +273,14 @@ public sealed class ThreatTracker
                 _alias[placeKey] = pred.Id;
                 isNew = false;
                 movedGroup = ev.Kind == ThreatKind.Missile;
+                if (pred.Kind == ThreatKind.Target && ev.Kind == ThreatKind.Drone) pred.Kind = ThreatKind.Drone;
+            }
+            // «8 реактивних на Київщину» — а всі вони вже стоять точними мітками в області: ще одна
+            // мітка «Київщина (обл.)» лише двоїть їх (2.11: один шахед над Києвом — 2–3 мітки).
+            if (isNew && approx && ev.Kind is ThreatKind.Drone or ThreatKind.Target && ExactDronesIn(pos, now) >= Math.Max(1, ev.Count))
+            {
+                _alias.Remove(placeKey);
+                return null;
             }
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
             // Місцевий монітор уже намалював цей дрон: лишається одна мітка.
@@ -508,12 +517,16 @@ public sealed class ThreatTracker
         double bestKm = double.MaxValue;
         foreach (var c in _active.Values)
         {
-            if (c.Kind != kind || c.Zone != "UA" || c.Launch || c.Approx || c.Down || c.Pos is not { } cp) continue;
+            // «Ціль» — той самий дрон, тип якого канал не назвав («Бортничі» за хвилину після «шахед на ДВРЗ»).
+            bool sameKind = c.Kind == kind || (c.Kind is ThreatKind.Drone or ThreatKind.Target && kind is ThreatKind.Drone or ThreatKind.Target);
+            if (!sameKind || c.Zone != "UA" || c.Launch || c.Approx || c.Down || c.Pos is not { } cp) continue;
             if (c.Stage is TrackStage.Impact or TrackStage.Passed) continue;
             var age = now - c.LastUpdate;
             if (age > TimeSpan.FromMinutes(12)) continue;
-            // Реактивний не стає звичайним шахедом, а одна ціль — трьома.
-            if (jet != IsJet(c.Ammo) && (jet || plain)) continue;
+            // Реактивний не стає звичайним шахедом, а одна ціль — трьома. Мітка без названого типу
+            // («Бортничі») — може бути й реактивним.
+            if (jet && c.Ammo is not null && !IsJet(c.Ammo)) continue;
+            if (plain && IsJet(c.Ammo)) continue;
             if (ev.Count > Math.Max(1, c.Count)) continue;
             double km = ThreatGeo.Km(cp, pos);
             if (km < 3) continue; // те саме місце — це не рух
@@ -536,7 +549,11 @@ public sealed class ThreatTracker
                 double turn = Math.Abs(((ThreatGeo.Bearing(cp, pos) - h) % 360 + 540) % 360 - 180);
                 if (turn > 110) continue;
             }
-            if (km < bestKm) { bestKm = km; best = c; }
+            // Найближча до мітки й найсвіжіша: стара мітка попереднього дрона, що стоїть поруч, не
+            // має забирати новий пост, поки свіжа мітка цього дрона лишається «примарою»
+            // (2.11 17:30: Вишеньки → Мишоловка дало дві мітки).
+            double score = Math.Min(km, fromMark) + 5 * age.TotalMinutes;
+            if (score < bestKm) { bestKm = score; best = c; }
         }
         return best;
     }
@@ -558,6 +575,29 @@ public sealed class ThreatTracker
             if (km < bestKm) { bestKm = km; best = c; }
         }
         return best;
+    }
+
+    // Реактивний летить 8 км щохвилини, а київські канали пишуть лише назви районів («Совки»,
+    // «Чоколівка»): мітка, про яку 2 хв мовчать, а поруч (≤25 км) є свіжіша мітка такого ж
+    // дрона, — це слід, що лишився позаду, а не ще одна ціль (2.11: 3 реактивні — 7 міток).
+    bool Superseded(Threat t, DateTime now)
+    {
+        if (t.Zone != "UA" || t.Approx || t.Launch || t.Down || t.Orbit || t.Count > 1 || t.Pos is not { } tp) return false;
+        if (t.Kind is not (ThreatKind.Drone or ThreatKind.Target) || !(IsJet(t.Ammo) || t.Kind == ThreatKind.Target)) return false;
+        if (now - t.LastUpdate < TimeSpan.FromMinutes(2)) return false;
+        return _active.Values.Any(o => o != t && o.Zone == "UA" && !o.Approx && !o.Launch && !o.Down
+                                       && o.Kind is ThreatKind.Drone or ThreatKind.Target && (IsJet(o.Ammo) || o.Kind == ThreatKind.Target)
+                                       && o.LastUpdate > t.LastUpdate && now - o.LastUpdate < TimeSpan.FromMinutes(2)
+                                       && o.Pos is { } op && ThreatGeo.Km(op, tp) <= 25);
+    }
+
+    // Скільки бортів уже стоїть точними мітками (не «центр області») в області точки.
+    int ExactDronesIn((double lat, double lon) pos, DateTime now)
+    {
+        var obl = OblastGeo.Region(pos.lat, pos.lon);
+        return _active.Values.Where(t => t.Kind is ThreatKind.Drone or ThreatKind.Target && t.Zone == "UA" && !t.Approx && !t.Launch && !t.Down
+                                         && t.Pos is { } p && now - t.LastUpdate < TimeSpan.FromMinutes(10) && OblastGeo.Region(p.lat, p.lon) == obl)
+                             .Sum(t => Math.Max(1, t.Count));
     }
 
     static bool SameAmmo(string? a, string? b)
@@ -618,13 +658,21 @@ public sealed class ThreatTracker
     // а «8 на Лубни» в одного каналу й «5 на Пирятин, 5 на Оржицю» в іншого — та сама група.
     void ReconcileCounts(IReadOnlyDictionary<string, int>? listCaps)
     {
-        foreach (var t in _active.Values) t.Trim = 0;
+        foreach (var t in _active.Values) { t.Trim = 0; t.Covered = false; }
+        // «Бандеролі на Одещину» — та сама група, що вже стоїть точною міткою в області.
+        foreach (var o in _active.Values.Where(t => t.Kind == ThreatKind.Missile && t.Zone == "UA" && t.Approx && t.Pos is not null))
+            o.Covered = _active.Values.Any(t => t.Kind == ThreatKind.Missile && t.Zone == "UA" && !t.Approx && !t.Launch && t.Pos is { } p
+                                                && OblastGeo.Region(p.lat, p.lon) == OblastGeo.Region(o.Pos!.Value.lat, o.Pos!.Value.lon));
         var drones = _active.Values.Where(t => t.Kind is ThreatKind.Drone or ThreatKind.Target && !t.Launch && !t.Down && t.Pos is not null);
         foreach (var g in drones.GroupBy(t => Geo.Canonical(OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon)) ?? t.Oblast ?? ""))
         {
             int exact = g.Where(t => !t.LastPlace.EndsWith("(обл.)")).Sum(t => t.Amount);
-            foreach (var o in g.Where(t => t.LastPlace.EndsWith("(обл.)") && t.Amount > 1))
+            foreach (var o in g.Where(t => t.LastPlace.EndsWith("(обл.)")))
+            {
                 o.Trim = Math.Min(o.Amount - 1, exact);
+                // Усі борти області вже на точних мітках — мітка «центр області» лише двоїть їх.
+                o.Covered = exact >= Math.Max(1, o.Count);
+            }
             if (listCaps is null || !listCaps.TryGetValue(g.Key, out var cap)) continue;
             for (int over = g.Sum(t => t.Amount) - cap; over > 0; over--)
             {
@@ -683,7 +731,7 @@ public sealed class ThreatTracker
                           && t.FlightMin is { } fm && flown > TimeSpan.FromMinutes(fm + 1); // долетіла — за хвилину знімаємо
             bool launchOver = t.Launch && flown > TimeSpan.FromMinutes(t.Kind == ThreatKind.Ballistic ? 4 : 8); // балістика — лічені хвилини
             if ((t.Stage is TrackStage.Impact or TrackStage.Passed && age > TimeSpan.FromSeconds(90))
-                || age > goneAfter || landed || launchOver)
+                || age > goneAfter || landed || launchOver || t.Covered || Superseded(t, now))
             {
                 t.Stage = TrackStage.Gone;
                 _active.Remove(t.Id);
