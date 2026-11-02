@@ -137,6 +137,7 @@ public static class Flows
         _learning = true;
         var grid = new Dictionary<(bool jet, int y, int x), double[]>();
         int moves = 0, courses = 0;
+        var seenCourse = new HashSet<(bool, (int, int), (int, int), long)>();
         void Add(bool jet, (double lat, double lon) a, (double lat, double lon) b, double w, double maxKm)
         {
             double len = Math.Min(ThreatGeo.Km(a, b), maxKm), brg = ThreatGeo.Bearing(a, b);
@@ -157,10 +158,20 @@ public static class Flows
                 if (t.Kind != ThreatKind.Drone || t.Zone != "UA") return;
                 bool jet = t.Ammo?.Contains("реакт", StringComparison.OrdinalIgnoreCase) == true;
                 double km = ThreatGeo.Km(a, b);
-                if (course) { if (km >= 8) { Add(jet, a, b, 1.5, 60); courses++; } return; }
+                // Курс: «на X» — 60 км від цілі вперед; «на X з Y» — останні 60 км підльоту до X.
+                // Той самий курс у десятці каналів — один курс.
+                if (course)
+                {
+                    if (km < 8 || !seenCourse.Add((jet, Cell(a), Cell(b), t.LastUpdate.Ticks / TimeSpan.FromMinutes(20).Ticks))) return;
+                    if (mins < 0) a = Move(b, ThreatGeo.Bearing(a, b) + 180, Math.Min(km, 60));
+                    Add(jet, a, b, 2, 60); courses++;
+                    return;
+                }
                 // Перестрибування (не та ціль) і стояння на місці — не рух.
                 if (km < 4 || km > 100 || mins < 0.5 || km / (mins / 60) > (jet ? 1000 : 400)) return;
-                Add(jet, a, b, 1, 100);
+                // Рух між постами трекер часто зв'язує не з тією ціллю (у списках уночі десятки дронів) —
+                // він лише заповнює місця, де курсів не називали.
+                Add(jet, a, b, 0.5, 100);
                 moves++;
             };
             Journal.Drive(file, tr);

@@ -363,6 +363,9 @@ public sealed class ThreatTracker
                 t.HeadingKnown = true;
                 if (!approx) FlowSink?.Invoke(t, pp, pos, (now - prevSeen).TotalMinutes, false);
             }
+            // Названо, звідки летить: напрямок підльоту до міста (для навчання потоків).
+            if (FlowSink is not null && !approx && OriginOf(ev, ev.City ?? gp.name, pos) is { } origin && ThreatGeo.Km(origin, pos) is >= 15 and <= 500)
+                FlowSink(t, origin, pos, -1, true);
             else if (!t.HeadingKnown)
                 t.Heading = ThreatGeo.Bearing(pos, ThreatGeo.UACenter); // лише для стрілки, не для руху
             ApplyCourse(t, ev, pos, isNew, now);
@@ -498,6 +501,29 @@ public sealed class ThreatTracker
     static bool IsJet(string? ammo) => ammo?.Contains("реакт", StringComparison.OrdinalIgnoreCase) == true;
 
     // «Розвертається на Обухів», «повернув назад» — справжній розворот, а не запізнілий пост.
+    // «5 на Кагарлик з Черкащини, 3 на Згурівку з Чернігівщини», «повз Козелець на Київщину»:
+    // звідки летить саме ЦЕЙ дрон — лише з тієї частини рядка, де назване його місто.
+    static readonly Regex OriginRe = new(@"(?:^|[\s(])(?:з|із|зі|від|повз|через)\s+((?-i:[А-ЯІЇЄҐ])[\w'ʼ’-]+(?:\s+(?-i:[А-ЯІЇЄҐ])[\w'ʼ’-]+)?)", RegexOptions.IgnoreCase);
+    static (double lat, double lon)? OriginOf(ThreatEvent ev, string city, (double lat, double lon) pos)
+    {
+        var stem = city[..Math.Min(4, city.Length)];
+        foreach (var clause in Regex.Split(ev.Raw, @"[,;\n]|\s[-–—]\s"))
+        {
+            if (clause.IndexOf(stem, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            foreach (Match m in OriginRe.Matches(clause))
+            {
+                var name = m.Groups[1].Value;
+                if (name.StartsWith(stem, StringComparison.OrdinalIgnoreCase)) continue;
+                if ((LaunchSites.Resolve(name) ?? ThreatGeo.Resolve(name)) is not { } o) continue;
+                // «з Одещини» про Ізмаїл — та сама область: це центр області, а не напрямок.
+                if (Regex.IsMatch(name, @"щини|ччини|чини$", RegexOptions.IgnoreCase) && OblastGeo.Region(o.lat, o.lon) == OblastGeo.Region(pos.lat, pos.lon)) return null;
+                return (o.lat, o.lon);
+            }
+            return null;
+        }
+        return null;
+    }
+
     static readonly Regex TurnBack = new(@"розверт|розворот|разворот|разверн|поверну|поверта|поворачива|назад|поверн\w*\s+на", RegexOptions.IgnoreCase);
 
     // Траєкторія: «з X на Y» дає курс; балістика й КАБ летять від точки пуску/скиду до
