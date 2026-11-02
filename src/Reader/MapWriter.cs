@@ -607,7 +607,7 @@ function build(){
   if(built||!fit()) return;
   built=true;
   // ── РОЗДІЛЕННЯ ТРИВОГ (як на офіційній карті) ──────────────────────────────
-  // Офіційний колір: червоний = тривога, жовтий = часткова/попередження.
+  // Офіційний колір: червоний = повітряна тривога, жовтий = жовтий рівень тривоги.
   function offColor(l){ return l==='red' ? 'rgba(255,59,48,0.50)' : l==='yellow' ? 'rgba(214,164,39,0.55)' : null; }
   function pathD(rings){ return rings.map(function(ring){ if(ring.length<3)return ''; return 'M'+ring.map(function(p){var q=P(p[0],p[1]);return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join(' L')+'Z'; }).join(' '); }
   // нормалізація апострофа: фід дає U+0027, геометрія — U+2019

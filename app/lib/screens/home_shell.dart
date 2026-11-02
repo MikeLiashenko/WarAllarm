@@ -65,7 +65,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       lon: map.home.lon,
       targets: map.isDemo ? const [] : map.targets,
       radiusKm: settings.alarmRadiusKm,
-      officialLevel: officialLevelFor(home, alerts.levels),
+      officialLevel: officialLevelFor(home, alerts.oblastWhole, alerts.raions),
       live: map.live,
     );
   }

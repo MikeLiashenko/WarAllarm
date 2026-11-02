@@ -3,7 +3,9 @@ using System.Text.Json;
 // ── WarAlarm · офіційні повітряні тривоги ────────────────────────────────────
 // Тягне офіційний статус тривог по областях (безкоштовний фід Вадима Клименка,
 // без токена) і повертає рівень по кожній НАШІЙ області-полігону (той самий «n»,
-// що в MapOblasts): "red" = тривога в області, "yellow" = часткова/попередження.
+// що в MapOblasts): "red" = повітряна тривога, "yellow" = жовтий рівень тривоги (так їх
+// і показує фід). Тривогу часто оголошують не на всю область, а по районах — тоді рівень
+// області = найвищий серед її районів, а «на всю область» чи «в районах» — окремо.
 // Порт логіки з app/lib/services/official_alerts_service.dart.
 public static class OfficialAlerts
 {
@@ -42,14 +44,36 @@ public static class OfficialAlerts
         ["м. Київ"] = "Kiev City",
     };
 
-    /// Знімок офіційних тривог: рівень по полігону («n»→red/yellow) + читабельні
-    /// українські назви областей, що зараз червоні / жовті (для новин у каналі).
+    /// Знімок офіційних тривог: рівень по полігону («n»→red/yellow, найвищий в області чи
+    /// її районах) + читабельні українські назви областей, що зараз червоні / жовті.
+    /// [RedWholeUa] — червона тривога на ВСЮ область (на неї — пости в каналі, як і раніше);
+    /// [PartUa] — області, де тривога лише в частині районів.
     public sealed record Snapshot(
         Dictionary<string, string> ByPolygon,
         List<string> RedUa,
         List<string> YellowUa,
         Dictionary<string, string>? ByRaion = null,
-        Dictionary<string, string>? ByOblastWhole = null);
+        Dictionary<string, string>? ByOblastWhole = null,
+        List<string>? RedWholeUa = null,
+        HashSet<string>? PartUa = null)
+    {
+        /// Тривога саме в цій точці: на всю область — її рівень, інакше — рівень району.
+        public string? LevelAt(double lat, double lon)
+        {
+            if (OblastGeo.PolyName(lat, lon) is not { } poly || !ByPolygon.ContainsKey(poly)) return null;
+            if (ByOblastWhole is not null && ByOblastWhole.TryGetValue(poly, out var whole)) return whole;
+            if (OblastGeo.RaionAt(lat, lon) is not { } r || ByRaion is null) return null;
+            foreach (var (name, lv) in ByRaion)
+                if (Napo(name) == Napo(r)) return lv;
+            return null;
+        }
+
+        static string Napo(string s) => s.Replace('’', '\'').Replace('ʼ', '\'').Replace('`', '\'');
+    }
+
+    // Рівень із фіду: жовтий — жовтий, решта (red, orange, без рівня) — повітряна тривога.
+    static string Level(JsonElement v) =>
+        v.TryGetProperty("alert_level", out var al) && al.ValueKind == JsonValueKind.String && al.GetString() == "yellow" ? "yellow" : "red";
 
     /// Наш полігон «n» → "red"/"yellow". Порожній словник = немає тривог / офлайн.
     public static async Task<Dictionary<string, string>> Fetch() => (await FetchFull()).ByPolygon;
@@ -61,46 +85,48 @@ public static class OfficialAlerts
         var yellowUa = new List<string>();
         var byRaion = new Dictionary<string, string>();       // «X район» → red/yellow (для розділення на карті)
         var byOblastWhole = new Dictionary<string, string>(); // «n» → red/yellow ЛИШЕ коли тривога на всю область
+        var redWholeUa = new List<string>();
+        var partUa = new HashSet<string>();
+        Snapshot Snap() => new(byPoly, redUa, yellowUa, byRaion, byOblastWhole, redWholeUa, partUa);
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, Url);
             req.Headers.Add("User-Agent", "WarAlarm/1.0");
             var resp = await Http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return new Snapshot(byPoly, redUa, yellowUa, byRaion, byOblastWhole);
+            if (!resp.IsSuccessStatusCode) return Snap();
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-            if (!doc.RootElement.TryGetProperty("states", out var states))
-                return new Snapshot(byPoly, redUa, yellowUa, byRaion, byOblastWhole);
+            if (!doc.RootElement.TryGetProperty("states", out var states)) return Snap();
 
             foreach (var st in states.EnumerateObject())
             {
                 if (!UaToEn.TryGetValue(st.Name, out var en)) continue;
                 var v = st.Value;
                 bool enabled = v.TryGetProperty("enabled", out var e) && e.ValueKind == JsonValueKind.True;
-                string lvl = v.TryGetProperty("alert_level", out var al) ? al.GetString() ?? "" : "";
+                string? level = enabled ? Level(v) : null;
 
-                int districtsOn = 0;
                 if (v.TryGetProperty("districts", out var ds) && ds.ValueKind == JsonValueKind.Object)
                     foreach (var d in ds.EnumerateObject())
                     {
                         bool don = d.Value.TryGetProperty("enabled", out var de) && de.ValueKind == JsonValueKind.True;
                         if (!don) continue;
-                        districtsOn++;
-                        string dlvl = d.Value.TryGetProperty("alert_level", out var dal) && dal.GetString() == "yellow"
-                            ? "yellow" : "red";
+                        var dlvl = Level(d.Value);
                         byRaion[d.Name] = dlvl; // ключ — назва району як у фіді
+                        if (level != "red") level = dlvl; // найвищий рівень: червоний перебиває жовтий
                     }
 
-                if (enabled) byOblastWhole[en] = lvl == "yellow" ? "yellow" : "red";
-
-                string? level = enabled ? (lvl == "yellow" ? "yellow" : "red")
-                              : districtsOn > 0 ? "yellow" : null;
+                if (enabled)
+                {
+                    byOblastWhole[en] = Level(v);
+                    if (Level(v) == "red") redWholeUa.Add(st.Name);
+                }
                 if (level == null) continue;
+                if (!enabled) partUa.Add(st.Name);
                 byPoly[en] = level;
                 (level == "red" ? redUa : yellowUa).Add(st.Name);
             }
         }
         catch { /* офлайн — порожньо */ }
-        return new Snapshot(byPoly, redUa, yellowUa, byRaion, byOblastWhole);
+        return Snap();
     }
 
     /// Читабельний перелік для команди /alerts, + чи є тривога у місті [myCity].

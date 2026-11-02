@@ -279,7 +279,7 @@ public sealed class TelegramBot
         {
             await Action(chat, "upload_photo");
             var png = await _f.MapPng(pl?.Lat ?? 0, pl?.Lon ?? 0, pl?.Name ?? ""); // без міста — карта країни
-            if (png != null) await SendPhoto(chat, png, $"🗺 <b>Карта загроз</b> · {DateTime.Now:HH:mm}\n🔴 тривога · 🟡 часткова · силуети — цілі за курсом", LiveMapKb(chat, pl));
+            if (png != null) await SendPhoto(chat, png, $"🗺 <b>Карта загроз</b> · {DateTime.Now:HH:mm}\n🔴 тривога · 🟡 жовтий рівень · силуети — цілі за курсом", LiveMapKb(chat, pl));
             else await Send(chat, "😔 Картинку зараз не вдалося намалювати, але жива карта працює.", LiveMapKb(chat, pl));
             return;
         }

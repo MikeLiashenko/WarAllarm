@@ -467,7 +467,7 @@ public static class MapImage
         canvas.DrawRect(x, y - 12, 14, 14, landRed);
         canvas.DrawText($"тривога {reds}", x + 20, y, cardText);
         canvas.DrawRect(x + 140, y - 12, 14, 14, landYellow);
-        canvas.DrawText($"часткова {yellows}", x + 160, y, cardText);
+        canvas.DrawText($"жовтий рівень {yellows}", x + 160, y, cardText);
         if (showHome)
         {
             y += 24;

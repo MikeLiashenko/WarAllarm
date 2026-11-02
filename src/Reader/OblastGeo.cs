@@ -6,7 +6,8 @@ using System.Text.Json;
 // («Волинь», «Київщина», «Харківщина»…).
 public static class OblastGeo
 {
-    static readonly List<(string en, List<List<double[]>> rings)> Polys = Parse();
+    static readonly List<(string en, List<List<double[]>> rings)> Polys = Parse(MapOblasts.Json);
+    static readonly List<(string en, List<List<double[]>> rings)> RaionPolys = Parse(MapRaions.Json);
 
     // Англ. «n» полігона → коротка укр. назва.
     static readonly Dictionary<string, string> ShortUa = new()
@@ -106,18 +107,26 @@ public static class OblastGeo
 
     // Рамки полігонів — швидко відкинути «явно не та область» (маршрути перевіряють
     // сотні точок на кожен запис карти).
-    static readonly (double minLat, double maxLat, double minLon, double maxLon)[] Boxes = Polys
+    static readonly (double minLat, double maxLat, double minLon, double maxLon)[] Boxes = BoxesOf(Polys);
+    static readonly (double minLat, double maxLat, double minLon, double maxLon)[] RaionBoxes = BoxesOf(RaionPolys);
+
+    static (double, double, double, double)[] BoxesOf(List<(string en, List<List<double[]>> rings)> polys) => polys
         .Select(p => p.rings.SelectMany(r => r).ToList())
         .Select(pts => (pts.Min(x => x[1]), pts.Max(x => x[1]), pts.Min(x => x[0]), pts.Max(x => x[0])))
         .ToArray();
 
-    static string? NameAt(double lat, double lon)
+    /// Район, що містить точку («Харківський район», як у фіді тривог), або null.
+    public static string? RaionAt(double lat, double lon) => NameIn(RaionPolys, RaionBoxes, lat, lon);
+
+    static string? NameAt(double lat, double lon) => NameIn(Polys, Boxes, lat, lon);
+
+    static string? NameIn(List<(string en, List<List<double[]>> rings)> polys, (double minLat, double maxLat, double minLon, double maxLon)[] boxes, double lat, double lon)
     {
-        for (int k = 0; k < Polys.Count; k++)
+        for (int k = 0; k < polys.Count; k++)
         {
-            var b = Boxes[k];
+            var b = boxes[k];
             if (lat < b.minLat || lat > b.maxLat || lon < b.minLon || lon > b.maxLon) continue;
-            var (en, rings) = Polys[k];
+            var (en, rings) = polys[k];
             bool inside = false;
             foreach (var ring in rings)
                 for (int i = 0, j = ring.Count - 1; i < ring.Count; j = i++)
@@ -132,12 +141,12 @@ public static class OblastGeo
         return null;
     }
 
-    static List<(string, List<List<double[]>>)> Parse()
+    static List<(string, List<List<double[]>>)> Parse(string json)
     {
         var outp = new List<(string, List<List<double[]>>)>();
         try
         {
-            using var doc = JsonDocument.Parse(MapOblasts.Json);
+            using var doc = JsonDocument.Parse(json);
             foreach (var o in doc.RootElement.EnumerateArray())
             {
                 var name = o.TryGetProperty("n", out var n) ? n.GetString() ?? "" : "";

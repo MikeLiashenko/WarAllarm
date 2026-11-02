@@ -190,12 +190,20 @@ ThreatProbability probabilityFor(
   );
 }
 
-/// Convenience: oblast air-raid level for a place, given the official levels map
-/// keyed by English oblast polygon name (from AlertsController.levels).
-String? officialLevelFor(
-    MonitoredPlace pl, Map<String, String> oblastLevels) {
-  if (oblastLevels.isEmpty) return null;
+/// Official air-raid level right at a place: the oblast's when the whole oblast is
+/// alarmed, otherwise its raion's — an alarm in another raion of the oblast is not
+/// an alarm here (AlertsController.oblastWhole / .raions).
+String? officialLevelFor(MonitoredPlace pl, Map<String, String> oblastWhole,
+    Map<String, String> raions) {
   final name = OblastLookup.instance.nameAt(pl.lat, pl.lon);
   if (name == null) return null;
-  return oblastLevels[name];
+  final whole = oblastWhole[name];
+  if (whole != null) return whole;
+  final r = OblastLookup.raions.nameAt(pl.lat, pl.lon);
+  if (r == null) return null;
+  String napo(String s) => s.replaceAll('’', "'").replaceAll('ʼ', "'").replaceAll('`', "'");
+  for (final e in raions.entries) {
+    if (napo(e.key) == napo(r)) return e.value;
+  }
+  return null;
 }

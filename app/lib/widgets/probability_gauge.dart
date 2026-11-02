@@ -124,7 +124,7 @@ class ProbabilityGauge extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        red ? '🔴 офіційна тривога в області' : '🟡 часткова тривога в області',
+        red ? '🔴 повітряна тривога тут' : '🟡 жовтий рівень тривоги тут',
         style: TextStyle(
             fontSize: 11, fontWeight: FontWeight.w700, color: c),
       ),

@@ -4,7 +4,8 @@ import 'package:http/http.dart' as http;
 
 /// Fetches the OFFICIAL Ukrainian air-raid alarm status per oblast (no token
 /// needed) from the public Vadym Klymenko feed. Returns a map of our oblast
-/// polygon name -> level ('red' = active air-raid, 'yellow' = warning/partial).
+/// polygon name -> level ('red' = air-raid alarm, 'yellow' = the official yellow
+/// alarm level). An oblast alarmed only in some raions takes its highest raion level.
 class OfficialAlertsService {
   OfficialAlertsService({http.Client? client})
       : _client = client ?? http.Client();
@@ -43,8 +44,7 @@ class OfficialAlertsService {
     'м. Київ': 'Kiev City',
   };
 
-  /// Legacy: oblast polygon name -> level (whole-oblast red, or yellow if any
-  /// district is on). Kept for callers that only need the oblast view.
+  /// Oblast polygon name -> highest level in the oblast or any of its raions.
   Future<Map<String, String>> fetch() async => (await fetchFull()).oblasts;
 
   /// Full snapshot for the raion-level map split (like the official map).
@@ -66,26 +66,22 @@ class OfficialAlertsService {
         if (v is! Map) return;
         final en = _uaToEn[k.toString()];
         if (en == null) return;
-        final lvl = (v['alert_level'] ?? '').toString();
-
-        var districtsOn = 0;
+        // The feed's own level: yellow is the yellow alarm level, anything else is red.
+        String level(Map m) => m['alert_level'] == 'yellow' ? 'yellow' : 'red';
+        String? top = v['enabled'] == true ? level(v) : null;
         final ds = v['districts'];
         if (ds is Map) {
           ds.forEach((dk, dv) {
             if (dv is! Map || dv['enabled'] != true) return;
-            districtsOn++;
-            final dlvl = (dv['alert_level'] ?? '').toString();
-            raions[dk.toString()] = dlvl == 'yellow' ? 'yellow' : 'red';
+            final dl = level(dv);
+            raions[dk.toString()] = dl;
+            if (top != 'red') top = dl; // red beats yellow
           });
         }
 
-        if (v['enabled'] == true) {
-          final l = lvl == 'yellow' ? 'yellow' : 'red';
-          oblasts[en] = l;
-          oblastWhole[en] = l; // whole-oblast alarm → fill the whole region
-        } else if (districtsOn > 0) {
-          oblasts[en] = 'yellow';
-        }
+        if (v['enabled'] == true) oblastWhole[en] = level(v); // whole-oblast alarm → fill the whole region
+        final t = top;
+        if (t != null) oblasts[en] = t;
       });
     }
     return OfficialAlertsSnapshot(oblasts, raions, oblastWhole);
@@ -94,7 +90,7 @@ class OfficialAlertsService {
 
 /// Official alerts at two levels: whole oblasts and individual raions.
 class OfficialAlertsSnapshot {
-  final Map<String, String> oblasts;      // legacy per-oblast
+  final Map<String, String> oblasts;      // highest level per oblast
   final Map<String, String> raions;       // "X район" -> red/yellow
   final Map<String, String> oblastWhole;  // "n" -> red/yellow (whole oblast)
   const OfficialAlertsSnapshot(this.oblasts, this.raions, this.oblastWhole);

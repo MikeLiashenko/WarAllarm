@@ -47,7 +47,7 @@ class Situation {
               (p) => probabilityFor(
                 p,
                 real,
-                officialLevel: officialLevelFor(p, alerts.levels),
+                officialLevel: officialLevelFor(p, alerts.oblastWhole, alerts.raions),
               ),
             )
             .toList()

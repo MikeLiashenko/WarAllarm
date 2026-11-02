@@ -798,7 +798,7 @@ if (args.Length >= 1 && args[0].Equals("channeltest", StringComparison.OrdinalIg
     var png = await BuildBotMapPng(channel: true);
     var poster = new ChannelPoster(ct!, cn!);
     await poster.Post(
-        "🔔 <b>Тест WarAlarm</b> — карта загроз\n🔴 офіційна тривога · 🟡 часткова · силуети — цілі\n\n<i>🤖 WarAlarm · дані приблизні</i>",
+        "🔔 <b>Тест WarAlarm</b> — карта загроз\n🔴 повітряна тривога · 🟡 жовтий рівень · силуети — цілі\n\n<i>🤖 WarAlarm · дані приблизні</i>",
         png);
     Console.WriteLine(png is null ? "⚠ карта не згенерувалась (надіслано лише текст)." : "✅ Надіслано: карта + текст.");
     return;
@@ -1273,11 +1273,12 @@ async Task RunAlertsLoop(ChannelPoster? channel)
                 ? System.Text.Json.JsonSerializer.Serialize(snap.ByOblastWhole) : "";
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
             // 2) Канал: новини при змінах.
-            var nowRed = new HashSet<string>(snap.RedUa, StringComparer.OrdinalIgnoreCase);
+            // Пости — на червону тривогу на ВСЮ область (районні тривоги на фронті мигають щохвилини).
+            var nowRed = new HashSet<string>(snap.RedWholeUa ?? snap.RedUa, StringComparer.OrdinalIgnoreCase);
             if (!seeded) { prevRed = nowRed; seeded = true; }
             else if (channel is not null)
             {
-                var newly = snap.RedUa.Where(r => !prevRed.Contains(r)).ToList();
+                var newly = nowRed.Where(r => !prevRed.Contains(r)).ToList();
                 var cleared = prevRed.Where(r => !nowRed.Contains(r)).ToList();
                 foreach (var r in newly) dayRed[r] = dayRed.GetValueOrDefault(r) + 1; // для зведення
                 // Тривога / відбій → перемальовуємо й постимо карту разом із текстом.
@@ -1302,10 +1303,10 @@ async Task RunAlertsLoop(ChannelPoster? channel)
                     if (clearPost is { } cp && DateTime.Now - cp.at < cascade && nowRed.Count > 0)
                     {
                         cp.regions.AddRange(cleared.Where(r => !cp.regions.Contains(r)));
-                        await channel.Edit(cp.id, BuildClearPost(cp.regions, nowRed.Count), cp.photo);
+                        await channel.Edit(cp.id, BuildClearPost(cp.regions, snap.RedUa.Count), cp.photo);
                     }
                     else if (await BuildBotMapPng(channel: true) is var png
-                             && await channel.Post(BuildClearPost(cleared, nowRed.Count), png) is { } id)
+                             && await channel.Post(BuildClearPost(cleared, snap.RedUa.Count), png) is { } id)
                     {
                         clearPost = (id, cleared.ToList(), DateTime.Now, png is not null);
                         mapPostId = null; mapPostAt = DateTime.Now;
@@ -1448,6 +1449,13 @@ static string RegionList(IEnumerable<string> regions, int max = 10)
     return H(string.Join(", ", l.Take(max))) + (l.Count > max ? $" і ще {l.Count - max}" : "");
 }
 
+// Червоні області для підпису: «Київська (райони)», коли тривога лише в частині районів.
+static string RedList(OfficialAlerts.Snapshot s, int max = 12)
+{
+    var l = s.RedUa.Select(r => ShortReg(r) + (s.PartUa?.Contains(r) == true ? " (райони)" : "")).ToList();
+    return H(string.Join(", ", l.Take(max))) + (l.Count > max ? $" і ще {l.Count - max}" : "");
+}
+
 static string BuildAlarmPost(List<string> newly, OfficialAlerts.Snapshot s)
 {
     var sb = new StringBuilder();
@@ -1471,7 +1479,7 @@ static string MapCaption(OfficialAlerts.Snapshot s, int targets)
     var sb = new StringBuilder();
     sb.AppendLine($"🗺 <b>Карта тривог</b> · {DateTime.Now:HH:mm}");
     sb.AppendLine($"🔴 {red} · 🟡 {yel} обл. · 🛸 у повітрі ~{targets}");
-    if (red > 0) sb.AppendLine("🔥 " + RegionList(s.RedUa, 12));
+    if (red > 0) sb.AppendLine("🔥 " + RedList(s));
     sb.AppendLine();
     sb.Append(ChannelFoot);
     return sb.ToString();
@@ -1755,7 +1763,7 @@ async Task<byte[]?> BuildBotMapPng(bool channel = false, (double lat, double lon
     var snap = await OfficialAlerts.FetchFull();
     if (channel)
     {
-        var subtitle = $"Тривога: {snap.RedUa.Count} обл · часткова: {snap.YellowUa.Count} · у повітрі: ~{AirborneNow(live.Sum(t => t.Amount))}";
+        var subtitle = $"Тривога: {snap.RedUa.Count} обл · жовтий рівень: {snap.YellowUa.Count} · у повітрі: ~{AirborneNow(live.Sum(t => t.Amount))}";
         return MapImage.Render((HomeLat, HomeLon), live, "WarAlarm · Карта тривог", subtitle, snap.ByPolygon,
             showHome: false, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
     }
@@ -1919,16 +1927,20 @@ async Task<string> BuildBotAlertsAt(double lat, double lon)
     var snap = await OfficialAlerts.FetchFull();
     var poly = OblastGeo.PolyName(lat, lon);
     var region = H(OblastGeo.Region(lat, lon));
-    var lvl = poly is not null && snap.ByPolygon.TryGetValue(poly, out var l) ? l : null;
+    // Саме тут: тривога на всю область або в районі цієї точки (а не «десь в області»).
+    var lvl = snap.LevelAt(lat, lon);
+    var raion = OblastGeo.RaionAt(lat, lon) is { } rn && poly is not null && !(snap.ByOblastWhole?.ContainsKey(poly) ?? false) ? H(rn) : region;
+    bool elsewhere = lvl is null && poly is not null && snap.ByPolygon.ContainsKey(poly);
     var sb = new StringBuilder($"🚨 <b>Офіційні тривоги</b> · {DateTime.Now:HH:mm}\n\n");
     sb.AppendLine(lvl switch
     {
-        "red"    => $"🔴 <b>{region} — ТРИВОГА!</b>\n➤ Прямуй в укриття.",
-        "yellow" => $"🟡 <b>{region}</b> — тривога в частині області",
+        "red"    => $"🔴 <b>{raion} — ТРИВОГА!</b>\n➤ Прямуй в укриття.",
+        "yellow" => $"🟡 <b>{raion}</b> — жовтий рівень тривоги\n➤ Прямуй в укриття.",
+        _ when elsewhere => $"🟢 <b>{region}</b> — тут тривоги немає, вона в інших районах області",
         _        => $"🟢 <b>{region}</b> — тривоги немає",
     });
     sb.AppendLine($"\n🇺🇦 По країні: 🔴 {snap.RedUa.Count} · 🟡 {snap.YellowUa.Count} обл.");
-    if (snap.RedUa.Count > 0) sb.AppendLine("🔥 " + RegionList(snap.RedUa, 12));
+    if (snap.RedUa.Count > 0) sb.AppendLine("🔥 " + RedList(snap));
     return sb.ToString();
 }
 
