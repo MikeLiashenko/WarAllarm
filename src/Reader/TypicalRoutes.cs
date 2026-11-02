@@ -191,6 +191,14 @@ public static class TypicalRoutes
     {
         if (t.Pos is not { } p || t.Orbit) return null; // кружляє над містом — нікуди не летить
         // «на Харків»: летить до міста й там зупиняється, поки канал не напише, куди далі.
+        bool jet = t.Ammo?.Contains("реакт", StringComparison.OrdinalIgnoreCase) == true;
+        // Переліт до названого місця — і далі потоком, а не зупинка там.
+        if (t.Approach is { } g && t.Glide)
+        {
+            var route = new List<(double lat, double lon)> { g, p };
+            if (Flows.Route(p, jet, ThreatGeo.Bearing(g, p)) is { } on) route.AddRange(on.Skip(1));
+            return route;
+        }
         if (t.Approach is { } a) return new List<(double lat, double lon)> { a, p };
         if (t.CourseTo is { } c)
         {
@@ -198,6 +206,9 @@ public static class TypicalRoutes
             if (FromPosition((c.lat, c.lon), null, false) is { } further) route.AddRange(further.Skip(1));
             return ClipToUkraine(route);
         }
+        // Дрон — потоком, вивченим із журналів (реактивні своїми дорогами), а не навмання «на Київ / на захід».
+        if (t.Kind is ThreatKind.Drone or ThreatKind.Target && Flows.Route(p, jet, t.HeadingKnown ? t.Heading : null) is { } flow)
+            return flow;
         return FromPosition(p, t.Heading, t.HeadingKnown);
     }
 

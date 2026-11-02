@@ -415,6 +415,13 @@ if (args.Length >= 1 && args[0].Equals("replay", StringComparison.OrdinalIgnoreC
 const string BallisticThreatText = "⚠️ Загроза балістики: пуску ще немає, будь ближче до укриття";
 
 // ── Як цілі рухались по журналу (оффлайн):   dotnet run -- trace <journal.jsonl> 17:10 17:25 [фільтр]
+// Потоки шахедів із журналів:   dotnet run -- flows journal/2026-10-*.jsonl journal/2026-11-*.jsonl
+if (args.Length >= 2 && args[0].Equals("flows", StringComparison.OrdinalIgnoreCase))
+{
+    Flows.Learn(args.Skip(1).OrderBy(f => f), Path.Combine("src", "Reader", "flows.txt") is var p && Directory.Exists(Path.GetDirectoryName(p)) ? p : "flows.txt");
+    return;
+}
+
 if (args.Length >= 4 && args[0].Equals("trace", StringComparison.OrdinalIgnoreCase))
 {
     Journal.Trace(args[1], TimeSpan.Parse(args[2]), TimeSpan.Parse(args[3]), args.Length >= 5 ? args[4] : null);

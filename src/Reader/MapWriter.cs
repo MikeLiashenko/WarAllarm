@@ -142,7 +142,7 @@ public static class MapWriter
             sb.Append(",\"heading\":").Append(t.Heading is { } h ? N(h) : "null");
             // Курс із реального руху (2 точки / «з X на Y») — лише тоді застосунок рухає маркер.
             if (t.HeadingKnown && t.Approach is null) sb.Append(",\"hdgReal\":true");
-            if (t.Approach is not null) sb.Append(",\"toPlace\":true"); // летить до міста: lat/lon — місто (для тривоги), мітка — на маршруті
+            if (t.Approach is not null && !t.Glide) sb.Append(",\"toPlace\":true"); // летить до міста: lat/lon — місто (для тривоги), мітка — на маршруті
             // Висота / падіння з тексту каналу.
             if (t.AltM is { } am) sb.Append(",\"alt\":").Append(N(am));
             if (t.AltNote is { Length: > 0 } an) sb.Append(",\"altNote\":\"").Append(Esc(an)).Append('"');

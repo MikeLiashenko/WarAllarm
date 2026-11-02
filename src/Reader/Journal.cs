@@ -97,6 +97,47 @@ public static class Journal
             Console.WriteLine("   " + Describe(t, day + to));
     }
 
+    /// Прогнати весь журнал через хаб і [tr] мовчки, як наживо (для навчання потоків).
+    public static void Drive(string file, ThreatTracker tr)
+    {
+        var day = DateTime.TryParse(Path.GetFileNameWithoutExtension(file), out var dd) ? dd : DateTime.Today;
+        var posts = new List<(string ch, int id, DateTime at, string text)>();
+        var inHub = new HashSet<(string, int)>();
+        foreach (var line in File.ReadLines(file))
+        {
+            try
+            {
+                var e = JsonDocument.Parse(line).RootElement;
+                var ch = e.GetProperty("ch").GetString()!; var id = e.GetProperty("id").GetInt32();
+                if (e.GetProperty("kind").GetString() == "post")
+                    posts.Add((ch, id, day + TimeSpan.Parse(e.GetProperty("t").GetString()!), e.GetProperty("text").GetString() ?? ""));
+                else inHub.Add((ch, id));
+            }
+            catch { }
+        }
+        var hub = new SourceHub();
+        DateTime last = default;
+        foreach (var (ch, id, at, text) in posts.OrderBy(p => p.at))
+        {
+            // Пости попереднього дня в кінці журналу (23:59) — не стрибаємо в часі назад/вперед.
+            if (last != default && at - last > TimeSpan.FromHours(3)) break;
+            last = at;
+            tr.Tick(at, hub.ListCaps(at), hub.LastListAt);
+            if (ch is "nebo_raketa" or "chyste_neboo")
+            {
+                var ke = KyivMonitor.Analyze(text);
+                if (ke.Signal == KhSignal.Threat && !(ke.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(ke.Raw)))
+                    tr.Ingest(ke, "Київ", at);
+                continue;
+            }
+            if (SourceCatalog.Get(ch) is not { } si || !inHub.Contains((ch, id))) continue;
+            var r = hub.Process(si, text, at);
+            foreach (var s in r.Statuses)
+                _ = s.Circling ? tr.MarkCircling(s.Pos, s.Kind, at) : tr.MarkShot(s.Pos, s.Kind, s.Shot, at, ch);
+            foreach (var e in r.Confirmed) tr.IngestUa(e.Ev, at, (e.Place, e.Pos.lat, e.Pos.lon));
+        }
+    }
+
     static string Describe(Threat t, DateTime at) =>
         $"[{t.Id}] {ThreatTracker.Label(t)} ×{t.Amount} {t.PlaceLabel} · {ThreatGeo.SpeedKmh(t.Kind, t.Ammo):0} км/г"
         + (t.Pos is { } p && t.DrawPos(at) is { } d ? $" · мітка за {ThreatGeo.Km(d, p):0} км" : "") + (t.Down ? " · збито" : "");

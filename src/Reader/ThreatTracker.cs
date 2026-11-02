@@ -73,12 +73,15 @@ public sealed class Threat
     // тримаються тривога, дистанція й ETA — сирена не запізнюється), а Approach — звідки вона
     // летить: мітка малюється там і рухається до міста з реальною швидкістю.
     public (double lat, double lon)? Approach;
+    // Approach — не «летить до міста», а плавний переліт мітки з того місця, де її видно, до
+    // щойно названого: без телепортів між районами, далі — потоком.
+    public bool Glide;
 
     // «Кружляє над Харковом»: ціль нікуди не летить — застосунок водить її колом над містом.
     public bool Orbit;
     public string? DownBy; // який канал написав останній «мінус» про цю ціль
     /// Кружляє над містом або вже долетіла до міста, куди летіла.
-    public bool OrbitingAt(DateTime now) => Orbit || (Approach is { } a && Pos is { } p
+    public bool OrbitingAt(DateTime now) => Orbit || (Approach is { } a && !Glide && Pos is { } p
         && ThreatGeo.SpeedKmh(Kind, Ammo) * 0.85 / 60 * Math.Min(20, (now - LastUpdate).TotalMinutes) >= ThreatGeo.Km(a, p));
 
     /// Де малювати ціль зараз: на шляху Approach → місто, інакше просто Pos.
@@ -93,7 +96,7 @@ public sealed class Threat
     }
 
     /// Підпис для людей: «на Харків», якщо ще летить туди.
-    public string PlaceLabel => Approach is null ? LastPlace : "на " + LastPlace;
+    public string PlaceLabel => Approach is null || Glide ? LastPlace : "на " + LastPlace;
 }
 
 public readonly record struct TrackUpdate(Threat Threat, bool StageChanged, TrackSound Sound, string Note);
@@ -106,6 +109,9 @@ public sealed class ThreatTracker
     readonly object _gate = new(); // Ingest (поток updates) и Tick (фоновый Task) — разные потоки
 
     public ThreatTracker((double lat, double lon) home) => _home = home;
+
+    /// Для навчання потоків (Flows.Learn): ціль переїхала a → b за [хв], або канал назвав курс a → b.
+    public Action<Threat, (double lat, double lon), (double lat, double lon), double, bool>? FlowSink;
 
     // Снимок (копия списка) — безопасно перечислять из карты, пока Tick меняет словарь.
     public IReadOnlyCollection<Threat> Active { get { lock (_gate) return _active.Values.ToList(); } }
@@ -300,6 +306,19 @@ public sealed class ThreatTracker
                 LaunchGroups.Absorb(pos, Math.Max(1, ev.Count), now);
             var prevPos = t!.Pos;
             var drawnBefore = isNew ? null : t.DrawPos(now); // до оновлення LastUpdate: де мітка саме зараз
+            var prevSeen = t.LastUpdate;
+            // Пост про місце ПОЗАДУ цілі, проти потоку («Вишеньки» вже після «Мишоловки») — канал
+            // запізнився, а не ціль розвернулась: мітка не відскакує назад і не стає другою ціллю.
+            // Розворот, названий у тексті, чи названий новий курс — справжні.
+            if (!isNew && !approx && t.Kind is ThreatKind.Drone or ThreatKind.Target && !t.Orbit
+                && (drawnBefore ?? prevPos) is { } here && ThreatGeo.Km(here, pos) is >= 3 and <= 35
+                && now - t.LastUpdate < TimeSpan.FromMinutes(6) && ev.Toward is null && !TurnBack.IsMatch(ev.Raw)
+                && Flows.Against(here, pos, IsJet(t.Ammo) || IsJet(ev.Extra)))
+            {
+                if (t.Approach is null) t.LastUpdate = now;
+                t.Hits.Add(ev.City ?? gp.name);
+                return new TrackUpdate(t, false, TrackSound.None, Note(t));
+            }
             // Прямо сказано «реактивний» — швидкість уточнюємо навіть для вже відомої цілі.
             t!.Ammo = IsJet(ev.Extra) ? ev.Extra : t.Ammo ?? ev.Extra;
             t.Oblast = ev.Oblast ?? t.Oblast;
@@ -324,18 +343,25 @@ public sealed class ThreatTracker
             if (t.Trail.Count == 0 || t.Trail[^1].place != gp.name) t.Trail.Add((gp.name, t.DistKm, now));
             // «на Харків» — ще летить: продовжуємо з того місця, де мітка зараз (повторний пост не
             // відкидає її назад); нова ціль — за ~10 хв польоту від міста з боку пуску / фронту.
-            t.Approach = null;
+            t.Approach = null; t.Glide = false;
             if (!approx && ev.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target
                 && ThreatParser.HeadingTo(ev.Raw, ev.City ?? gp.name))
             {
                 var start = NotFarther(drawnBefore ?? ApproachStart(ev, t, pos), pos, MaxApproachKm(t.Kind));
                 if (ThreatGeo.Km(start, pos) >= 3) t.Approach = start;
             }
+            // Дрон уже на карті, а канал назвав нове місце: мітка не телепортується (у Києві канали
+            // називають райони вперемішку — мітка стрибала туди-сюди на 5–10 км), а летить туди з
+            // реальною швидкістю від того місця, де її видно.
+            else if (!approx && !isNew && ev.Kind is ThreatKind.Drone or ThreatKind.Target && !t.Orbit
+                     && drawnBefore is { } db && ThreatGeo.Km(db, pos) is >= 3 and <= 40)
+            { t.Approach = db; t.Glide = true; }
             AddTrack(t, t.Approach ?? pos);
             if (prevPos is { } pp && ThreatGeo.Km(pp, pos) > 2)
             {
                 t.Heading = ThreatGeo.Bearing(pp, pos); // реальний рух між двома точками
                 t.HeadingKnown = true;
+                if (!approx) FlowSink?.Invoke(t, pp, pos, (now - prevSeen).TotalMinutes, false);
             }
             else if (!t.HeadingKnown)
                 t.Heading = ThreatGeo.Bearing(pos, ThreatGeo.UACenter); // лише для стрілки, не для руху
@@ -354,6 +380,7 @@ public sealed class ThreatTracker
                 t.HeadingKnown = true;
                 t.CourseTo = (dest.name, dest.lat, dest.lon);
                 t.Orbit = false;
+                if (!approx) FlowSink?.Invoke(t, pos, (dest.lat, dest.lon), 0, true);
             }
             ApplyAltitude(t, ev.Alt ?? Altitude.Parse(ev.Raw), now);
             var prev = t.Stage; t.Stage = Classify(t);
@@ -433,6 +460,14 @@ public sealed class ThreatTracker
     // і для реактивного теж: з 60 км він «летів» би до міста після того, як уже пролетів далі.
     static (double lat, double lon) ApproachStart(ThreatEvent ev, Threat t, (double lat, double lon) dest)
     {
+        // Дрон приходить туди, звідки йде потік (не завжди з боку фронту: на Київ — з Чернігівщини,
+        // на Білу Церкву — з-за Києва), і «на X» пишуть, коли він уже близько.
+        bool jet = IsJet(t.Ammo) || IsJet(ev.Extra);
+        if (LaunchSites.Resolve(ev.From) is null && t.Kind is ThreatKind.Drone or ThreatKind.Target && Flows.Dir(dest, jet) is { } d)
+        {
+            double r = (d + 180) * Math.PI / 180, km = jet ? 15 : 20;
+            return (dest.lat + km * Math.Cos(r) / 111, dest.lon + km * Math.Sin(r) / (111 * Math.Cos(dest.lat * Math.PI / 180)));
+        }
         var from = LaunchSites.Resolve(ev.From) is { } f ? (f.lat, f.lon) : LaunchSites.NearestFront(dest);
         return NotFarther(from, dest, MaxApproachKm(t.Kind));
     }
@@ -461,6 +496,9 @@ public sealed class ThreatTracker
     }
 
     static bool IsJet(string? ammo) => ammo?.Contains("реакт", StringComparison.OrdinalIgnoreCase) == true;
+
+    // «Розвертається на Обухів», «повернув назад» — справжній розворот, а не запізнілий пост.
+    static readonly Regex TurnBack = new(@"розверт|розворот|разворот|разверн|поверну|поверта|поворачива|назад|поверн\w*\s+на", RegexOptions.IgnoreCase);
 
     // Траєкторія: «з X на Y» дає курс; балістика й КАБ летять від точки пуску/скиду до
     // цілі з реальною швидкістю засобу (застосунок рухає маркер уздовж From→To).
@@ -553,6 +591,8 @@ public sealed class ThreatTracker
             // має забирати новий пост, поки свіжа мітка цього дрона лишається «примарою»
             // (2.11 17:30: Вишеньки → Мишоловка дало дві мітки).
             double score = Math.Min(km, fromMark) + 5 * age.TotalMinutes;
+            // Шлях від мітки сюди проти потоку — швидше інша ціль (чи запізнілий пост), ніж її рух.
+            if (Flows.Against(c.DrawPos(now) ?? cp, pos, jet || IsJet(c.Ammo))) score += 25;
             if (score < bestKm) { bestKm = score; best = c; }
         }
         return best;
