@@ -522,7 +522,7 @@ public sealed class SourceHub
 
     // Остання «загроза балістики» (будь-який канал) і звідки: «Ракета на Харків» за хвилину
     // після «балістика з Бєлгорода» — це та сама балістика, а не крилата, що летить на Київ.
-    DateTime _ballAt = DateTime.MinValue;
+    DateTime _ballAt = DateTime.MinValue, _cruiseAt = DateTime.MinValue;
     string? _ballFrom;
 
     static TimeSpan CtxTtl(ThreatKind k) => k switch
@@ -663,7 +663,10 @@ public sealed class SourceHub
 
             // ── розбір ──
             string? dflt = src.Oblasts.Length == 1 ? src.Oblasts[0] : null;
-            bool recentBall = at - _ballAt < TimeSpan.FromMinutes(4);
+            // Але йде атака крилатими (бандеролі/Х-59) — «6 ракет на Чорноморськ» це вони, а не
+            // балістика через одну «швидкісну ціль на Затоку» (2.11: «Балістика ×10»).
+            if (Cruise.IsMatch(clean)) _cruiseAt = at;
+            bool recentBall = at - _ballAt < TimeSpan.FromMinutes(4) && at - _cruiseAt > TimeSpan.FromMinutes(10);
             var events = ThreatParser.Parse(clean, dflt)
                 .Where(e => e.Kind is not (ThreatKind.AllClear or ThreatKind.Aviation))
                 .Select(e =>
@@ -751,7 +754,11 @@ public sealed class SourceHub
                     // Парсер лишає перше місце з «Вишневе/Пулини»; другий варіант теж потрібен.
                     if (ev.City is { Length: > 0 } ec && Regex.Match(ev.Raw, Regex.Escape(ec) + @"(?:\s*/\s*[^/\n;,.()]+)+") is { Success: true } alts)
                         phrase = alts.Value;
-                    if (ofCity && _lastPlaced.TryGetValue(src.User, out var lastP) && at - lastP.at <= StatusTtl)
+                    // «Одеса, 6 бандеролей на місто!» — місто названо тут же, на початку поста.
+                    if (ofCity && Regex.Match(ev.Raw, @"^\W*(\p{Lu}[\p{L}'’ʼ\-]{2,})\s*[,:!—–-]") is { Success: true } head
+                        && Locate(head.Groups[1].Value, rawObl ?? ev.Oblast, src, bare, out bool headName) is { } hg && headName)
+                        g = hg;
+                    else if (ofCity && _lastPlaced.TryGetValue(src.User, out var lastP) && at - lastP.at <= StatusTtl)
                         g = (lastP.place, lastP.pos.lat, lastP.pos.lon);
                     else
                     {
@@ -1136,7 +1143,8 @@ public sealed class SourceHub
             seg = Regex.Replace(seg, @"\s+(?:тг|отг|громада|територіальна громада)\.?$", "", RegexOptions.IgnoreCase);
             seg = Regex.Replace(seg, @"^\d{3,5}(?:\s*-\s*\d{3,5})?\s*м\b\s*", "");    // висота «2500-2700м Спасское»
             int count = 1;
-            var m = Regex.Match(seg, @"^(\d+)\s*[хx×]?\s+");
+            // «16 Фонтана» — зупинка в Одесі (16-та станція Великого Фонтану), а не 16 цілей.
+            var m = Regex.Match(seg, @"^(\d+)(?!\s*(?:-?(?:а|та|ти)\s+)?(?:фонтан|станці|ст\.\s|км\b|хв))\s*[хx×]?\s+", RegexOptions.IgnoreCase);
             if (m.Success) { int.TryParse(m.Groups[1].Value, out count); seg = seg[m.Length..]; }
             // Назва засобу перед місцем: «бандероль — Оболонь», «бандеролі: Дарниця», «ракета Бровари».
             var wm = Regex.Match(seg, @"^(?:бандерол\w*|ракет\w*|крилат\w*|ціл[ьі]\w*|каб\w*|шахед\w*|реактив\w*|рбпла|бпла)\s*[-—–:]?\s*", RegexOptions.IgnoreCase);

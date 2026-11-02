@@ -252,7 +252,11 @@ public sealed class ThreatTracker
             {
                 bool fresh = Slang.NewTarget(ev.Raw);
                 if (!fresh && now - t.LastUpdate < TimeSpan.FromMinutes(4))
+                {
+                    // Група ракет уже далі, але «до 10 бандеролей на Одесу» — це про неї ж: ×N росте.
+                    if (t.Kind == ThreatKind.Missile && ev.Count > t.Count) t.Count = ev.Count;
                     return new TrackUpdate(t, false, TrackSound.None, Note(t));
+                }
                 key = $"{placeKey}#{now:HHmmss}";
                 _alias[placeKey] = key;
                 isNew = true;
@@ -260,12 +264,14 @@ public sealed class ThreatTracker
             // Нове місто — це часто ТА САМА ціль, що пролетіла далі. Раніше кожне місто
             // ставало новою міткою, а стара висіла «примарою» 15 хв без оновлень (і курсу
             // не було — лише здогадка «вглиб країни»). Тепер шукаємо попередника.
+            bool movedGroup = false;
             if (isNew && !approx && Predecessor(ev, pos, now) is { } pred)
             {
                 _active.Remove(key);
                 t = pred;
                 _alias[placeKey] = pred.Id;
                 isNew = false;
+                movedGroup = ev.Kind == ThreatKind.Missile;
             }
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
             // Місцевий монітор уже намалював цей дрон: лишається одна мітка.
@@ -299,7 +305,8 @@ public sealed class ThreatTracker
             UpdateOrbit(t, ev.Raw, !isNew && prevPos is { } sp && ThreatGeo.Km(sp, pos) <= 3, now, approx);
             t.LastUpdate = now;
             t.Hits.Add(ev.City ?? gp.name);
-            t.Count = ev.Count > 0 ? ev.Count : 1;
+            // Група ракет, що переїхала: «на Чорноморськ» без числа не зменшує «7х» групи.
+            t.Count = movedGroup ? Math.Max(t.Count, Math.Max(1, ev.Count)) : ev.Count > 0 ? ev.Count : 1;
             t.PrevDistKm = t.DistKm;
             t.Pos = pos; t.LastPlace = place;
             t.DistKm = ThreatGeo.Km(pos, _home);
@@ -494,6 +501,7 @@ public sealed class ThreatTracker
         if (kind is not (ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target)) return null;
         // «2 новые шаболды», «+2 шахеди» — канал прямо каже, що це інші цілі.
         if (Slang.NewTarget(ev.Raw)) return null;
+        if (kind == ThreatKind.Missile) return MissileGroup(ev, pos, now);
         bool jet = IsJet(ev.Extra), plain = Slang.PlainDrone(ev.Raw);
         bool toBigCity = BigCities.Any(b => ThreatGeo.Km(b, pos) <= 5) && ThreatParser.HeadingTo(ev.Raw, ev.City);
         Threat? best = null;
@@ -531,6 +539,31 @@ public sealed class ThreatTracker
             if (km < bestKm) { bestKm = km; best = c; }
         }
         return best;
+    }
+
+    // Ракети йдуть групою, і канали називають її по-різному майже одночасно: «5 на Одесу»,
+    // «7 на Чорноморськ», «на Затоку/Чорноморськ» (2.11 — десять бандеролей стали ~10 мітками
+    // й ~50 «бортами»). Той самий засіб у межах 70 км за 8 хв — та сама група: мітка
+    // переїжджає, ×N — найбільше назване число, а не сума.
+    Threat? MissileGroup(ThreatEvent ev, (double lat, double lon) pos, DateTime now)
+    {
+        Threat? best = null;
+        double bestKm = double.MaxValue;
+        foreach (var c in _active.Values)
+        {
+            if (c.Kind != ThreatKind.Missile || c.Zone != "UA" || c.Launch || c.Approx || c.Down || c.Pos is not { } cp) continue;
+            if (now - c.LastUpdate > TimeSpan.FromMinutes(8) || !SameAmmo(ev.Extra, c.Ammo)) continue;
+            double km = Math.Min(ThreatGeo.Km(cp, pos), ThreatGeo.Km(c.DrawPos(now) ?? cp, pos));
+            if (km < 3 || km > 70) continue;
+            if (km < bestKm) { bestKm = km; best = c; }
+        }
+        return best;
+    }
+
+    static bool SameAmmo(string? a, string? b)
+    {
+        static string Norm(string? s) => Regex.Replace((s ?? "").ToLowerInvariant().Replace('x', 'х'), @"[^\p{L}\d]", "") is var n && n.StartsWith("бандерол") ? "бандерол" : n;
+        return a is null || b is null || Norm(a) == Norm(b);
     }
 
     static void AddTrack(Threat t, (double lat, double lon) p)

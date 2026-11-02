@@ -81,6 +81,19 @@ public static class OblastGeo
         // Неопукла область: точка поза полігоном — тягнемо до середини, доки не всередині.
         for (int i = 0; i < 6 && NameAt(pt.lat, pt.lon) != en; i++)
             pt = ((pt.lat + (minLat + maxLat) / 2) / 2, (pt.lon + (minLon + maxLon) / 2) / 2);
+        // Середина рамки сама поза областю (Одещина: центр рамки — у Придністров'ї) — найближча точка всередині.
+        if (NameAt(pt.lat, pt.lon) != en)
+        {
+            var near = pt; double best = double.MaxValue;
+            for (int y = 1; y < 20; y++)
+                for (int x = 1; x < 20; x++)
+                {
+                    double la = minLat + (maxLat - minLat) * y / 20, lo = minLon + (maxLon - minLon) * x / 20;
+                    double d = (la - pt.lat) * (la - pt.lat) + (lo - pt.lon) * (lo - pt.lon);
+                    if (d < best && NameAt(la, lo) == en) { best = d; near = (la, lo); }
+                }
+            pt = near;
+        }
         return pt;
     }
 
