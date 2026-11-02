@@ -371,7 +371,9 @@ public static class MapImage
             var left = new SKRect(cp.X - 5 - tw, cp.Y - 17, cp.X - 5, cp.Y);
             var below = new SKRect(cp.X - tw / 2, cp.Y + 4, cp.X + tw / 2, cp.Y + 20);
             var below2 = new SKRect(cp.X - tw / 2, cp.Y + 14, cp.X + tw / 2, cp.Y + 30); // ціль прямо на місті
-            var at = new[] { right, left, below, below2 }.FirstOrDefault(r => !HitsTarget(r), right);
+            // Біля краю картинки (Луганськ) — не справа, бо обріжеться до «Луганс».
+            var fits = new[] { right, left, below, below2 }.Where(r => r.Left >= 2 && r.Right <= W - 2).ToArray();
+            var at = fits.FirstOrDefault(r => !HitsTarget(r), fits.Length > 0 ? fits[0] : left);
             canvas.DrawText(nm, at.Left, at.Bottom - 4, cityHalo); // темна обводка для читабельності
             canvas.DrawText(nm, at.Left, at.Bottom - 4, cityText);
         }
@@ -529,8 +531,9 @@ public static class MapImage
         {
             var cp = P(lat, lon);
             canvas.DrawCircle(cp, 3f, cityDot);
-            canvas.DrawText(nm, cp.X + 6, cp.Y - 5, cityHalo);
-            canvas.DrawText(nm, cp.X + 6, cp.Y - 5, cityText);
+            float tx = cp.X + 6 + cityText.MeasureText(nm) > W - 2 ? cp.X - 6 - cityText.MeasureText(nm) : cp.X + 6;
+            canvas.DrawText(nm, tx, cp.Y - 5, cityHalo);
+            canvas.DrawText(nm, tx, cp.Y - 5, cityText);
         }
 
         // Дуга a→b (контрольна точка зсунута вбік — «вигнуті» лінії як на радарах).

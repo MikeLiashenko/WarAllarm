@@ -160,9 +160,8 @@ public static class PlaceFinder
         (@"^(?:київське )?(?:водосховищ|море\b)", "Київське водосховище", 50.82, 30.47),
         (@"^столиц", "Київ", 50.4547, 30.5238),
         // Місцевий сленг: «Троя» = Троєщина (Київ), «Амур» = Амур-Нижньодніпровський (Дніпро),
-        // «Хортицький» = район Запоріжжя, ТЕЦ-6 — біля Троєщини.
+        // «Хортицький» = район Запоріжжя.
         (@"^тро[яюєї]\b", "Троєщина", 50.516, 30.605),
-        (@"^тец[- ]?6\b", "ТЕЦ-6 (Київ)", 50.524, 30.655),
         (@"^амур\b", "Амур (Дніпро)", 48.505, 35.085),
         (@"^хортицьк", "Хортицький р-н (Запоріжжя)", 47.820, 35.030),
         // Нема в довіднику — без них «Космос» ставав Космачем у Карпатах, «Лісопарк» — Лиском на
@@ -180,7 +179,79 @@ public static class PlaceFinder
         (@"^львов(?:а|у|і|ом)$", "Львів", 49.84, 24.03), // «на Львова» — місто, а не село Львове на Херсонщині
         (@"^канатов", "Канатове", 48.580, 32.376),
         (@"^шпитьк", "Шпитьки", 50.415, 30.120),
+        // Електростанції за назвою (координати — OpenStreetMap). «ТЕЦ-5» є і в Києві, і в
+        // Харкові — береться найближча до регіону каналу.
+        (@"^т[еэ]ц[- ]?5\b|^видубицьк\w* т[еэ]ц", "ТЕЦ-5 (Київ)", 50.394, 30.568),
+        (@"^т[еэ]ц[- ]?5\b", "ТЕЦ-5 (Харків)", 49.971, 36.113),
+        (@"^т[еэ]ц[- ]?6\b", "ТЕЦ-6 (Київ)", 50.531, 30.667),
+        (@"^т[еэ]ц[- ]?4\b|^дарницьк\w* т[еэ]ц", "Дарницька ТЕЦ (Київ)", 50.448, 30.644),
+        (@"^трипільськ\w* т[еэ][сц]", "Трипільська ТЕС", 50.133, 30.751),
+        (@"^(?:київськ\w* )?га[еэ]с\b", "Київська ГАЕС", 50.610, 30.488),
+        (@"^київськ\w* г[еэ]с\b", "Київська ГЕС", 50.588, 30.511),
+        (@"^дніпрог[еэ]с|^днепрог[еэ]с|^дніпровськ\w* г[еэ]с", "ДніпроГЕС", 47.868, 35.086),
+        (@"^придніпровськ\w* т[еэ][сц]|^приднепровск\w* т[еэ][сц]", "Придніпровська ТЕС", 48.406, 35.111),
+        (@"^зміївськ\w* т[еэ]с|^змиевск\w* т[еэ]с", "Зміївська ТЕС", 49.586, 36.528),
+        (@"^(?:зеленодольськ|криворізьк)\w* т[еэ]с", "Криворізька ТЕС", 47.545, 33.660),
+        (@"^ладижинськ\w* т[еэ]с", "Ладижинська ТЕС", 48.705, 29.219),
+        (@"^бурштинськ\w* т[еэ]с", "Бурштинська ТЕС", 49.211, 24.662),
+        (@"^добротвірськ\w* т[еэ]с", "Добротвірська ТЕС", 50.214, 24.376),
+        (@"^кременчуцьк\w* г[еэ]с", "Кременчуцька ГЕС", 49.078, 33.251),
+        (@"^канівськ\w* г[еэ]с", "Канівська ГЕС", 49.761, 31.473),
+        (@"^середньодніпровськ\w* г[еэ]с", "Середньодніпровська ГЕС", 48.548, 34.541),
+        (@"^дністровськ\w* г?а?[еэ]с", "Дністровська ГЕС", 48.513, 27.473),
+        (@"^тополя[- ]т[еэ]ц", "Сумська ТЕЦ", 50.933, 34.819),
+        (@"^придні?к(?:а|у|ом|і)?\b|^приднепровск\b","Придніпровськ (Дніпро)", 48.405, 35.110),
     };
+
+    // Голе «ТЕЦ»/«ТЕС»/«ГЕС» — станція МІСТА каналу: «Курс ТЕЦ» у Чернігові, «На ГЕС» у
+    // Запоріжжі (ДніпроГЕС) чи Києві (Київська ГЕС). Лише якщо станція ≤ PlantKm від центру
+    // області каналу. У Києві й Харкові ТЕЦ кілька — голе «ТЕЦ» там нікуди не ставимо.
+    const double PlantKm = 55;
+    const string Tec = @"^т[еэ]ц(?:і|ю|и|у)?\b(?![- ]?\d)", Tes = @"^т[еэ]с(?:і|ю|и|у)?\b", Ges = @"^г[еэ]с(?:і|у)?\b";
+    static readonly (string re, string name, double lat, double lon)[] Plants =
+    {
+        (Tec, "Чернігівська ТЕЦ", 51.452, 31.266),
+        (Tec, "Херсонська ТЕЦ", 46.676, 32.650),
+        (Tec, "Черкаська ТЕЦ", 49.389, 32.065),
+        (Tec, "Миколаївська ТЕЦ", 46.951, 31.988),
+        (Tec, "Одеська ТЕЦ", 46.504, 30.716),
+        (Tec, "Сумська ТЕЦ", 50.933, 34.819),
+        (Tec, "Придніпровська ТЕС", 48.406, 35.111),
+        (Tes, "Придніпровська ТЕС", 48.406, 35.111),
+        (Tes, "Трипільська ТЕС", 50.133, 30.751),
+        (Tes, "Зміївська ТЕС", 49.586, 36.528),
+        (Tes, "Бурштинська ТЕС", 49.211, 24.662),
+        (Ges, "Київська ГЕС", 50.588, 30.511),
+        (Ges, "ДніпроГЕС", 47.868, 35.086),
+        (Ges, "Середньодніпровська ГЕС", 48.548, 34.541),
+    };
+
+    /// Орієнтир із [Aliases] (найближчий до регіону, ≤ maxKm), інакше станція з [Plants].
+    static (string name, double lat, double lon)? Landmark(string q, string rawLow, IReadOnlyCollection<string> region, double maxKm, Func<(double, double), bool>? ok = null)
+    {
+        (string name, double lat, double lon)? best = null;
+        double bestKm = double.MaxValue;
+        foreach (var a in Aliases)
+        {
+            if (a.name is null || !(Regex.IsMatch(q, a.re) || Regex.IsMatch(rawLow, a.re)) || ok?.Invoke((a.lat, a.lon)) == false) continue;
+            var km = RegionKm((a.lat, a.lon), region);
+            if (km > maxKm) continue;
+            if (km is null) return (a.name, a.lat, a.lon); // без регіону — перший, як і раніше
+            if (km < bestKm) { bestKm = km.Value; best = (a.name, a.lat, a.lon); }
+        }
+        if (best is not null) return best;
+        foreach (var p in Plants)
+        {
+            if (!(Regex.IsMatch(q, p.re) || Regex.IsMatch(rawLow, p.re)) || ok?.Invoke((p.lat, p.lon)) == false) continue;
+            if (RegionKm((p.lat, p.lon), region) is { } km && km <= PlantKm && km < bestKm) { bestKm = km; best = (p.name, p.lat, p.lon); }
+        }
+        return best;
+    }
+
+    // Сільські назви повторюються і в Криму (Оріхове, Березовка, Михайловка, Комаровка…), а
+    // загрози, які ведуть наші канали, — над підконтрольною територією: кримського тезку не
+    // беремо ніколи. Великі міста Криму, названі прямо (Джанкой, Сімферополь), — з курованого.
+    static bool Crimea(double lat, double lon) => lat < 46.3 && OblastGeo.PolyName(lat, lon) is "Crimea" or "Sevastopol'";
 
     // Нормовані назви довідника — рахуємо раз (раніше Norm для кожного з ~5300 імен на
     // кожен запит: десятки тисяч Regex на пост на слабкому сервері).
@@ -304,8 +375,7 @@ public static class PlaceFinder
         if (q.Length < 3 || (Geo.Canonical(q) is not null && q != "запоріжжя") || OblastWord.IsMatch(q)) return null;
         var one = new[] { oblast };
         var rawLow = raw.Trim().ToLowerInvariant();
-        if (Aliases.FirstOrDefault(a => (Regex.IsMatch(q, a.re) || Regex.IsMatch(rawLow, a.re)) && InOblast((a.lat, a.lon), oblast, slackKm)) is { name: not null } al)
-            return (al.name, al.lat, al.lon);
+        if (Landmark(q, rawLow, one, double.MaxValue, p => InOblast(p, oblast, slackKm)) is { } al) return al;
         if (RaionGeo.Find(q, one) is { } rg && InOblast((rg.lat, rg.lon), oblast, slackKm)) return rg;
         if (ThreatGeo.Resolve(raw) is { } g && Literal(g.name, q) && InOblast((g.lat, g.lon), oblast, slackKm)) return g;
         bool real = CityNorm.Any(c => LiteralN(c, q));
@@ -316,6 +386,7 @@ public static class PlaceFinder
             int sc = ScoreN(CityNorm[i], q);
             if (sc == 0 || (real && !LiteralN(CityNorm[i], q))) continue;
             var c = Cities.All[i];
+            if (Crimea(c.lat, c.lon)) continue;
             double key = sc * 1000 - i * 0.01;
             if (key > bestKey && InOblast((c.lat, c.lon), oblast, slackKm)) { bestKey = key; best = c; }
         }
@@ -338,15 +409,13 @@ public static class PlaceFinder
         // Норма прибирає цифри («ТЕЦ-6» → «тец-»), тож орієнтири звіряємо й із сирим текстом.
         var rawLow = raw.Trim().ToLowerInvariant();
         // Орієнтир — лише якщо він у регіоні каналу (сільські назви повторюються по країні).
-        if (Aliases.FirstOrDefault(a => (Regex.IsMatch(q, a.re) || Regex.IsMatch(rawLow, a.re))
-                                        && !(RegionKm((a.lat, a.lon), region) > maxKm)) is { name: not null } al)
-            return (al.name, al.lat, al.lon);
+        if (Landmark(q, rawLow, region, maxKm) is { } al) return al;
 
         // 1) Курований довідник (райони міст, ключові н.п.). Він ловить і префікс фрази
         //    («Гайсин прощається…» → Гайсин), тож перевіряємо, що назва — вся фраза.
         (string name, double lat, double lon)? cur = null;
         int curScore = 0;
-        if (ThreatGeo.Resolve(raw) is { } g && Score(g.name, q) is > 0 and var gs)
+        if (ThreatGeo.Resolve(raw) is { } g && Score(g.name, q) is > 0 and var gs && !(Crimea(g.lat, g.lon) && !Literal(g.name, q)))
         {
             var near = RegionKm((g.lat, g.lon), region);
             if (near is null || near <= maxKm) { cur = g; curScore = gs; }
@@ -365,7 +434,7 @@ public static class PlaceFinder
         {
             var c = Cities.All[i];
             int sc = ScoreN(CityNorm[i], q);
-            if (sc == 0) continue;
+            if (sc == 0 || Crimea(c.lat, c.lon)) continue;
             if (real && !LiteralN(CityNorm[i], q)) continue;
             var km = RegionKm((c.lat, c.lon), region);
             if (km is { } k && k > maxKm) continue;
@@ -390,7 +459,7 @@ public static class PlaceFinder
         if (q.Length < 4 || Geo.Canonical(q) is not null && q != "запоріжжя" || OblastWord.IsMatch(q)) return null;
         var hits = new List<int>();
         for (int i = 0; i < CityNorm.Length; i++)
-            if (LiteralN(CityNorm[i], q)) hits.Add(i);
+            if (LiteralN(CityNorm[i], q) && !Crimea(Cities.All[i].lat, Cities.All[i].lon)) hits.Add(i);
         if (hits.Count == 0) return null;
         var f = Cities.All[hits[0]];
         if (hits.Any(i => ThreatGeo.Km((Cities.All[i].lat, Cities.All[i].lon), (f.lat, f.lon)) > 40)) return null;
@@ -409,6 +478,7 @@ public static class PlaceFinder
         {
             if (!CityNorm[i].StartsWith(q)) continue;
             var c = Cities.All[i];
+            if (Crimea(c.lat, c.lon)) continue;
             if (RegionKm((c.lat, c.lon), region) is { } km && km <= bestKm) { bestKm = km; best = c; }
         }
         return best;
@@ -977,6 +1047,8 @@ public sealed class SourceHub
             for (int j = i; j < toks.Count && run.Count < 3; j++)
             {
                 var t = toks[j];
+                // «ТЕЦ 6» — номер станції частина назви.
+                if (t.All(char.IsDigit) && run.Count > 0 && Regex.IsMatch(run[^1], "^(?:ТЕЦ|ТЭЦ)$", RegexOptions.IgnoreCase)) { run.Add(t); continue; }
                 if (NotName.IsMatch(t.TrimEnd('.')) || !char.IsUpper(t[0]) && !lowOk) break;
                 run.Add(t);
             }

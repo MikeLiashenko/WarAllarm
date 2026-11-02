@@ -781,12 +781,15 @@ class _Map3DPainter extends CustomPainter {
       if (!screen.contains(p)) continue;
       final fs = big ? 11.0 : c.tier <= 1 ? 10.0 : 9.0;
       final label = cityLabel(c.name);
-      final box = Rect.fromCenter(center: p + Offset(0, -fs), width: label.length * fs * 0.6 + 6, height: fs * 1.3);
+      final w = label.length * fs * 0.6 + 6;
+      // Near the screen edge slide the label inwards instead of cutting it.
+      final at = Offset(size.width > w + 4 ? p.dx.clamp(w / 2 + 2, size.width - w / 2 - 2).toDouble() : p.dx, p.dy - fs);
+      final box = Rect.fromCenter(center: at, width: w, height: fs * 1.3);
       if (!big && placed.any((r) => r.overlaps(box))) continue;
       placed.add(box);
       canvas.drawCircle(p, big ? 2.6 : c.tier <= 1 ? 2 : 1.4,
           Paint()..color = big ? AppColors.textPrimary.withValues(alpha: 0.8) : AppColors.textSecondary);
-      _text(canvas, label, p + Offset(0, -fs), fs,
+      _text(canvas, label, at, fs,
           (big ? AppColors.textPrimary : AppColors.textSecondary).withValues(alpha: big ? 0.92 : 0.8),
           bold: big);
     }

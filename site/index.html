@@ -276,6 +276,7 @@ function motionOf(t, now, alarm){
 // ── Полотно ────────────────────────────────────────────────────────────────────
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 let W=0, H=0, dpr=1, fit=null, latest=null, base=null, baseKey='', baseView=null, alarmVer=0, alarmSet=null;
+let baseLabels = []; // підписи міст на підкладці — щоб дописати поверх значка цілі
 function computeFit(){
   dpr = Math.min(2, window.devicePixelRatio||1);
   W = cv.clientWidth; H = cv.clientHeight;
@@ -352,13 +353,18 @@ function drawBase(s){
   // містечка, найближче — села (крапки рівномірно, підписи без накладань).
   const BIG = new Set(['Київ','Харків','Одеса','Дніпро','Львів','Запоріжжя','Миколаїв','Полтава','Суми','Чернігів','Вінниця','Херсон','Житомир','Ужгород','Луганськ','Сімферополь']);
   const z = view.s, placed = [], cell = new Map();
+  baseLabels = [];
   const label = (nm, q, fs, color) => {
-    const w = nm.length*fs*0.58+4, h = fs*1.2, box = [q[0]+4, q[1]-4-h, q[0]+4+w, q[1]-4];
-    for(const o of placed) if(box[0]<o[2] && box[2]>o[0] && box[1]<o[3] && box[3]>o[1]) return;
-    placed.push(box);
     c.font = '600 '+fs+'px "Segoe UI",system-ui,sans-serif';
-    c.lineWidth = 3; c.strokeStyle = PAL.land; c.strokeText(nm, q[0]+5, q[1]-4);
-    c.fillStyle = color; c.fillText(nm, q[0]+5, q[1]-4);
+    // Біля правого/верхнього краю (Луганськ на вузькому телефоні) — підпис ліворуч/нижче
+    // точки, а не обрізаний «Луганс».
+    const w = c.measureText(nm).width+4, h = fs*1.2, y = q[1]-4-h < 2 ? q[1]+4+h*0.8 : q[1]-4;
+    const free = x => x >= 1 && x+w <= W-1 && !placed.some(o => x-1<o[2] && x-1+w>o[0] && y-h<o[3] && y>o[1]);
+    const x = [q[0]+5, q[0]-5-w].find(free);
+    if(x === undefined) return;
+    placed.push([x-1, y-h, x-1+w, y]); baseLabels.push({ nm, x, y, w, h, fs, color });
+    c.lineWidth = 3; c.strokeStyle = PAL.land; c.strokeText(nm, x, y);
+    c.fillStyle = color; c.fillText(nm, x, y);
   };
   const dot = (q, r, color) => { c.beginPath(); c.arc(q[0], q[1], r, 0, 7); c.fillStyle = color; c.fill(); c.lineWidth = 1; c.strokeStyle = PAL.land; c.stroke(); };
   if(z < 1.7){
@@ -524,6 +530,14 @@ function draw(){
     if(t.down) text(t.altNote || 'падає', x, y+badgeR+13, 11, '#FF6B5E', 'center');
     if((t.n||1) > 1) text('×'+t.n, x, y-badgeR-3, 13, PAL.tx, 'center');
   }
+  // Значок цілі на підписі міста («…цьк», «ркаси») — підпис дописуємо поверх.
+  if(baseView && baseView.s === view.s && baseView.tx === view.tx && baseView.ty === view.ty)
+    for(const L of baseLabels)
+      if(icons.some(i => !i.mo.landed && i.x+badgeR*1.4 > L.x && i.x-badgeR*1.4 < L.x+L.w && i.y+badgeR*1.4 > L.y-L.h && i.y-badgeR*1.4 < L.y)){
+        ctx.font = '600 '+L.fs+'px "Segoe UI",system-ui,sans-serif';
+        ctx.lineWidth = 3; ctx.strokeStyle = PAL.land; ctx.lineJoin = 'round'; ctx.strokeText(L.nm, L.x, L.y);
+        ctx.fillStyle = L.color; ctx.fillText(L.nm, L.x, L.y);
+      }
   if(home){
     const [hx, hy] = P(home.lon, home.lat);
     ctx.beginPath(); ctx.arc(hx, hy, 5, 0, Math.PI*2);

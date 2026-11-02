@@ -624,6 +624,8 @@ class _MapPainter extends CustomPainter {
     // --- Cities / towns / villages (tiered by zoom, thinned + de-cluttered) ---
     // kCities is sorted big→small, so important places claim dots/labels first.
     final placed = <Rect>[]; // label boxes already drawn (collision avoidance)
+    // Drawn city labels — redrawn on top where a target icon covers them («…цьк»).
+    final cityLabels = <(String, Offset, double, Color, Rect)>[];
     final dotCell = <int, int>{}; // per-grid-cell village dot cap (even density)
     for (final c in kCities) {
       if (isLatinName(c.name)) continue; // «Desna», «… Microdistrict» — англ. дублі
@@ -680,8 +682,13 @@ class _MapPainter extends CustomPainter {
       // Skip a label if it would overlap one already drawn.
       final w = c.name.length * fs * 0.6 + 4;
       final h = fs * 1.2;
+      // Near the screen edge (Луганськ on a phone) slide the label inwards
+      // instead of letting it be cut to «Луганс».
+      final cx = size.width > w + 4
+          ? p.dx.clamp(w / 2 + 2, size.width - w / 2 - 2).toDouble()
+          : p.dx;
       final box = Rect.fromCenter(
-          center: Offset(p.dx, p.dy - (r + 3) - h / 2), width: w, height: h);
+          center: Offset(cx, p.dy - (r + 3) - h / 2), width: w, height: h);
       var clash = false;
       for (final o in placed) {
         if (box.overlaps(o)) {
@@ -691,10 +698,10 @@ class _MapPainter extends CustomPainter {
       }
       if (clash) continue;
       placed.add(box.inflate(1));
-      _text(canvas, cityLabel(c.name), p + Offset(0, -(r + 3)),
-          fs,
-          village ? AppColors.textSecondary : AppColors.textPrimary,
+      final labelColor = village ? AppColors.textSecondary : AppColors.textPrimary;
+      _text(canvas, cityLabel(c.name), Offset(cx, p.dy - (r + 3)), fs, labelColor,
           center: true, stroke: true);
+      cityLabels.add((cityLabel(c.name), Offset(cx, p.dy - (r + 3)), fs, labelColor, box));
     }
 
     // --- Audibility radius around home ("what we can hear") ---
@@ -740,6 +747,7 @@ class _MapPainter extends CustomPainter {
           Paint()..color = Colors.white.withValues(alpha: 0.4));
     }
     final badgeR = (ppu * 4.6).clamp(10.0, 15.0);
+    final iconBoxes = <Rect>[];
     for (final t in targets) {
       final key = iconKey(t.cat, t.label); // reactive shahed has its own silhouette
       final cat = figs.containsKey(key) ? key : figs.containsKey(t.cat) ? t.cat : 'other';
@@ -906,6 +914,7 @@ class _MapPainter extends CustomPainter {
           glow: picked ? AppColors.highlight : near ? const Color(0xFFFF453A) : color,
           glowStrength: picked ? 1.0 : near ? 0.55 + 0.45 * pulse : 0.55);
       if (faded) canvas.restore();
+      iconBoxes.add(Rect.fromCircle(center: scr, radius: badgeR * 1.4));
       if (t.forecast) {
         _text(canvas, 'прогноз', scr + Offset(0, badgeR + 11), 9.5, color.withValues(alpha: 0.85),
             center: true, stroke: true, bold: true);
@@ -928,6 +937,11 @@ class _MapPainter extends CustomPainter {
       }
     }
     if (dimTargets) canvas.restore();
+    for (final (name, at, fs, color, box) in cityLabels) {
+      if (iconBoxes.any((b) => b.overlaps(box))) {
+        _text(canvas, name, at, fs, color, center: true, stroke: true);
+      }
+    }
   }
 
   _Fit _fit(Size size) => _geoFit(size, insets);
