@@ -102,7 +102,7 @@ var privateUaIds = new HashSet<long>(
 // («Повітряний простір | Напрямок ракет» — чітко пише хвилі пусків по аеродромах).
 // Налаштовується: launch_channels=ukraine_pyxx,...
 var launchChannels = new HashSet<string>(
-    cfg.GetValueOrDefault("launch_channels", "dnipro_pyxx,ukraine_pyxx") // @vinny_banut більше не існує
+    cfg.GetValueOrDefault("launch_channels", "ukraine_pyxx") // @vinny_banut більше не існує; перейменований канал ловиться за назвою
        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
        .Select(s => s.TrimStart('@')),
     StringComparer.OrdinalIgnoreCase);
