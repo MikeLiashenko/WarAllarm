@@ -68,6 +68,18 @@ public sealed class AiAdvisor
         "Пиши прямо, спокійно і по суті, як досвідчений фахівець із безпеки. Без вступів, без markdown, без переліків. " +
         "Ніколи не вигадуй загроз, яких немає у зведенні.";
 
+    // Мислячі моделі (Gemini 3.x) витрачають цей ліміт і на «роздуми»: з 400 порада
+    // обривалася на півслові («один із ворожих»). Відповідь коротка, тож запас не коштує.
+    const int MaxOut = 2048;
+
+    // Обрізана відповідь (ліміт токенів) — лишаємо тільки цілі речення.
+    static string WholeSentences(string text, bool cut)
+    {
+        if (!cut) return text;
+        int end = text.LastIndexOfAny(new[] { '.', '!', '?', '…' });
+        return end > 0 ? text[..(end + 1)] : "";
+    }
+
     // Ліміт/квота вичерпані (429) — не стукаємо щокілька хвилин усю ніч (було 167 помилок за добу).
     DateTime _pausedUntil = DateTime.MinValue;
 
@@ -81,18 +93,18 @@ public sealed class AiAdvisor
             {
                 Mode.Anthropic => JsonSerializer.Serialize(new
                 {
-                    model = _model, max_tokens = 400, system = SystemPrompt,
+                    model = _model, max_tokens = MaxOut, system = SystemPrompt,
                     messages = new[] { new { role = "user", content = situation } },
                 }),
                 Mode.Google => JsonSerializer.Serialize(new
                 {
                     systemInstruction = new { parts = new[] { new { text = SystemPrompt } } },
                     contents = new[] { new { role = "user", parts = new[] { new { text = situation } } } },
-                    generationConfig = new { maxOutputTokens = 400, temperature = 0.3 },
+                    generationConfig = new { maxOutputTokens = MaxOut, temperature = 0.3 },
                 }),
                 _ => JsonSerializer.Serialize(new
                 {
-                    model = _model, max_tokens = 400, temperature = 0.3,
+                    model = _model, max_tokens = MaxOut, temperature = 0.3,
                     messages = new[]
                     {
                         new { role = "system", content = SystemPrompt },
@@ -143,7 +155,8 @@ public sealed class AiAdvisor
                     if (block.TryGetProperty("type", out var ty) && ty.GetString() == "text"
                         && block.TryGetProperty("text", out var tx))
                         sb.Append(tx.GetString());
-                text = sb.ToString().Trim();
+                text = WholeSentences(sb.ToString().Trim(),
+                    root.TryGetProperty("stop_reason", out var sr) && sr.GetString() == "max_tokens");
             }
             else if (_mode == Mode.Google)
             {
@@ -152,12 +165,17 @@ public sealed class AiAdvisor
                 if (root.TryGetProperty("candidates", out var cands) && cands.GetArrayLength() > 0
                     && cands[0].TryGetProperty("content", out var content) && content.TryGetProperty("parts", out var parts))
                     foreach (var part in parts.EnumerateArray())
-                        if (part.TryGetProperty("text", out var tx)) sb.Append(tx.GetString());
-                text = sb.ToString().Trim();
+                        if (part.TryGetProperty("text", out var tx)
+                            && !(part.TryGetProperty("thought", out var th) && th.ValueKind == JsonValueKind.True))
+                            sb.Append(tx.GetString());
+                text = WholeSentences(sb.ToString().Trim(), cands.GetArrayLength() > 0
+                    && cands[0].TryGetProperty("finishReason", out var fr) && fr.GetString() == "MAX_TOKENS");
             }
             else
             {
-                text = root.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()?.Trim() ?? "";
+                var ch = root.GetProperty("choices")[0];
+                text = WholeSentences(ch.GetProperty("message").GetProperty("content").GetString()?.Trim() ?? "",
+                    ch.TryGetProperty("finish_reason", out var fr) && fr.GetString() == "length");
             }
             return text.Length > 0 ? text : null;
         }
