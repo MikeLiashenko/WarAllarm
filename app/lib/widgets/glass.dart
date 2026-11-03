@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/ukraine_geo.dart';
@@ -28,13 +30,19 @@ class Glass extends StatelessWidget {
   final VoidCallback? onTap;
   final bool shadow;
 
+  /// Phones / tablets: no live backdrop blur — over a constantly repainting map it
+  /// re-blurred every frame and made the tablet lag and crash. A denser fill instead.
+  static bool get _noBlur =>
+      defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
+
   @override
   Widget build(BuildContext context) {
     final r = BorderRadius.circular(radius);
+    final fill = color ?? AppColors.glass;
     Widget body = Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: color ?? AppColors.glass,
+        color: _noBlur ? fill.withValues(alpha: math.max(fill.a, 0.94)) : fill,
         borderRadius: r,
         border: Border.all(color: borderColor ?? AppColors.glassBorder),
       ),
@@ -61,10 +69,12 @@ class Glass extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: r,
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: body,
-        ),
+        child: _noBlur
+            ? body
+            : BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: body,
+              ),
       ),
     );
   }

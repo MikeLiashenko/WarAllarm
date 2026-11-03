@@ -188,11 +188,27 @@ class _Cam {
   }
 }
 
+/// Notifies at most every ~33 ms (target animation at ≤30 fps instead of every vsync).
+class _FrameClock3D extends ChangeNotifier {
+  int _last = 0;
+  void tick() {
+    final n = DateTime.now().millisecondsSinceEpoch;
+    if (n - _last >= 33) {
+      _last = n;
+      notifyListeners();
+    }
+  }
+}
+
 class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
   static List<_Poly>? _oblasts;
   static List<_Poly>? _raions;
   late final AnimationController _anim =
-      AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
+      AnimationController(vsync: this, duration: const Duration(seconds: 2))
+        ..addListener(_clock.tick)
+        ..repeat();
+  // ≤30 fps for the idle animation: every vsync (120 Hz tablet) made the map lag and crash.
+  final _clock = _FrameClock3D();
 
   static const double _homeLat = 48.6, _homeLon = 31.4;
   double _focusLat = _homeLat, _focusLon = _homeLon;
@@ -217,6 +233,7 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
   @override
   void dispose() {
     _anim.dispose();
+    _clock.dispose();
     super.dispose();
   }
 
@@ -408,7 +425,7 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
                 },
                 onScaleEnd: (_) => _rotateMode = false,
                 child: AnimatedBuilder(
-                  animation: _anim,
+                  animation: _clock,
                   builder: (context, _) {
                     _followTick();
                     return CustomPaint(

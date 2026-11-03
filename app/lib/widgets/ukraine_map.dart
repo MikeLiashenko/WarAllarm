@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -47,6 +48,285 @@ _Fit _geoFit(Size size, [EdgeInsets insets = EdgeInsets.zero]) {
       ph: ph,
       oX: insets.left + (size.width - insets.horizontal - pw) / 2,
       oY: insets.top + (size.height - insets.vertical - ph) / 2);
+}
+
+/// Notifies at most every ~33 ms: target animation at ≤30 fps instead of every vsync.
+class _FrameClock extends ChangeNotifier {
+  int _last = 0;
+  void tick() {
+    final n = DateTime.now().millisecondsSinceEpoch;
+    if (n - _last >= 33) {
+      _last = n;
+      notifyListeners();
+    }
+  }
+}
+
+/// City labels drawn by the base layer — redrawn on top where a target icon covers them.
+class _LabelSink {
+  List<(String, Offset, double, Color, Rect)> items = const [];
+}
+
+/// Oblast / raion outlines projected ONCE per size into base (pre-zoom) pixels, then
+/// drawn under the pan/zoom transform (no reprojection of ~30k points per frame).
+class _BaseGeo {
+  _BaseGeo(this.size, this.insets, List<_Oblast> oblasts, List<_Oblast> raions) {
+    final fit = _geoFit(size, insets);
+    Path poly(_Oblast ob) {
+      final p = Path()..fillType = PathFillType.evenOdd;
+      for (final ring in ob.rings) {
+        for (var i = 0; i < ring.length; i++) {
+          final s = fit.project(ring[i].dx, ring[i].dy);
+          i == 0 ? p.moveTo(s.dx, s.dy) : p.lineTo(s.dx, s.dy);
+        }
+        p.close();
+      }
+      return p;
+    }
+
+    for (final ob in oblasts) {
+      final p = poly(ob);
+      oblastPaths.add((ob.name, p));
+      land.addPath(p, Offset.zero);
+    }
+    for (final r in raions) {
+      final p = poly(r);
+      raionPaths.add((r.name, p));
+      raionBorders.addPath(p, Offset.zero);
+    }
+    bounds = Rect.fromPoints(fit.project(_lon0, _lat1), fit.project(_lon0 + _lonSpan, _lat1 - _latSpan));
+  }
+
+  final Size size;
+  final EdgeInsets insets;
+  final oblastPaths = <(String, Path)>[];
+  final raionPaths = <(String, Path)>[];
+  final land = Path();
+  final raionBorders = Path();
+  late final Rect bounds;
+}
+
+/// Laid-out label paragraphs, reused across frames (layout + shadow setup was per frame).
+final Map<String, ui.Paragraph> _paraCache = {};
+
+void _drawText(Canvas canvas, String s, Offset at, double size, Color color,
+    {bool center = false, bool stroke = false, bool bold = false}) {
+  final key = '$s|$size|${color.toARGB32()}|$center|$stroke|$bold|${AppColors.isDark}';
+  var para = _paraCache[key];
+  if (para == null) {
+    if (_paraCache.length > 800) _paraCache.clear();
+    final builder = ui.ParagraphBuilder(ui.ParagraphStyle(
+      textAlign: center ? TextAlign.center : TextAlign.left,
+      fontSize: size,
+      fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+    ))
+      ..pushStyle(ui.TextStyle(
+        color: color,
+        shadows: stroke
+            ? [
+                Shadow(color: AppColors.mapLand, blurRadius: 3),
+                Shadow(color: AppColors.mapLand, blurRadius: 2),
+              ]
+            : null,
+      ))
+      ..addText(s);
+    para = _paraCache[key] = builder.build()..layout(const ui.ParagraphConstraints(width: 200));
+  }
+  final dx = center ? at.dx - 100 : at.dx;
+  final dy = center ? at.dy - para.height : at.dy - para.height / 2;
+  canvas.drawParagraph(para, Offset(dx, dy));
+}
+
+/// The static map: land, official alarm fills, raion / oblast borders, cities and labels.
+/// Repaints only when the view, the alarms or the theme change — not with every target frame.
+class _BasePainter extends CustomPainter {
+  _BasePainter({
+    required this.geo,
+    required this.scale,
+    required this.tx,
+    required this.ty,
+    required this.oblastWhole,
+    required this.raionLevels,
+    required this.insets,
+    required this.light,
+    required this.dark,
+    required this.sink,
+  });
+
+  final _BaseGeo geo;
+  final double scale, tx, ty;
+  final Map<String, String> oblastWhole, raionLevels;
+  final EdgeInsets insets;
+  final bool light; // while panning / zooming: skip the costly border glow
+  final bool dark;
+  final _LabelSink sink;
+
+  static final Set<MapCity> _bigSet = kBigCities.toSet();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fit = _geoFit(size, insets);
+    Offset toScreen(Offset b) => Offset(tx + scale * b.dx, ty + scale * b.dy);
+    final px = 1 / scale; // one screen pixel in base units
+
+    canvas.save();
+    canvas.translate(tx, ty);
+    canvas.scale(scale);
+    // Land: a soft vertical gradient so the country reads as a raised surface
+    // on the dark sea, plus a faint outer glow along the border.
+    if (!light) {
+      canvas.drawPath(
+          geo.land,
+          Paint()
+            ..color = AppColors.primary.withValues(alpha: AppColors.isDark ? 0.10 : 0.08)
+            ..maskFilter = MaskFilter.blur(BlurStyle.normal, 18 * px));
+    }
+    canvas.drawPath(
+        geo.land,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.lerp(AppColors.mapLand, Colors.white, AppColors.isDark ? 0.05 : 0)!,
+              AppColors.mapLand,
+            ],
+          ).createShader(geo.bounds));
+    // Official shading — fill a WHOLE oblast only when the whole oblast is under
+    // alarm (like the official map). Per-raion alarms are drawn below.
+    for (final (name, path) in geo.oblastPaths) {
+      final lvl = oblastWhole[name];
+      if (lvl == null) continue;
+      final red = lvl == 'red';
+      canvas.drawPath(path, Paint()..color = (red ? _alarmRed : _alarmYellow).withValues(alpha: red ? 0.5 : 0.6));
+    }
+    // --- Raion split: fill alarmed raions individually + faint raion borders,
+    //     so partially-alarmed oblasts show WHICH raions (official-style). ---
+    final raiLvl = <String, String>{for (final e in raionLevels.entries) _MapPainter._napo(e.key): e.value};
+    if (raiLvl.isNotEmpty) {
+      for (final (name, path) in geo.raionPaths) {
+        final lvl = raiLvl[_MapPainter._napo(name)];
+        if (lvl == null) continue;
+        final red = lvl == 'red';
+        canvas.drawPath(path, Paint()..color = (red ? _alarmRed : _alarmYellow).withValues(alpha: red ? 0.5 : 0.6));
+      }
+    }
+    canvas.drawPath(
+        geo.raionBorders,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.5 * px
+          ..strokeJoin = StrokeJoin.round
+          ..color = const Color(0xFF8296B4).withValues(alpha: 0.28));
+    // Oblast borders (also the country outline — the outer edges).
+    canvas.drawPath(
+        geo.land,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = px
+          ..strokeJoin = StrokeJoin.round
+          ..color = AppColors.primary.withValues(alpha: 0.5));
+    // Colored edge on wholly-alarmed oblasts, on top of the blue border.
+    for (final (name, path) in geo.oblastPaths) {
+      final lvl = oblastWhole[name];
+      if (lvl == null) continue;
+      final red = lvl == 'red';
+      canvas.drawPath(
+          path,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.3 * px
+            ..strokeJoin = StrokeJoin.round
+            ..color = (red ? _alarmRed : _alarmYellow).withValues(alpha: 0.9));
+    }
+    canvas.restore();
+
+    // --- Cities / towns / villages (tiered by zoom, thinned + de-cluttered) ---
+    // kCities is sorted big→small, so important places claim dots/labels first.
+    final placed = <Rect>[]; // label boxes already drawn (collision avoidance)
+    // Drawn city labels — redrawn on top where a target icon covers them («…цьк»).
+    final cityLabels = <(String, Offset, double, Color, Rect)>[];
+    final dotCell = <int, int>{}; // per-grid-cell village dot cap (even density)
+    final dotFill = Paint()..color = AppColors.primary;
+    final dotVillage = Paint()..color = AppColors.textMuted;
+    final dotRim = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = AppColors.mapLand;
+    for (final c in kCities) {
+      if (isLatinName(c.name)) continue; // «Desna», «… Microdistrict» — англ. дублі
+      // Country zoom: real big cities only (tier 0 also holds city districts,
+      // and villages share big-city names) — see kBigCities.
+      final big = c.tier <= 1 && _bigSet.contains(c);
+      final show = big ||
+          (c.tier <= 1 && !isCityDistrict(c.name) && scale >= 1.7) ||
+          (c.tier == 0 && scale >= 1.7) ||
+          (c.tier == 2 && scale >= 2.8) ||
+          (c.tier == 3 && scale >= 4.2);
+      if (!show) continue;
+      final p = toScreen(fit.project(c.lon, c.lat));
+      if (p.dx < -30 || p.dx > size.width + 30 || p.dy < -20 || p.dy > size.height + 20) continue;
+      final village = c.tier == 3;
+
+      // Even out village dot density: cap per ~46px screen cell.
+      if (village) {
+        final cell = (p.dx ~/ 46) * 100000 + (p.dy ~/ 46);
+        final n = dotCell[cell] ?? 0;
+        if (n >= 2) continue;
+        dotCell[cell] = n + 1;
+      }
+
+      final r = c.tier == 0
+          ? 2.4
+          : c.tier == 1
+              ? 1.9
+              : c.tier == 2
+                  ? 1.4
+                  : 1.0;
+      canvas.drawCircle(p, r, village ? dotVillage : dotFill);
+      canvas.drawCircle(p, r, dotRim);
+
+      if (village && scale < 5.2) continue; // village labels only when close
+      final fs = c.tier == 0
+          ? 10.5
+          : c.tier == 1
+              ? 9.0
+              : c.tier == 2
+                  ? 7.5
+                  : 6.5;
+      // Skip a label if it would overlap one already drawn.
+      final w = c.name.length * fs * 0.6 + 4;
+      final h = fs * 1.2;
+      // Near the screen edge (Луганськ on a phone) slide the label inwards
+      // instead of letting it be cut to «Луганс».
+      final cx = size.width > w + 4 ? p.dx.clamp(w / 2 + 2, size.width - w / 2 - 2).toDouble() : p.dx;
+      final box = Rect.fromCenter(center: Offset(cx, p.dy - (r + 3) - h / 2), width: w, height: h);
+      var clash = false;
+      for (final o in placed) {
+        if (box.overlaps(o)) {
+          clash = true;
+          break;
+        }
+      }
+      if (clash) continue;
+      placed.add(box.inflate(1));
+      final labelColor = village ? AppColors.textSecondary : AppColors.textPrimary;
+      _drawText(canvas, cityLabel(c.name), Offset(cx, p.dy - (r + 3)), fs, labelColor, center: true, stroke: true);
+      cityLabels.add((cityLabel(c.name), Offset(cx, p.dy - (r + 3)), fs, labelColor, box));
+    }
+    sink.items = cityLabels;
+  }
+
+  @override
+  bool shouldRepaint(_BasePainter old) =>
+      old.geo != geo ||
+      old.scale != scale ||
+      old.tx != tx ||
+      old.ty != ty ||
+      old.light != light ||
+      old.dark != dark ||
+      !mapEquals(old.oblastWhole, oblastWhole) ||
+      !mapEquals(old.raionLevels, raionLevels);
 }
 
 /// Full custom-painted Ukraine threat map — Ukraine silhouette, tiered cities,
@@ -119,6 +399,13 @@ class UkraineMapState extends State<UkraineMap>
   late final List<_Oblast> _oblasts;
   late final List<_Oblast> _raions;
   late final AnimationController _anim;
+  // The tablet (120 Hz) repainted the whole map 120×/s and lagged until it crashed: targets
+  // now animate at ≤30 fps, and the static map (land, alarms, cities) lives in its own
+  // layer that repaints only when the view or the alarms change.
+  final _clock = _FrameClock();
+  final _labels = _LabelSink();
+  _BaseGeo? _geo;
+  bool _interacting = false;
 
   double _scale = 1;
   double _tx = 0, _ty = 0;
@@ -199,7 +486,9 @@ class UkraineMapState extends State<UkraineMap>
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
-    )..repeat();
+    )
+      ..addListener(_clock.tick)
+      ..repeat();
   }
 
   List<_Oblast> _parsePolys(String json) {
@@ -240,6 +529,7 @@ class UkraineMapState extends State<UkraineMap>
   @override
   void dispose() {
     _anim.dispose();
+    _clock.dispose();
     super.dispose();
   }
 
@@ -288,6 +578,7 @@ class UkraineMapState extends State<UkraineMap>
               child: GestureDetector(
               onTapUp: (d) => widget.onTargetTap?.call(targetAt(d.localPosition)),
               onScaleStart: (d) {
+                _interacting = true;
                 _startScale = _scale;
                 _startT = Offset(_tx, _ty);
                 _focalBase = (d.localFocalPoint - _startT) / _startScale;
@@ -302,11 +593,34 @@ class UkraineMapState extends State<UkraineMap>
                   _ty = d.localFocalPoint.dy - _scale * _focalBase.dy;
                 });
               },
+              onScaleEnd: (_) => setState(() => _interacting = false),
               child: AnimatedBuilder(
-                animation: _anim,
+                animation: _clock,
                 builder: (context, _) {
                   _followTick();
-                  return CustomPaint(
+                  final geo = _geo != null && _geo!.size == _size && _geo!.insets == widget.insets
+                      ? _geo!
+                      : (_geo = _BaseGeo(_size, widget.insets, _oblasts, _raions));
+                  return Stack(children: [
+                    RepaintBoundary(
+                      child: CustomPaint(
+                        size: Size.infinite,
+                        painter: _BasePainter(
+                          geo: geo,
+                          scale: _scale,
+                          tx: _tx,
+                          ty: _ty,
+                          oblastWhole: widget.oblastWhole,
+                          raionLevels: widget.raionLevels,
+                          insets: widget.insets,
+                          light: _interacting,
+                          dark: AppColors.isDark,
+                          sink: _labels,
+                        ),
+                      ),
+                    ),
+                    RepaintBoundary(
+                      child: CustomPaint(
                   size: Size.infinite,
                   painter: _MapPainter(
                     figs: _figs,
@@ -328,8 +642,11 @@ class UkraineMapState extends State<UkraineMap>
                     insets: widget.insets,
                     dimTargets: widget.dimTargets,
                     selectedId: widget.selectedId,
+                    labels: _labels,
                   ),
-                );
+                      ),
+                    ),
+                  ]);
                 },
               ),
             ),
@@ -428,8 +745,10 @@ class _MapPainter extends CustomPainter {
     this.insets = EdgeInsets.zero,
     this.dimTargets = false,
     this.selectedId,
+    required this.labels,
   });
 
+  final _LabelSink labels;
   final String? selectedId;
   final EdgeInsets insets;
   final bool dimTargets;
@@ -447,7 +766,6 @@ class _MapPainter extends CustomPainter {
   final Map<String, String> raionLevels;
   final Map<String, String> oblastWhole;
 
-  static final Set<MapCity> _bigSet = kBigCities.toSet();
 
   Offset _toScreen(Offset base) => Offset(tx + scale * base.dx, ty + scale * base.dy);
 
@@ -490,218 +808,23 @@ class _MapPainter extends CustomPainter {
     // zoom; a touch larger on wide desktop windows.
     final ppu = (size.width / 420).clamp(2.0, 3.4);
 
-    // --- Country drawn FROM the oblast polygons, so land, oblast borders and
-    //     the alert shading all share the exact same geometry (perfectly
-    //     aligned — no separate silhouette that could drift). ---
-    final obPaths = <_Oblast, Path>{};
-    for (final ob in oblasts) {
-      final path = Path()..fillType = PathFillType.evenOdd;
-      for (final ring in ob.rings) {
-        for (var i = 0; i < ring.length; i++) {
-          final s = _toScreen(fit.project(ring[i].dx, ring[i].dy));
-          i == 0 ? path.moveTo(s.dx, s.dy) : path.lineTo(s.dx, s.dy);
-        }
-        path.close();
-      }
-      obPaths[ob] = path;
-    }
-
-    // Land: a soft vertical gradient so the country reads as a raised surface
-    // on the dark sea, plus a faint outer glow along the border.
-    final bounds = Rect.fromPoints(
-      _toScreen(fit.project(_lon0, _lat1)),
-      _toScreen(fit.project(_lon0 + _lonSpan, _lat1 - _latSpan)),
-    );
-    final land = Path();
-    for (final ob in oblasts) {
-      land.addPath(obPaths[ob]!, Offset.zero);
-    }
-    canvas.drawPath(
-        land,
-        Paint()
-          ..color = AppColors.primary.withValues(alpha: AppColors.isDark ? 0.10 : 0.08)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18));
-    canvas.drawPath(
-        land,
-        Paint()
-          ..shader = LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color.lerp(AppColors.mapLand, Colors.white, AppColors.isDark ? 0.05 : 0)!,
-              AppColors.mapLand,
-            ],
-          ).createShader(bounds));
-
-    // --- Hot-zone glow under target clusters ---
+    // The static map (land, alarms, borders, cities) is drawn by _BasePainter below.
+    // --- Hot-zone glow under target clusters (radial gradient: a blur per target per frame was heavy) ---
     if (!dimTargets) {
       for (final t in targets) {
         // Де мітка зараз: «на Харків» ще не над Харковом.
         final hm = motionOf(t, nowMs, frozen: dimTargets);
         final p = _toScreen(fit.project(hm.lon, hm.lat));
+        final r = 34 + 5.0 * t.amount;
         canvas.drawCircle(
             p,
-            22 + 5.0 * t.amount,
+            r,
             Paint()
-              ..color = const Color(0xFFFF3B30).withValues(alpha: 0.14)
-              ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20));
+              ..shader = RadialGradient(colors: [
+                const Color(0xFFFF3B30).withValues(alpha: 0.16),
+                const Color(0xFFFF3B30).withValues(alpha: 0),
+              ]).createShader(Rect.fromCircle(center: p, radius: r)));
       }
-    }
-
-    // Official shading — fill a WHOLE oblast only when the whole oblast is under
-    // alarm (like the official map). Per-raion alarms are drawn below.
-    for (final ob in oblasts) {
-      final lvl = oblastWhole[ob.name];
-      if (lvl == null) continue;
-      final red = lvl == 'red';
-      canvas.drawPath(
-          obPaths[ob]!,
-          Paint()
-            ..style = PaintingStyle.fill
-            ..color = (red ? _alarmRed : _alarmYellow)
-                .withValues(alpha: red ? 0.5 : 0.6));
-    }
-    // --- Raion split: fill alarmed raions individually + faint raion borders,
-    //     so partially-alarmed oblasts show WHICH raions (official-style). ---
-    if (raionLevels.isNotEmpty || raions.isNotEmpty) {
-      final raiLvl = <String, String>{
-        for (final e in raionLevels.entries) _napo(e.key): e.value,
-      };
-      final borderPath = Path();
-      for (final r in raions) {
-        final rp = Path()..fillType = PathFillType.evenOdd;
-        for (final ring in r.rings) {
-          for (var i = 0; i < ring.length; i++) {
-            final s = _toScreen(fit.project(ring[i].dx, ring[i].dy));
-            i == 0 ? rp.moveTo(s.dx, s.dy) : rp.lineTo(s.dx, s.dy);
-            i == 0 ? borderPath.moveTo(s.dx, s.dy) : borderPath.lineTo(s.dx, s.dy);
-          }
-          rp.close();
-          borderPath.close();
-        }
-        final lvl = raiLvl[_napo(r.name)];
-        if (lvl != null) {
-          final red = lvl == 'red';
-          canvas.drawPath(
-              rp,
-              Paint()
-                ..style = PaintingStyle.fill
-                ..color = (red ? _alarmRed : _alarmYellow)
-                    .withValues(alpha: red ? 0.5 : 0.6));
-        }
-      }
-      canvas.drawPath(
-          borderPath,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 0.5
-            ..strokeJoin = StrokeJoin.round
-            ..color = const Color(0xFF8296B4).withValues(alpha: 0.28));
-    }
-    // Oblast borders (also the country outline — the outer edges).
-    final borderPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0
-      ..strokeJoin = StrokeJoin.round
-      ..color = AppColors.primary.withValues(alpha: 0.5);
-    for (final ob in oblasts) {
-      canvas.drawPath(obPaths[ob]!, borderPaint);
-    }
-    // Colored edge on wholly-alarmed oblasts, on top of the blue border.
-    for (final ob in oblasts) {
-      final lvl = oblastWhole[ob.name];
-      if (lvl == null) continue;
-      final red = lvl == 'red';
-      canvas.drawPath(
-          obPaths[ob]!,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.3
-            ..strokeJoin = StrokeJoin.round
-            ..color = (red ? _alarmRed : _alarmYellow).withValues(alpha: 0.9));
-    }
-
-    // --- Cities / towns / villages (tiered by zoom, thinned + de-cluttered) ---
-    // kCities is sorted big→small, so important places claim dots/labels first.
-    final placed = <Rect>[]; // label boxes already drawn (collision avoidance)
-    // Drawn city labels — redrawn on top where a target icon covers them («…цьк»).
-    final cityLabels = <(String, Offset, double, Color, Rect)>[];
-    final dotCell = <int, int>{}; // per-grid-cell village dot cap (even density)
-    for (final c in kCities) {
-      if (isLatinName(c.name)) continue; // «Desna», «… Microdistrict» — англ. дублі
-      // Country zoom: real big cities only (tier 0 also holds city districts,
-      // and villages share big-city names) — see kBigCities.
-      final big = c.tier <= 1 && _bigSet.contains(c);
-      final show = big ||
-          (c.tier <= 1 && !isCityDistrict(c.name) && scale >= 1.7) ||
-          (c.tier == 0 && scale >= 1.7) ||
-          (c.tier == 2 && scale >= 2.8) ||
-          (c.tier == 3 && scale >= 4.2);
-      if (!show) continue;
-      final p = _toScreen(fit.project(c.lon, c.lat));
-      if (p.dx < -30 || p.dx > size.width + 30 ||
-          p.dy < -20 || p.dy > size.height + 20) {
-        continue;
-      }
-      final village = c.tier == 3;
-
-      // Even out village dot density: cap per ~46px screen cell.
-      if (village) {
-        final cell = (p.dx ~/ 46) * 100000 + (p.dy ~/ 46);
-        final n = dotCell[cell] ?? 0;
-        if (n >= 2) continue;
-        dotCell[cell] = n + 1;
-      }
-
-      final r = c.tier == 0
-          ? 2.4
-          : c.tier == 1
-              ? 1.9
-              : c.tier == 2
-                  ? 1.4
-                  : 1.0;
-      canvas.drawCircle(
-          p,
-          r,
-          Paint()
-            ..color = village ? AppColors.textMuted : AppColors.primary);
-      canvas.drawCircle(p, r,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1
-            ..color = AppColors.mapLand);
-
-      if (village && scale < 5.2) continue; // village labels only when close
-      final fs = c.tier == 0
-          ? 10.5
-          : c.tier == 1
-              ? 9.0
-              : c.tier == 2
-                  ? 7.5
-                  : 6.5;
-      // Skip a label if it would overlap one already drawn.
-      final w = c.name.length * fs * 0.6 + 4;
-      final h = fs * 1.2;
-      // Near the screen edge (Луганськ on a phone) slide the label inwards
-      // instead of letting it be cut to «Луганс».
-      final cx = size.width > w + 4
-          ? p.dx.clamp(w / 2 + 2, size.width - w / 2 - 2).toDouble()
-          : p.dx;
-      final box = Rect.fromCenter(
-          center: Offset(cx, p.dy - (r + 3) - h / 2), width: w, height: h);
-      var clash = false;
-      for (final o in placed) {
-        if (box.overlaps(o)) {
-          clash = true;
-          break;
-        }
-      }
-      if (clash) continue;
-      placed.add(box.inflate(1));
-      final labelColor = village ? AppColors.textSecondary : AppColors.textPrimary;
-      _text(canvas, cityLabel(c.name), Offset(cx, p.dy - (r + 3)), fs, labelColor,
-          center: true, stroke: true);
-      cityLabels.add((cityLabel(c.name), Offset(cx, p.dy - (r + 3)), fs, labelColor, box));
     }
 
     // --- Audibility radius around home ("what we can hear") ---
@@ -937,7 +1060,7 @@ class _MapPainter extends CustomPainter {
       }
     }
     if (dimTargets) canvas.restore();
-    for (final (name, at, fs, color, box) in cityLabels) {
+    for (final (name, at, fs, color, box) in labels.items) {
       if (iconBoxes.any((b) => b.overlaps(box))) {
         _text(canvas, name, at, fs, color, center: true, stroke: true);
       }
@@ -1006,28 +1129,8 @@ class _MapPainter extends CustomPainter {
   }
 
   void _text(Canvas canvas, String s, Offset at, double size, Color color,
-      {bool center = false, bool stroke = false, bool bold = false}) {
-    final builder = ui.ParagraphBuilder(ui.ParagraphStyle(
-      textAlign: center ? TextAlign.center : TextAlign.left,
-      fontSize: size,
-      fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
-    ))
-      ..pushStyle(ui.TextStyle(
-        color: color,
-        shadows: stroke
-            ? [
-                Shadow(color: AppColors.mapLand, blurRadius: 3),
-                Shadow(color: AppColors.mapLand, blurRadius: 2),
-              ]
-            : null,
-      ))
-      ..addText(s);
-    final para = builder.build()
-      ..layout(const ui.ParagraphConstraints(width: 200));
-    final dx = center ? at.dx - 100 : at.dx;
-    final dy = center ? at.dy - para.height : at.dy - para.height / 2;
-    canvas.drawParagraph(para, Offset(dx, dy));
-  }
+          {bool center = false, bool stroke = false, bool bold = false}) =>
+      _drawText(canvas, s, at, size, color, center: center, stroke: stroke, bold: bold);
 
   @override
   bool shouldRepaint(_MapPainter old) => true;
