@@ -1265,11 +1265,24 @@ async Task RunAlertsLoop(ChannelPoster? channel)
     // а ОДИН пост, який доповнюємо редагуванням. Нове велике місто — завжди новий пост (зі звуком).
     (long id, List<string> regions, DateTime at, bool photo)? alarmPost = null, clearPost = null;
     var cascade = TimeSpan.FromMinutes(3);
+    // Відбій — лише коли області немає у ДВОХ опитуваннях поспіль (~40 с): один дивний
+    // знімок не дає хибного «ВІДБІЙ по всій країні» з подальшою «тривогою» назад.
+    var missOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    bool warnedFail = false;
     while (true)
     {
         try
         {
             var snap = await OfficialAlerts.FetchFull();
+            // Збій API — це не відбій: нічого не міняємо (ні пости, ні цілі на карті).
+            if (!snap.Ok)
+            {
+                if (!warnedFail) Console.Error.WriteLine("⚠ alerts: API тривог не відповів — тримаю попередній стан");
+                warnedFail = true;
+                await Task.Delay(TimeSpan.FromSeconds(20));
+                continue;
+            }
+            warnedFail = false;
 
             // ── Офіційний відбій прибирає цілі (щоб шахеди не висіли після відбою) ──
             // ByPolygon = області з червоною/жовтою тривогою. Коли область виходить із
@@ -1314,6 +1327,12 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             // 2) Канал: новини при змінах.
             // Пости — на червону тривогу на ВСЮ область (районні тривоги на фронті мигають щохвилини).
             var nowRed = new HashSet<string>(snap.RedWholeUa ?? snap.RedUa, StringComparer.OrdinalIgnoreCase);
+            if (seeded)
+            {   // зникла вперше — ще вважаємо під тривогою; зникла вдруге поспіль — відбій
+                var firstMiss = prevRed.Where(r => !nowRed.Contains(r) && !missOnce.Contains(r)).ToList();
+                missOnce = new HashSet<string>(firstMiss, StringComparer.OrdinalIgnoreCase);
+                nowRed.UnionWith(firstMiss);
+            }
             if (!seeded) { prevRed = nowRed; seeded = true; }
             else if (channel is not null)
             {

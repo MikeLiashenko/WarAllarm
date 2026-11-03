@@ -48,6 +48,8 @@ public static class OfficialAlerts
     /// її районах) + читабельні українські назви областей, що зараз червоні / жовті.
     /// [RedWholeUa] — червона тривога на ВСЮ область (на неї — пости в каналі, як і раніше);
     /// [PartUa] — області, де тривога лише в частині районів.
+    /// [Ok] — свіжа відповідь API. false — запит не вдався: це НЕ «тривог немає» (03.11 збій
+    /// дав пост «ВІДБІЙ по всій країні» з Кримом і Луганською та зняв живих шахедів з карти).
     public sealed record Snapshot(
         Dictionary<string, string> ByPolygon,
         List<string> RedUa,
@@ -55,7 +57,8 @@ public static class OfficialAlerts
         Dictionary<string, string>? ByRaion = null,
         Dictionary<string, string>? ByOblastWhole = null,
         List<string>? RedWholeUa = null,
-        HashSet<string>? PartUa = null)
+        HashSet<string>? PartUa = null,
+        bool Ok = false)
     {
         /// Тривога саме в цій точці: на всю область — її рівень, інакше — рівень району.
         public string? LevelAt(double lat, double lon)
@@ -78,6 +81,10 @@ public static class OfficialAlerts
     /// Наш полігон «n» → "red"/"yellow". Порожній словник = немає тривог / офлайн.
     public static async Task<Dictionary<string, string>> Fetch() => (await FetchFull()).ByPolygon;
 
+    // Останній вдалий знімок: при збої віддаємо його (Ok = false), щоб карта бота не ставала порожньою.
+    static Snapshot? _lastGood;
+    static DateTime _lastGoodAt;
+
     public static async Task<Snapshot> FetchFull()
     {
         var byPoly = new Dictionary<string, string>();
@@ -88,14 +95,15 @@ public static class OfficialAlerts
         var redWholeUa = new List<string>();
         var partUa = new HashSet<string>();
         Snapshot Snap() => new(byPoly, redUa, yellowUa, byRaion, byOblastWhole, redWholeUa, partUa);
+        Snapshot Failed() => _lastGood is { } g && DateTime.Now - _lastGoodAt < TimeSpan.FromMinutes(10) ? g with { Ok = false } : Snap();
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, Url);
             req.Headers.Add("User-Agent", "WarAlarm/1.0");
             var resp = await Http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return Snap();
+            if (!resp.IsSuccessStatusCode) return Failed();
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-            if (!doc.RootElement.TryGetProperty("states", out var states)) return Snap();
+            if (!doc.RootElement.TryGetProperty("states", out var states) || states.ValueKind != JsonValueKind.Object) return Failed();
 
             foreach (var st in states.EnumerateObject())
             {
@@ -125,8 +133,10 @@ public static class OfficialAlerts
                 (level == "red" ? redUa : yellowUa).Add(st.Name);
             }
         }
-        catch { /* офлайн — порожньо */ }
-        return Snap();
+        catch { return Failed(); /* офлайн — останній вдалий знімок або порожньо */ }
+        _lastGood = Snap() with { Ok = true };
+        _lastGoodAt = DateTime.Now;
+        return _lastGood;
     }
 
     /// Читабельний перелік для команди /alerts, + чи є тривога у місті [myCity].
