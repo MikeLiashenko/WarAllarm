@@ -151,6 +151,7 @@ AiAdvisor? advisor = aiKey is { Length: > 0 }
     : null;
 MapWriter.Config = MapWriter.Config! with { Ai = advisor is not null };
 var aiLast = DateTime.MinValue;
+var aiSig = "";
 
 // ── Міст до Firebase: публікуємо живий стан у RTDB для застосунку ─────────────
 // Ключ шукаємо в secrets.local.txt АБО settings.local.txt (cfg) — де зручніше.
@@ -186,8 +187,15 @@ string BuildSituation()
 Task MaybeAi(bool force)
 {
     if (advisor is null) return Task.CompletedTask;
-    if (!force && DateTime.Now - aiLast < TimeSpan.FromMinutes(3)) return Task.CompletedTask;
-    if (!force && !tracker.Active.Any(t => t.DistKm is { } d && d <= 60)) return Task.CompletedTask; // только близкие цели
+    // Безкоштовна добова квота Gemini скінчилася за один вечір: питали кожні 3 хв, поки
+    // цілі ближче 60 км (~20 запитів/год). Тепер — не частіше 10 хв і лише коли змінилось,
+    // хто поруч і як (ціль, стадія, відстань з кроком 10 км); без змін — раз на 30 хв.
+    if (!force && DateTime.Now - aiLast < TimeSpan.FromMinutes(10)) return Task.CompletedTask;
+    var near = tracker.Active.Where(t => t.DistKm is { } d && d <= 60).ToList();
+    if (!force && near.Count == 0) return Task.CompletedTask; // только близкие цели
+    var sig = string.Join(";", near.Select(t => $"{t.Id}/{t.Stage}/{(int)(t.DistKm!.Value / 10)}").Order());
+    if (!force && sig == aiSig && DateTime.Now - aiLast < TimeSpan.FromMinutes(30)) return Task.CompletedTask;
+    aiSig = sig;
     aiLast = DateTime.Now;
     var situation = BuildSituation();
     _ = Task.Run(async () =>
