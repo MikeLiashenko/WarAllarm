@@ -1890,7 +1890,17 @@ async Task<string> BuildBotAi()
         return "🤖 ШІ-аналіз не налаштовано (немає ai_api_key у secrets.local.txt).";
     var reply = await advisor.Analyze(BuildSituation());
     return reply is { Length: > 0 } ? "🤖 <b>ШІ-аналіз</b> · " + DateTime.Now.ToString("HH:mm") + "\n\n" + H(reply.Trim())
-                                    : "😔 ШІ не відповів — спробуй трохи згодом.";
+                                    : BotAiFallback();
+}
+
+// Ліміт ШІ: показуємо останню пораду з карти (якщо свіжа), а не порожнє «не відповів».
+string BotAiFallback()
+{
+    if (MapWriter.AiText.Length > 0 && MapWriter.AiAt is { } at && DateTime.Now - at < TimeSpan.FromMinutes(30))
+        return "🤖 <b>ШІ-аналіз</b> · " + at.ToString("HH:mm") + "\n\n" + H(MapWriter.AiText.Trim());
+    return advisor!.PausedUntil > DateTime.Now
+        ? $"😔 Ліміт ШІ вичерпано — знову зможу о {advisor.PausedUntil:HH:mm}."
+        : "😔 ШІ не відповів — спробуй трохи згодом.";
 }
 
 // ── 🛰 Ціль детально / стеження (бот) ───────────────────────────────────────

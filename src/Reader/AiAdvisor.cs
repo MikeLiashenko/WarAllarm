@@ -82,6 +82,7 @@ public sealed class AiAdvisor
 
     // Ліміт/квота вичерпані (429) — не стукаємо щокілька хвилин усю ніч (було 167 помилок за добу).
     DateTime _pausedUntil = DateTime.MinValue;
+    public DateTime PausedUntil => _pausedUntil;
 
     // Возвращает совет модели или null (ошибка/пусто). Ошибки не критичны.
     public async Task<string?> Analyze(string situation)
@@ -135,10 +136,15 @@ public sealed class AiAdvisor
             {
                 if ((int)resp.StatusCode == 429)
                 {
-                    // Квота на добу — пауза 2 год; короткий rate limit — 10 хв.
-                    var pause = body.Contains("quota", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromHours(2) : TimeSpan.FromMinutes(10);
+                    // Gemini пише «quota» і на поминутний ліміт — тоді чекаємо, скільки він просить
+                    // (retryDelay / retry-after). 2 год — лише коли вичерпано добову квоту (…PerDay…).
+                    var wait = System.Text.RegularExpressions.Regex.Match(body, @"""retryDelay""\s*:\s*""(\d+)");
+                    var pause = body.Contains("PerDay", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromHours(2)
+                              : wait.Success ? TimeSpan.FromSeconds(int.Parse(wait.Groups[1].Value) + 2)
+                              : resp.Headers.RetryAfter?.Delta is { } ra ? ra
+                              : TimeSpan.FromMinutes(1);
                     _pausedUntil = DateTime.Now + pause;
-                    Console.Error.WriteLine($"⚠ ІІ: 429 (ліміт) — пауза до {_pausedUntil:HH:mm}");
+                    Console.Error.WriteLine($"⚠ ІІ: 429 (ліміт) — пауза до {_pausedUntil:HH:mm:ss} · {body[..Math.Min(300, body.Length)].ReplaceLineEndings(" ")}");
                     return null;
                 }
                 Console.Error.WriteLine($"⚠ ІІ: {(int)resp.StatusCode} {body[..Math.Min(260, body.Length)]}");
