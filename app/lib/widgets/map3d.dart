@@ -222,6 +222,8 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
   Offset _lastFocal = Offset.zero, _lastPan = Offset.zero;
   double _lastScale = 1, _lastRotation = 0;
   Offset _lastTap = Offset.zero;
+  Offset _startFocal = Offset.zero;
+  String? _twoMode; // two-finger gesture, decided once per touch: zoom / rotate / tilt
 
   @override
   void initState() {
@@ -400,17 +402,36 @@ class Map3DState extends State<Map3D> with SingleTickerProviderStateMixin {
                 onDoubleTap: () => setState(() => _zoomAt(_lastTap, 2)),
                 onScaleStart: (d) {
                   _lastFocal = d.localFocalPoint;
+                  _startFocal = d.localFocalPoint;
                   _lastScale = 1;
                   _lastRotation = 0;
+                  _twoMode = null;
                 },
                 onScaleUpdate: (d) {
                   setState(() {
                     final delta = d.localFocalPoint - _lastFocal;
                     if (d.pointerCount >= 2) {
-                      // Pinch zoom at the fingers, twist rotates, both move pans.
-                      _zoomAt(d.localFocalPoint, d.scale / _lastScale);
-                      _yaw = (_yaw - (d.rotation - _lastRotation) * 180 / math.pi) % 360;
-                      _panScreen(_lastFocal, d.localFocalPoint);
+                      if (_twoMode == null) {
+                        final moved = d.localFocalPoint - _startFocal;
+                        if (d.rotation.abs() > 0.26) {
+                          _twoMode = 'rotate';
+                        } else if ((d.scale - 1).abs() > 0.07) {
+                          _twoMode = 'zoom';
+                        } else if (moved.distance > 16) {
+                          _twoMode = moved.dy.abs() > moved.dx.abs() * 1.4 ? 'tilt' : 'zoom';
+                        }
+                      }
+                      switch (_twoMode) {
+                        case 'tilt':
+                          _tilt = (_tilt - delta.dy * 0.35).clamp(0.0, 75.0);
+                        case 'rotate':
+                          _zoomAt(d.localFocalPoint, d.scale / _lastScale);
+                          _yaw = (_yaw - (d.rotation - _lastRotation) * 180 / math.pi) % 360;
+                          _panScreen(_lastFocal, d.localFocalPoint);
+                        case 'zoom':
+                          _zoomAt(d.localFocalPoint, d.scale / _lastScale);
+                          _panScreen(_lastFocal, d.localFocalPoint);
+                      }
                     } else if (_rotateMode) {
                       _yaw = (_yaw - delta.dx * 0.35) % 360;
                       _tilt = (_tilt - delta.dy * 0.3).clamp(0.0, 75.0);
@@ -986,10 +1007,9 @@ class _Map3DPainter extends CustomPainter {
         ground.o,
         air.o,
         Paint()
-          ..strokeWidth = 5
+          ..strokeWidth = 6
           ..strokeCap = StrokeCap.round
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3)
-          ..shader = ui.Gradient.linear(ground.o, air.o, [glowC.withValues(alpha: 0.05), glowC.withValues(alpha: 0.35)]));
+          ..shader = ui.Gradient.linear(ground.o, air.o, [glowC.withValues(alpha: 0.03), glowC.withValues(alpha: 0.2)]));
     canvas.drawLine(
         ground.o,
         air.o,
@@ -1007,7 +1027,6 @@ class _Map3DPainter extends CustomPainter {
           Paint()
             ..strokeWidth = r * 0.55
             ..strokeCap = StrokeCap.round
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5)
             ..shader = ui.Gradient.linear(air.o, b, [color.withValues(alpha: 0.55), color.withValues(alpha: 0)]));
     }
     paintThreatIcon(canvas, air.o, r * 2.15, iconKey(t.cat, t.label), color, m.heading - cam.yaw,
@@ -1044,16 +1063,29 @@ class _Map3DPainter extends CustomPainter {
     }
   }
 
-  void _text(Canvas canvas, String s, Offset at, double size, Color color, {bool bold = false}) {
+  // Labels: cached paragraphs, halo = the text in the sea colour nudged around
+  // (blurred shadows were a GPU blur pass per label per frame).
+  static final Map<String, ui.Paragraph> _paras = {};
+  static ui.Paragraph _para(String s, double size, Color color, bool bold) {
+    final key = '$s|$size|${color.toARGB32()}|$bold';
+    final hit = _paras[key];
+    if (hit != null) return hit;
+    if (_paras.length > 600) _paras.clear();
     final b = ui.ParagraphBuilder(ui.ParagraphStyle(
         textAlign: TextAlign.center, fontSize: size, fontWeight: bold ? FontWeight.w700 : FontWeight.w600))
-      ..pushStyle(ui.TextStyle(color: color, shadows: [
-        Shadow(color: AppColors.mapSea, blurRadius: 3),
-        Shadow(color: AppColors.mapSea, blurRadius: 2),
-      ]))
+      ..pushStyle(ui.TextStyle(color: color))
       ..addText(s);
-    final p = b.build()..layout(const ui.ParagraphConstraints(width: 240));
-    canvas.drawParagraph(p, at - Offset(120, p.height / 2));
+    return _paras[key] = b.build()..layout(const ui.ParagraphConstraints(width: 240));
+  }
+
+  void _text(Canvas canvas, String s, Offset at, double size, Color color, {bool bold = false}) {
+    final p = _para(s, size, color, bold);
+    final h = _para(s, size, AppColors.mapSea.withValues(alpha: 0.85), bold);
+    final o = at - Offset(120, p.height / 2);
+    for (final d in const [Offset(-1, -1), Offset(1, -1), Offset(-1, 1), Offset(1, 1), Offset(0, 1.4), Offset(0, -1.4)]) {
+      canvas.drawParagraph(h, o + d);
+    }
+    canvas.drawParagraph(p, o);
   }
 
   @override

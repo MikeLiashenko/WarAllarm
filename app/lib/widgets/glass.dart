@@ -190,9 +190,12 @@ void paintThreatIcon(Canvas canvas, Offset c, double size, String cat, Color col
   canvas.translate(c.dx, c.dy);
   canvas.rotate(headingDeg * 3.141592653589793 / 180);
   canvas.scale(k);
+  // Glow as a radial gradient — a blur per icon per frame was heavy on the tablet.
   final halo = Paint()
-    ..color = (glow ?? color).withValues(alpha: 0.75 * glowStrength)
-    ..maskFilter = MaskFilter.blur(BlurStyle.normal, 7 / k);
+    ..shader = RadialGradient(colors: [
+      (glow ?? color).withValues(alpha: 0.55 * glowStrength),
+      (glow ?? color).withValues(alpha: 0),
+    ]).createShader(Rect.fromCircle(center: Offset.zero, radius: 15));
   final outline = Paint()
     ..style = PaintingStyle.stroke
     ..strokeWidth = 2.2 / k
@@ -205,9 +208,7 @@ void paintThreatIcon(Canvas canvas, Offset c, double size, String cat, Color col
       colors: [Color.lerp(color, Colors.white, 0.45)!, color, Color.lerp(color, Colors.black, 0.15)!],
       stops: const [0, 0.45, 1],
     ).createShader(const Rect.fromLTRB(-11, -12, 11, 11));
-  for (final (path, style) in parts) {
-    if (style == FigStyle.body) canvas.drawPath(path, halo);
-  }
+  canvas.drawCircle(Offset.zero, 15, halo);
   for (final (path, style) in parts) {
     if (style == FigStyle.body) canvas.drawPath(path, outline);
   }

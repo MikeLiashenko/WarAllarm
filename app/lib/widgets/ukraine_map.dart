@@ -120,20 +120,31 @@ void _drawText(Canvas canvas, String s, Offset at, double size, Color color,
       fontSize: size,
       fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
     ))
-      ..pushStyle(ui.TextStyle(
-        color: color,
-        shadows: stroke
-            ? [
-                Shadow(color: AppColors.mapLand, blurRadius: 3),
-                Shadow(color: AppColors.mapLand, blurRadius: 2),
-              ]
-            : null,
-      ))
+      ..pushStyle(ui.TextStyle(color: color))
       ..addText(s);
     para = _paraCache[key] = builder.build()..layout(const ui.ParagraphConstraints(width: 200));
   }
   final dx = center ? at.dx - 100 : at.dx;
   final dy = center ? at.dy - para.height : at.dy - para.height / 2;
+  if (stroke) {
+    // Halo = the same text in the land colour, nudged around (a blurred shadow per label
+    // was a GPU blur pass each — over a hundred per frame on the tablet).
+    final hk = '$s|$size|halo|$center|$bold|${AppColors.isDark}';
+    var halo = _paraCache[hk];
+    if (halo == null) {
+      final hb = ui.ParagraphBuilder(ui.ParagraphStyle(
+        textAlign: center ? TextAlign.center : TextAlign.left,
+        fontSize: size,
+        fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+      ))
+        ..pushStyle(ui.TextStyle(color: AppColors.mapLand.withValues(alpha: 0.85)))
+        ..addText(s);
+      halo = _paraCache[hk] = hb.build()..layout(const ui.ParagraphConstraints(width: 200));
+    }
+    for (final o in const [Offset(-1, -1), Offset(1, -1), Offset(-1, 1), Offset(1, 1), Offset(0, 1.4), Offset(0, -1.4)]) {
+      canvas.drawParagraph(halo, Offset(dx, dy) + o);
+    }
+  }
   canvas.drawParagraph(para, Offset(dx, dy));
 }
 
@@ -404,6 +415,15 @@ class UkraineMapState extends State<UkraineMap>
   // layer that repaints only when the view or the alarms change.
   final _clock = _FrameClock();
   final _labels = _LabelSink();
+  // Impeller (Android) has no raster cache: even an unchanged layer re-tessellated ~30k
+  // border points and re-blurred every label shadow each frame. So the static map is drawn
+  // ONCE into an image; frames just blit it (moved / scaled while panning) and it is
+  // re-rendered at most every 0.3 s during a gesture and right after it.
+  ui.Image? _baseImg;
+  ({double s, double tx, double ty})? _baseView;
+  Object? _baseKey;
+  bool _baseBusy = false;
+  int _baseAt = 0;
   _BaseGeo? _geo;
   bool _interacting = false;
 
@@ -530,7 +550,58 @@ class UkraineMapState extends State<UkraineMap>
   void dispose() {
     _anim.dispose();
     _clock.dispose();
+    _baseImg?.dispose();
     super.dispose();
+  }
+
+  String _levelsKey(Map<String, String> m) =>
+      (m.entries.map((e) => '${e.key}=${e.value}').toList()..sort()).join(',');
+
+  /// Re-render the static map image when the view, alarms or theme changed.
+  void _renderBase(_BaseGeo geo, double dpr) {
+    if (_size.isEmpty || _baseBusy) return;
+    final key = (_scale, _tx, _ty, _size, widget.insets, AppColors.isDark, _interacting,
+        _levelsKey(widget.oblastWhole), _levelsKey(widget.raionLevels));
+    if (key == _baseKey) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_interacting && _baseImg != null && now - _baseAt < 300) return;
+    _baseBusy = true;
+    _baseAt = now;
+    final view = (s: _scale, tx: _tx, ty: _ty);
+    final ratio = math.min(dpr, 2.0);
+    final rec = ui.PictureRecorder();
+    final c = Canvas(rec)..scale(ratio);
+    _BasePainter(
+      geo: geo,
+      scale: view.s,
+      tx: view.tx,
+      ty: view.ty,
+      oblastWhole: widget.oblastWhole,
+      raionLevels: widget.raionLevels,
+      insets: widget.insets,
+      light: _interacting,
+      dark: AppColors.isDark,
+      sink: _labels,
+    ).paint(c, _size);
+    final pic = rec.endRecording();
+    pic.toImage((_size.width * ratio).ceil(), (_size.height * ratio).ceil()).then((img) {
+      pic.dispose();
+      _baseBusy = false;
+      if (!mounted) {
+        img.dispose();
+        return;
+      }
+      final old = _baseImg;
+      setState(() {
+        _baseImg = img;
+        _baseView = view;
+        _baseKey = key;
+      });
+      if (old != null) WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
+    }, onError: (_) {
+      pic.dispose();
+      _baseBusy = false;
+    });
   }
 
   // --- Projection helpers (recomputed from current size) ----------------------
@@ -601,26 +672,9 @@ class UkraineMapState extends State<UkraineMap>
                   final geo = _geo != null && _geo!.size == _size && _geo!.insets == widget.insets
                       ? _geo!
                       : (_geo = _BaseGeo(_size, widget.insets, _oblasts, _raions));
-                  return Stack(children: [
-                    RepaintBoundary(
-                      child: CustomPaint(
-                        size: Size.infinite,
-                        painter: _BasePainter(
-                          geo: geo,
-                          scale: _scale,
-                          tx: _tx,
-                          ty: _ty,
-                          oblastWhole: widget.oblastWhole,
-                          raionLevels: widget.raionLevels,
-                          insets: widget.insets,
-                          light: _interacting,
-                          dark: AppColors.isDark,
-                          sink: _labels,
-                        ),
-                      ),
-                    ),
-                    RepaintBoundary(
-                      child: CustomPaint(
+                  _renderBase(geo, MediaQuery.devicePixelRatioOf(context));
+                  final bv = _baseView;
+                  return CustomPaint(
                   size: Size.infinite,
                   painter: _MapPainter(
                     figs: _figs,
@@ -643,10 +697,11 @@ class UkraineMapState extends State<UkraineMap>
                     dimTargets: widget.dimTargets,
                     selectedId: widget.selectedId,
                     labels: _labels,
+                    base: _baseImg,
+                    baseView: bv,
+                    labelsValid: bv != null && bv.s == _scale && bv.tx == _tx && bv.ty == _ty,
                   ),
-                      ),
-                    ),
-                  ]);
+                  );
                 },
               ),
             ),
@@ -746,9 +801,15 @@ class _MapPainter extends CustomPainter {
     this.dimTargets = false,
     this.selectedId,
     required this.labels,
+    this.base,
+    this.baseView,
+    this.labelsValid = false,
   });
 
   final _LabelSink labels;
+  final ui.Image? base;
+  final ({double s, double tx, double ty})? baseView;
+  final bool labelsValid; // the image shows exactly this view → its label boxes match
   final String? selectedId;
   final EdgeInsets insets;
   final bool dimTargets;
@@ -808,7 +869,21 @@ class _MapPainter extends CustomPainter {
     // zoom; a touch larger on wide desktop windows.
     final ppu = (size.width / 420).clamp(2.0, 3.4);
 
-    // The static map (land, alarms, borders, cities) is drawn by _BasePainter below.
+    // The static map (land, alarms, borders, cities): a cached image from _BasePainter,
+    // moved / scaled to the current view (new view = old view × k + shift).
+    final img = base, bv = baseView;
+    if (img != null && bv != null) {
+      final k = scale / bv.s;
+      canvas.save();
+      canvas.translate(tx - k * bv.tx, ty - k * bv.ty);
+      canvas.scale(k);
+      canvas.drawImageRect(
+          img,
+          Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+          Offset.zero & size,
+          Paint()..filterQuality = FilterQuality.low);
+      canvas.restore();
+    }
     // --- Hot-zone glow under target clusters (radial gradient: a blur per target per frame was heavy) ---
     if (!dimTargets) {
       for (final t in targets) {
@@ -1060,7 +1135,7 @@ class _MapPainter extends CustomPainter {
       }
     }
     if (dimTargets) canvas.restore();
-    for (final (name, at, fs, color, box) in labels.items) {
+    for (final (name, at, fs, color, box) in labelsValid ? labels.items : const <(String, Offset, double, Color, Rect)>[]) {
       if (iconBoxes.any((b) => b.overlaps(box))) {
         _text(canvas, name, at, fs, color, center: true, stroke: true);
       }
@@ -1080,8 +1155,10 @@ class _MapPainter extends CustomPainter {
     canvas.rotate(headingDeg * math.pi / 180);
     canvas.scale(k);
     final halo = Paint()
-      ..color = glow.withValues(alpha: 0.75 * glowStrength)
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 7 / k);
+      ..shader = RadialGradient(colors: [
+        glow.withValues(alpha: 0.55 * glowStrength),
+        glow.withValues(alpha: 0),
+      ]).createShader(Rect.fromCircle(center: Offset.zero, radius: 15));
     final outline = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.2 / k
@@ -1094,9 +1171,7 @@ class _MapPainter extends CustomPainter {
         colors: [Color.lerp(color, Colors.white, 0.45)!, color, Color.lerp(color, Colors.black, 0.15)!],
         stops: const [0, 0.45, 1],
       ).createShader(const Rect.fromLTRB(-11, -12, 11, 11));
-    for (final p in parts.where((p) => p.body)) {
-      canvas.drawPath(p.path, halo);
-    }
+    canvas.drawCircle(Offset.zero, 15, halo);
     for (final p in parts.where((p) => p.body)) {
       canvas.drawPath(p.path, outline);
     }
