@@ -13,7 +13,8 @@ using TL;
 
 public static class NightSummary
 {
-    public record Point(double Lat, double Lon, ThreatKind Kind, int N, string Place, DateTime At, bool Approx = false); // Approx = центр області (місто не знайдено)
+    // Approx = центр області (місто не знайдено); Weapon — уточнення з поста («реакт. шахед», «Циркон», «крилата»).
+    public record Point(double Lat, double Lon, ThreatKind Kind, int N, string Place, DateTime At, bool Approx = false, string? Weapon = null);
     public record Impact(double Lat, double Lon, string Place, DateTime At);
     // N — скільки ракет у цьому пуску («5х Балістик на Київ»); Guessed — місце пуску не
     // назване в пості, взято найближчий до цілі район пусків балістики (орієнтовно).
@@ -23,7 +24,18 @@ public static class NightSummary
 
     // Райони, звідки зазвичай б'ють балістикою (для «орієнтовного» місця пуску).
     static readonly string[] BallisticSites = { "Брянськ", "Курськ", "Бєлгород", "Воронеж", "Таганрог", "Крим" };
-    public record Track(ThreatKind Kind, List<(double lat, double lon)> Pts, string? Site);
+    public record Track(string Cat, List<(double lat, double lon)> Pts, string? Site);
+
+    /// Шар карти ночі: shahed · jet (реактивний шахед) · cruise (крилата) · hyper (Циркон/Онікс/
+    /// Кинджал) · kab · fpv; "" — не малюємо.
+    public static string Cat(Point p) => p.Kind switch
+    {
+        ThreatKind.Missile => p.Weapon is { } w && Regex.IsMatch(w, "циркон|онікс|оникс|кинджал", RegexOptions.IgnoreCase) ? "hyper" : "cruise",
+        ThreatKind.Kab => "kab",
+        ThreatKind.Fpv => "fpv",
+        _ when IsDrone(p.Kind) => p.Weapon is { } w && w.Contains("реакт", StringComparison.OrdinalIgnoreCase) ? "jet" : "shahed",
+        _ => "",
+    };
 
     public record Data(DateTime From, DateTime To, List<Point> Points, List<Impact> Impacts,
                        List<LaunchBatch> Waves, int MaxAir, List<Ballistic> Ballistics,
@@ -39,8 +51,8 @@ public static class NightSummary
 
         /// Куди летіло найбільше (місто, не центр області). Та сама ціль у кількох постах
         /// поспіль — один раз на 20 хв (найбільше «×N» за цей час), а не сума згадок.
-        public List<(string place, double lat, double lon, int score)> HotSpots(bool missiles, int take) =>
-            Points.Where(p => !p.Approx && (missiles ? p.Kind == ThreatKind.Missile : IsDrone(p.Kind)))
+        public List<(string place, double lat, double lon, int score)> HotSpots(string cat, int take) =>
+            Points.Where(p => !p.Approx && Cat(p) == cat)
                   .GroupBy(p => p.Place)
                   .Select(g => (g.Key, g.First().Lat, g.First().Lon,
                                 g.GroupBy(p => p.At.Ticks / TimeSpan.FromMinutes(20).Ticks).Sum(s => s.Max(p => p.N))))
@@ -48,6 +60,9 @@ public static class NightSummary
 
         /// Була атака крилатими (радар писав «КР», «крилаті», «Калібр»…).
         public bool HadCruise => Points.Any(p => p.Kind == ThreatKind.Missile);
+
+        /// Скільки «було» цього шару: сума по місцях (та сама ціль у постах поспіль — раз на 20 хв).
+        public int Count(string cat) => HotSpots(cat, int.MaxValue).Sum(h => h.score);
 
         /// Місця пуску шахедів цієї ночі (з хвиль); якщо хвиль немає — усі відомі.
         public List<string> DroneSites()
@@ -69,11 +84,12 @@ public static class NightSummary
     {
         var tracks = new List<Track>();
         var sites = d.DroneSites();
-        foreach (var fam in new[] { true, false }) // true = дрони, false = крилаті ракети
+        foreach (var cat in new[] { "shahed", "jet", "cruise", "hyper" })
         {
+            bool fam = cat is "shahed" or "jet"; // дрони (повільні, від місця пуску) / ракети
             // Без «центрів області» (місто не знайдено) — інакше лінії хибно сходяться
             // «зірками» в Київ/Полтаву/Миколаїв.
-            var pts = d.Points.Where(p => !p.Approx && (fam ? IsDrone(p.Kind) : p.Kind == ThreatKind.Missile))
+            var pts = d.Points.Where(p => !p.Approx && Cat(p) == cat)
                               .OrderBy(p => p.At).ToList();
             var chains = new List<List<Point>>();
             foreach (var p in pts)
@@ -121,7 +137,7 @@ public static class NightSummary
                     }
                     if (site != null) line.Insert(0, LaunchFeed.SiteCoords(site)!.Value);
                 }
-                if (line.Count >= 2) tracks.Add(new(fam ? ThreatKind.Drone : ThreatKind.Missile, line, site));
+                if (line.Count >= 2) tracks.Add(new(cat, line, site));
             }
         }
         return tracks;
@@ -350,7 +366,7 @@ public static class NightSummary
             bool approx = g is null;
             g ??= ThreatGeo.ResolveOblast(ev.Oblast);
             if (g is not { } gp) continue;
-            points.Add(new(gp.lat, gp.lon, ev.Kind, Math.Max(1, ev.Count), gp.name, at, approx));
+            points.Add(new(gp.lat, gp.lon, ev.Kind, Math.Max(1, ev.Count), gp.name, at, approx, ev.Extra));
         }
     }
 
@@ -429,7 +445,11 @@ public static class NightSummary
         }
         if (d.HadCruise)
             sb.AppendLine("🟠 Крилаті ракети" + (d.Official is { Missiles: > 0 } ? "" : " (групи КР)") + ": курсом на "
-                + T(string.Join(", ", d.HotSpots(true, 7).Select(h => h.place))));
+                + T(string.Join(", ", d.HotSpots("cruise", 7).Concat(d.HotSpots("hyper", 3)).Select(h => h.place).Distinct())));
+        if (d.Count("hyper") is > 0 and var hy)
+            sb.AppendLine($"🔷 Циркони/Кинджали: ~{hy} — на " + T(string.Join(", ", d.HotSpots("hyper", 5).Select(h => h.place))));
+        if (d.Count("kab") is > 0 and var kb)
+            sb.AppendLine($"💣 КАБ: ~{kb} — " + T(string.Join(", ", d.HotSpots("kab", 4).Select(h => h.place))));
         if (d.MaxAir > 0) sb.AppendLine($"🛸 Максимум одночасно в повітрі: ~{d.MaxAir}");
         var top = d.TopOblasts(5);
         if (top.Count > 0) sb.AppendLine("📍 Куди летіло найбільше: " + T(string.Join(", ", top.Select(t => t.oblast))));
@@ -455,10 +475,10 @@ public static class NightSummary
         return $"{{\"ts\":{ts},\"period\":\"{J(Period(d))}\",\"launched\":{d.Launched},\"waves\":{d.Waves.Count},"
              + $"\"maxAir\":{d.MaxAir},\"top\":\"{J(top)}\",\"impacts\":{d.Impacts.Count},\"impactAt\":\"{J(boomAt)}\","
              + $"\"ballistic\":{d.Ballistics.Sum(b => b.N)},\"missiles\":{d.Official?.Missiles ?? 0},"
-             + $"\"cruiseAt\":\"{J(Cruise(d))}\"}}";
+             + $"\"cruiseAt\":\"{J(Cruise(d))}\",\"hyper\":{d.Count("hyper")},\"kab\":{d.Count("kab")}}}";
     }
 
-    static string Cruise(Data d) => d.HadCruise ? string.Join(", ", d.HotSpots(true, 5).Select(h => h.place)) : "";
+    static string Cruise(Data d) => d.HadCruise ? string.Join(", ", d.HotSpots("cruise", 5).Concat(d.HotSpots("hyper", 2)).Select(h => h.place).Distinct()) : "";
 
     /// Для архіву ночей (data/nights/index.json).
     public static string ArchiveJson(Data d, string imageFile)
@@ -472,7 +492,7 @@ public static class NightSummary
         return $"{{\"id\":\"{id}\",\"from\":\"{d.From:yyyy-MM-ddTHH:mm:ss}\",\"to\":\"{d.To:yyyy-MM-ddTHH:mm:ss}\","
              + $"\"period\":\"{J(Period(d))}\",\"launched\":{d.Launched},\"waves\":{d.Waves.Count},\"maxAir\":{d.MaxAir},"
              + $"\"top\":\"{J(top)}\",\"impacts\":{d.Impacts.Count},\"impactAt\":\"{J(boomAt)}\",\"ballistic\":{d.Ballistics.Sum(b => b.N)},"
-             + $"\"missiles\":{d.Official?.Missiles ?? 0},\"cruiseAt\":\"{J(Cruise(d))}\","
+             + $"\"missiles\":{d.Official?.Missiles ?? 0},\"cruiseAt\":\"{J(Cruise(d))}\",\"hyper\":{d.Count("hyper")},\"kab\":{d.Count("kab")},"
              + $"\"downed\":\"{J(downed)}\",\"image\":\"{J(imageFile)}\",\"caption\":\"{J(caption)}\"}}";
     }
 }

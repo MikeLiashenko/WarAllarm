@@ -295,6 +295,8 @@ class MapDataController extends ChangeNotifier {
   int get nightMissiles => (_night['missiles'] as num?)?.toInt() ?? 0;
   /// Куди летіли крилаті («Ладижин, Умань, Дніпро»), порожньо — крилатих не було.
   String get nightCruiseAt => (_night['cruiseAt'] ?? '').toString();
+  int get nightHyper => (_night['hyper'] as num?)?.toInt() ?? 0;
+  int get nightKab => (_night['kab'] as num?)?.toInt() ?? 0;
 
   // 🌙 «Чого чекати цієї ночі» (вечірня оцінка загроз від моніторів).
   Map<String, dynamic> _outlook = const {};
