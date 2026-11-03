@@ -102,7 +102,7 @@ var privateUaIds = new HashSet<long>(
 // («Повітряний простір | Напрямок ракет» — чітко пише хвилі пусків по аеродромах).
 // Налаштовується: launch_channels=ukraine_pyxx,...
 var launchChannels = new HashSet<string>(
-    cfg.GetValueOrDefault("launch_channels", "vinny_banut,ukraine_pyxx")
+    cfg.GetValueOrDefault("launch_channels", "dnipro_pyxx,ukraine_pyxx") // @vinny_banut більше не існує
        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
        .Select(s => s.TrimStart('@')),
     StringComparer.OrdinalIgnoreCase);
@@ -111,6 +111,7 @@ var launchChannels = new HashSet<string>(
 var launchTitles = cfg.GetValueOrDefault("launch_titles", "Напрямок ракет")
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 bool IsLaunchTitle(string? t) => t is { Length: > 0 } && launchTitles.Any(x => t.Contains(x, StringComparison.OrdinalIgnoreCase));
+List<Channel> nightOfficialChs = new(); // канали звітів ПС ЗСУ (для пізнього звіту)
 int airReported = 0;                         // 🚀 «у повітрі» за оцінкою моніторів (@ukraine_pyxx)
 DateTime airReportedAt = DateTime.MinValue;
 LaunchBatch? lastBatch = null;               // остання хвиля пусків
@@ -334,6 +335,16 @@ if (args.Length >= 2 && args[0].Equals("place", StringComparison.OrdinalIgnoreCa
 
 // ── 🖼 Картинка карти для бота (оффлайн, без Telegram) — перевірка шрифтів/Skia на сервері:
 //    dotnet run -- mappng out.png [demo]   (demo — з кількома вигаданими цілями, щоб оцінити вигляд)
+// ── Підсумок ночі з журналів (офлайн):  dotnet run -- nightjr out.png "2026-11-02 18:00" "2026-11-03 08:00" journal/*.jsonl
+if (args.Length >= 5 && args[0].Equals("nightjr", StringComparison.OrdinalIgnoreCase))
+{
+    var nd = NightSummary.FromJournal(args.Skip(4), DateTime.Parse(args[2]), DateTime.Parse(args[3]));
+    File.WriteAllBytes(args[1], MapImage.RenderNight(nd));
+    Console.WriteLine(NightSummary.Caption(nd, html: false));
+    Console.WriteLine($"точок {nd.Points.Count}, ракетних {nd.Points.Count(p => p.Kind == ThreatKind.Missile)}");
+    return;
+}
+
 if (args.Length >= 2 && args[0].Equals("mappng", StringComparison.OrdinalIgnoreCase))
 {
     var snap0 = await OfficialAlerts.FetchFull();
@@ -951,6 +962,7 @@ async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNi
     foreach (var n in offNames.Where(n => !official.Any(c => ChannelNames(c).Contains(n, StringComparer.OrdinalIgnoreCase))))
         try { if ((await client.Contacts_ResolveUsername(n)).chats.Values.OfType<Channel>().FirstOrDefault() is { } c) official.Add(c); }
         catch (Exception ex) { Console.Error.WriteLine($"⚠ night: @{n} — {ex.Message}"); }
+    nightOfficialChs = official;
     var d = await NightSummary.Collect(client, radars, kyiv, launch, official, from, to);
     try { lock (NightSummary.BallLog) File.WriteAllLines("night_ball.log", NightSummary.BallLog); } catch { }
     // Діагностика: які канали знайшлись і що з них зібрано (night.log поруч із night.png).
@@ -1133,9 +1145,34 @@ async Task RunOutlookLoop(ChannelPoster? channel)
 async Task RunNightLoop(ChannelPoster? channel)
 {
     var lastMorning = DateTime.Now.Hour >= 9 ? DateTime.Now.Date : DateTime.MinValue; // запуск пізніше — чекаємо завтра
+    // Ранковий звіт ПС ЗСУ часто виходить ПІЗНІШЕ за підсумок (сьогодні о 09:01 його ще не було):
+    // до 13:00 раз на 15 хв перепитуємо лише канал звітів і, коли з'явився, правимо пост.
+    (NightSummary.Data d, long? postId, DateTime lastTry)? waitOfficial = null;
     while (true)
     {
         try { await Task.Delay(TimeSpan.FromSeconds(10)); } catch { }
+        if (waitOfficial is { } wo && (DateTime.Now.Date != wo.d.To.Date || DateTime.Now.Hour >= 13)) waitOfficial = null;
+        if (waitOfficial is { } w && DateTime.Now - w.lastTry >= TimeSpan.FromMinutes(15))
+        {
+            waitOfficial = w with { lastTry = DateTime.Now };
+            try
+            {
+                if (await NightSummary.FindOfficial(client, nightOfficialChs, w.d.To) is { } rep)
+                {
+                    waitOfficial = null;
+                    var d2 = NightSummary.WithOfficial(w.d, rep);
+                    var png2 = MapImage.RenderNight(d2);
+                    File.WriteAllBytes("night.png", png2);
+                    File.WriteAllText("night.txt", NightSummary.Caption(d2, html: false));
+                    SaveNightArchive(d2, png2, isCustom: false);
+                    MapWriter.NightJson = NightSummary.StateJson(d2);
+                    MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+                    if (channel is not null && w.postId is { } pid) await channel.EditPhoto(pid, png2, NightSummary.Caption(d2, html: true));
+                    Ui.Line(ConsoleColor.Magenta, $"🌙 Підсумок ночі доповнено звітом ПС ЗСУ: ракет {rep.Missiles}, БпЛА {rep.Drones}");
+                }
+            }
+            catch (Exception ex) { Console.Error.WriteLine("⚠ night official: " + ex.Message); }
+        }
         try
         {
             if (File.Exists("night_custom.request"))
@@ -1175,11 +1212,13 @@ async Task RunNightLoop(ChannelPoster? channel)
             File.WriteAllText("night.txt", plain);
             SaveNightArchive(d, png, isCustom: false);
             Ui.Line(ConsoleColor.Magenta, "🌙 Готово: night.png · цілей-точок " + d.Points.Count + " · вибухів " + d.Impacts.Count + " · пусків ~" + d.Launched);
+            long? nightPost = null;
             if (post)
             {
-                if (channel is not null) await channel.Post(html, png, silent: true);
+                if (channel is not null) nightPost = await channel.Post(html, png, silent: true);
                 await Alert(new AlarmInfo(now.ToString("HH:mm:ss"), "WarAlarm", "🌙 Підсумок ночі", plain, ThreatKind.Unknown, Urgent: false, Info: true));
             }
+            if (d.Official is null && now.Hour < 13) waitOfficial = (d, nightPost, now);
         }
         catch (Exception ex) { Console.Error.WriteLine("⚠ night: " + ex.Message); }
     }

@@ -373,6 +373,10 @@ class _NowScreenState extends State<NowScreen> {
             if (data.nightLaunched > 0)
               'Запущено ~${data.nightLaunched} (хвиль: ${data.nightWaves})',
             if (data.nightMaxAir > 0) 'Максимум у повітрі ~${data.nightMaxAir}',
+            if (data.nightCruiseAt.isNotEmpty || data.nightMissiles > 0)
+              'Крилаті ракети${data.nightMissiles > 0 ? ' (ракет за ПС ЗСУ: ${data.nightMissiles})' : ''}'
+                  '${data.nightCruiseAt.isNotEmpty ? ' — на ${data.nightCruiseAt}' : ''}',
+            if (data.nightBallistic > 0) 'Балістика: ${data.nightBallistic}',
             if (data.nightTop.isNotEmpty) 'Найбільше: ${data.nightTop}',
             if (data.nightImpacts > 0)
               'Вибухи: ${data.nightImpacts} — ${data.nightImpactAt}',

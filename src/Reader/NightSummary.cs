@@ -37,6 +37,18 @@ public static class NightSummary
                   .Select(g => (g.Key, g.Sum(p => p.N)))
                   .OrderByDescending(x => x.Item2).Take(take).ToList();
 
+        /// Куди летіло найбільше (місто, не центр області). Та сама ціль у кількох постах
+        /// поспіль — один раз на 20 хв (найбільше «×N» за цей час), а не сума згадок.
+        public List<(string place, double lat, double lon, int score)> HotSpots(bool missiles, int take) =>
+            Points.Where(p => !p.Approx && (missiles ? p.Kind == ThreatKind.Missile : IsDrone(p.Kind)))
+                  .GroupBy(p => p.Place)
+                  .Select(g => (g.Key, g.First().Lat, g.First().Lon,
+                                g.GroupBy(p => p.At.Ticks / TimeSpan.FromMinutes(20).Ticks).Sum(s => s.Max(p => p.N))))
+                  .OrderByDescending(x => x.Item4).Take(take).ToList();
+
+        /// Була атака крилатими (радар писав «КР», «крилаті», «Калібр»…).
+        public bool HadCruise => Points.Any(p => p.Kind == ThreatKind.Missile);
+
         /// Місця пуску шахедів цієї ночі (з хвиль); якщо хвиль немає — усі відомі.
         public List<string> DroneSites()
         {
@@ -74,9 +86,10 @@ public static class NightSummary
                 {
                     var last = c[^1];
                     var dt = p.At - last.At;
-                    if (dt < TimeSpan.Zero || dt > TimeSpan.FromMinutes(50) || c.Count >= 40) continue;
+                    // Крилата — ~13 км/хв: між постами радара буває й 200 км, але й «пам'ять» коротша.
+                    if (dt < TimeSpan.Zero || dt > TimeSpan.FromMinutes(fam ? 50 : 30) || c.Count >= 40) continue;
                     var km = ThreatGeo.Km((last.Lat, last.Lon), (p.Lat, p.Lon));
-                    if (km < 3 || km > 110) continue;
+                    if (km < 3 || km > (fam ? 110 : 260)) continue;
                     if (km < bd) { bd = km; best = c; }
                 }
                 if (best != null) best.Add(p); else chains.Add(new() { p });
@@ -256,19 +269,7 @@ public static class NightSummary
         // Радари: «Область:\nN× ТИП курсом на Місто» → точки.
         foreach (var ch in radars)
             foreach (var m in await Safe(() => History(client, ch, from, to)))
-            {
-                var at = m.date.ToLocalTime();
-                BallisticFrom(m.message, at, false, ball);
-                foreach (var ev in ThreatParser.Parse(m.message))
-                {
-                    if (ev.Kind is ThreatKind.AllClear or ThreatKind.Ballistic) continue;
-                    var g = ThreatGeo.Resolve(ev.City);
-                    bool approx = g is null;
-                    g ??= ThreatGeo.ResolveOblast(ev.Oblast);
-                    if (g is not { } gp) continue;
-                    points.Add(new(gp.lat, gp.lon, ev.Kind, Math.Max(1, ev.Count), gp.name, at, approx));
-                }
-            }
+                RadarPost(m.message, m.date.ToLocalTime(), points, ball);
 
         // Київ: цілі по районах + вибухи/прильоти + балістика на Київ.
         foreach (var ch in kyivLocal)
@@ -308,22 +309,78 @@ public static class NightSummary
         var ballistics = Salvos(ball.Count > 0 ? ball : ballOther);
 
         // Ранковий звіт ПС ЗСУ виходить ~09:00 — шукаємо до +6 год після кінця вікна.
-        OfficialReport? official = null;
+        var d = new Data(from, to, points, impacts, waves, maxAir, ballistics);
+        return await FindOfficial(client, officialChs, to) is { } official ? WithOfficial(d, official) : d;
+    }
+
+    /// Ранковий звіт ПС ЗСУ про цю ніч (виходить ~09:00–11:00) — лише один канал, дешево:
+    /// його можна перепитувати, поки звіту нема, не збираючи всю ніч наново.
+    public static async Task<OfficialReport?> FindOfficial(WTelegram.Client client, IEnumerable<Channel> officialChs, DateTime to)
+    {
         foreach (var ch in officialChs.DistinctBy(c => c.ID))
             foreach (var m in await Safe(() => History(client, ch, to.AddHours(-3), to.AddHours(6))))
-                if (OfficialReports.Parse(m.message) is { } rep) { official = rep; break; }
-        // Офіційний звіт ПС ЗСУ знайдено → райони пуску ракет переназначаємо на найближчий
-        // з НАЗВАНИХ у звіті (а не з загального списку).
-        if (official is { MissileSites.Count: > 0 })
-            ballistics = ballistics.Select(b =>
+                if (OfficialReports.Parse(m.message) is { } rep) return rep;
+        return null;
+    }
+
+    /// Ніч + офіційний звіт: райони пуску балістики переназначаємо на найближчий з НАЗВАНИХ у
+    /// звіті (а не з загального списку).
+    public static Data WithOfficial(Data d, OfficialReport official)
+    {
+        var ballistics = official is { MissileSites.Count: > 0 }
+            ? d.Ballistics.Select(b =>
             {
                 if (!b.Guessed) return b;
                 var site = official.MissileSites.OrderBy(s => ThreatGeo.Km(LaunchFeed.SiteCoords(s)!.Value, (b.TLat, b.TLon))).First();
                 var sc = LaunchFeed.SiteCoords(site)!.Value;
                 return b with { Origin = site, OLat = sc.lat, OLon = sc.lon };
-            }).ToList();
+            }).ToList()
+            : d.Ballistics;
+        return d with { Ballistics = ballistics, Official = official };
+    }
 
-        return new(from, to, points, impacts, waves, maxAir, ballistics, official);
+    /// Пост радара → точки цілей (+ балістика).
+    static void RadarPost(string text, DateTime at, List<Point> points, List<Ballistic> ball)
+    {
+        BallisticFrom(text, at, false, ball);
+        foreach (var ev in ThreatParser.Parse(text))
+        {
+            if (ev.Kind is ThreatKind.AllClear or ThreatKind.Ballistic) continue;
+            var g = ThreatGeo.Resolve(ev.City);
+            bool approx = g is null;
+            g ??= ThreatGeo.ResolveOblast(ev.Oblast);
+            if (g is not { } gp) continue;
+            points.Add(new(gp.lat, gp.lon, ev.Kind, Math.Max(1, ev.Count), gp.name, at, approx));
+        }
+    }
+
+    /// Ніч із журналів (офлайн-перевірка картинки): пости радара й каналу пусків.
+    public static Data FromJournal(IEnumerable<string> files, DateTime from, DateTime to, string radar = "rozvidkaneba")
+    {
+        var points = new List<Point>(); var ball = new List<Ballistic>(); var waves = new List<LaunchBatch>(); int maxAir = 0;
+        foreach (var f in files.OrderBy(x => x))
+        {
+            var day = DateTime.TryParse(Path.GetFileNameWithoutExtension(f), out var dd) ? dd : DateTime.Today;
+            foreach (var line in File.ReadLines(f))
+            {
+                try
+                {
+                    var e = System.Text.Json.JsonDocument.Parse(line).RootElement;
+                    if (e.GetProperty("kind").GetString() != "post") continue;
+                    var at = day + TimeSpan.Parse(e.GetProperty("t").GetString()!);
+                    if (at < from || at > to) continue;
+                    var ch = e.GetProperty("ch").GetString(); var text = e.GetProperty("text").GetString() ?? "";
+                    if (ch == radar) RadarPost(text, at, points, ball);
+                    else if (ch is "ukraine_pyxx" or "dnipro_pyxx")
+                    {
+                        if (LaunchFeed.ParseLaunch(text) is { } b) waves.Add(b);
+                        else if (LaunchFeed.ParseAirborne(text) is int a) maxAir = Math.Max(maxAir, a);
+                    }
+                }
+                catch { }
+            }
+        }
+        return new(from, to, points, new(), waves, maxAir, Salvos(ball));
     }
 
     static async Task<List<Message>> Safe(Func<Task<List<Message>>> f)
@@ -370,6 +427,9 @@ public static class NightSummary
                    : d.Official is { MissileSites.Count: > 0 } ? " (райони пуску — за звітом ПС ЗСУ)"
                    : " (місця пуску орієнтовні)"));
         }
+        if (d.HadCruise)
+            sb.AppendLine("🟠 Крилаті ракети" + (d.Official is { Missiles: > 0 } ? "" : " (групи КР)") + ": курсом на "
+                + T(string.Join(", ", d.HotSpots(true, 7).Select(h => h.place))));
         if (d.MaxAir > 0) sb.AppendLine($"🛸 Максимум одночасно в повітрі: ~{d.MaxAir}");
         var top = d.TopOblasts(5);
         if (top.Count > 0) sb.AppendLine("📍 Куди летіло найбільше: " + T(string.Join(", ", top.Select(t => t.oblast))));
@@ -394,8 +454,11 @@ public static class NightSummary
         var boomAt = string.Join(", ", d.Impacts.GroupBy(i => i.Place).OrderByDescending(g => g.Count()).Take(5).Select(g => g.Key));
         return $"{{\"ts\":{ts},\"period\":\"{J(Period(d))}\",\"launched\":{d.Launched},\"waves\":{d.Waves.Count},"
              + $"\"maxAir\":{d.MaxAir},\"top\":\"{J(top)}\",\"impacts\":{d.Impacts.Count},\"impactAt\":\"{J(boomAt)}\","
-             + $"\"ballistic\":{d.Ballistics.Sum(b => b.N)}}}";
+             + $"\"ballistic\":{d.Ballistics.Sum(b => b.N)},\"missiles\":{d.Official?.Missiles ?? 0},"
+             + $"\"cruiseAt\":\"{J(Cruise(d))}\"}}";
     }
+
+    static string Cruise(Data d) => d.HadCruise ? string.Join(", ", d.HotSpots(true, 5).Select(h => h.place)) : "";
 
     /// Для архіву ночей (data/nights/index.json).
     public static string ArchiveJson(Data d, string imageFile)
@@ -409,6 +472,7 @@ public static class NightSummary
         return $"{{\"id\":\"{id}\",\"from\":\"{d.From:yyyy-MM-ddTHH:mm:ss}\",\"to\":\"{d.To:yyyy-MM-ddTHH:mm:ss}\","
              + $"\"period\":\"{J(Period(d))}\",\"launched\":{d.Launched},\"waves\":{d.Waves.Count},\"maxAir\":{d.MaxAir},"
              + $"\"top\":\"{J(top)}\",\"impacts\":{d.Impacts.Count},\"impactAt\":\"{J(boomAt)}\",\"ballistic\":{d.Ballistics.Sum(b => b.N)},"
+             + $"\"missiles\":{d.Official?.Missiles ?? 0},\"cruiseAt\":\"{J(Cruise(d))}\","
              + $"\"downed\":\"{J(downed)}\",\"image\":\"{J(imageFile)}\",\"caption\":\"{J(caption)}\"}}";
     }
 }

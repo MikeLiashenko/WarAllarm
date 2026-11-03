@@ -68,9 +68,13 @@ public sealed class AiAdvisor
         "Пиши прямо, спокійно і по суті, як досвідчений фахівець із безпеки. Без вступів, без markdown, без переліків. " +
         "Ніколи не вигадуй загроз, яких немає у зведенні.";
 
+    // Ліміт/квота вичерпані (429) — не стукаємо щокілька хвилин усю ніч (було 167 помилок за добу).
+    DateTime _pausedUntil = DateTime.MinValue;
+
     // Возвращает совет модели или null (ошибка/пусто). Ошибки не критичны.
     public async Task<string?> Analyze(string situation)
     {
+        if (DateTime.Now < _pausedUntil) return null;
         try
         {
             string payload = _mode switch
@@ -117,6 +121,14 @@ public sealed class AiAdvisor
             var body = await resp.Content.ReadAsStringAsync();
             if (!resp.IsSuccessStatusCode)
             {
+                if ((int)resp.StatusCode == 429)
+                {
+                    // Квота на добу — пауза 2 год; короткий rate limit — 10 хв.
+                    var pause = body.Contains("quota", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromHours(2) : TimeSpan.FromMinutes(10);
+                    _pausedUntil = DateTime.Now + pause;
+                    Console.Error.WriteLine($"⚠ ІІ: 429 (ліміт) — пауза до {_pausedUntil:HH:mm}");
+                    return null;
+                }
                 Console.Error.WriteLine($"⚠ ІІ: {(int)resp.StatusCode} {body[..Math.Min(260, body.Length)]}");
                 return null;
             }
@@ -136,8 +148,11 @@ public sealed class AiAdvisor
             else if (_mode == Mode.Google)
             {
                 var sb = new StringBuilder();
-                foreach (var part in root.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts").EnumerateArray())
-                    if (part.TryGetProperty("text", out var tx)) sb.Append(tx.GetString());
+                // Заблокована/обрізана відповідь приходить без «content»/«parts» — це не помилка, а «нема що сказати».
+                if (root.TryGetProperty("candidates", out var cands) && cands.GetArrayLength() > 0
+                    && cands[0].TryGetProperty("content", out var content) && content.TryGetProperty("parts", out var parts))
+                    foreach (var part in parts.EnumerateArray())
+                        if (part.TryGetProperty("text", out var tx)) sb.Append(tx.GetString());
                 text = sb.ToString().Trim();
             }
             else

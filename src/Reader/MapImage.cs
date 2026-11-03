@@ -523,18 +523,10 @@ public static class MapImage
             canvas.DrawPath(path, border);
         }
 
-        // Міста України.
+        // Міста України — підписи малюємо ПІСЛЯ ліній (інакше жмуток шахедів їх закриває: «Чер аси»).
         using var cityDot = new SKPaint { Color = new SKColor(0xB8, 0xBC, 0xC6), IsAntialias = true };
         using var cityText = new SKPaint { Color = new SKColor(0xE6, 0xE8, 0xEE), IsAntialias = true, TextSize = 17, FakeBoldText = true };
-        using var cityHalo = new SKPaint { Color = new SKColor(0x15, 0x16, 0x19), IsAntialias = true, TextSize = 17, FakeBoldText = true, Style = SKPaintStyle.Stroke, StrokeWidth = 4 };
-        foreach (var (nm, lon, lat) in Cities)
-        {
-            var cp = P(lat, lon);
-            canvas.DrawCircle(cp, 3f, cityDot);
-            float tx = cp.X + 6 + cityText.MeasureText(nm) > W - 2 ? cp.X - 6 - cityText.MeasureText(nm) : cp.X + 6;
-            canvas.DrawText(nm, tx, cp.Y - 5, cityHalo);
-            canvas.DrawText(nm, tx, cp.Y - 5, cityText);
-        }
+        using var cityHalo = new SKPaint { Color = new SKColor(0x15, 0x16, 0x19), IsAntialias = true, TextSize = 17, FakeBoldText = true, Style = SKPaintStyle.Stroke, StrokeWidth = 5, StrokeJoin = SKStrokeJoin.Round };
 
         // Дуга a→b (контрольна точка зсунута вбік — «вигнуті» лінії як на радарах).
         void Arc(SKPath path, SKPoint a, SKPoint b, float bend)
@@ -617,6 +609,65 @@ public static class MapImage
         foreach (var g in d.Impacts.GroupBy(i => (Math.Round(i.Lat, 2), Math.Round(i.Lon, 2))))
             Burst(P(g.First().Lat, g.First().Lon), 13 + Math.Min(9, g.Count() * 2));
 
+        // Підписи без накладань: праворуч, ліворуч, під, над точкою.
+        var taken = new List<SKRect>();
+        SKRect? Spot(SKPoint p, float tw, float th, bool force)
+        {
+            var opts = new[]
+            {
+                new SKRect(p.X + 7, p.Y - th - 3, p.X + 7 + tw, p.Y - 3), new SKRect(p.X - 7 - tw, p.Y - th - 3, p.X - 7, p.Y - 3),
+                new SKRect(p.X - tw / 2, p.Y + 6, p.X + tw / 2, p.Y + 6 + th), new SKRect(p.X - tw / 2, p.Y - th - 9, p.X + tw / 2, p.Y - 9),
+            };
+            foreach (var r in opts)
+                if (r.Left >= 2 && r.Right <= W - 2 && r.Top >= 2 && !taken.Any(t => t.IntersectsWith(r))) { taken.Add(r); return r; }
+            if (!force) return null;
+            var f = opts[0].Right <= W - 2 ? opts[0] : opts[1];
+            taken.Add(f); return f;
+        }
+        // Куди летіло найбільше: кільце (шахеди — жовте, крилаті — помаранчеве; більше — частіше).
+        // Кільця — до підписів, і підписи їх оминають.
+        var cityNames = Cities.Select(c => c.name).ToHashSet();
+        var hot = d.HotSpots(false, 14).Select(h => (h, mis: false)).Concat(d.HotSpots(true, 10).Select(h => (h, mis: true))).ToList();
+        int maxScore = Math.Max(1, hot.Count == 0 ? 1 : hot.Max(x => x.h.score));
+        float RingR(int score) => 5 + 6 * (float)Math.Sqrt((double)score / maxScore);
+        foreach (var (h, mis) in hot)
+        {
+            var hp = P(h.lat, h.lon);
+            float rr = RingR(h.score);
+            using var ringFill = new SKPaint { Color = new SKColor(0x15, 0x16, 0x19, 0xC0), IsAntialias = true };
+            using var ring = new SKPaint { Color = mis ? CMissile : CDrone, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2.4f };
+            canvas.DrawCircle(hp, rr, ringFill);
+            canvas.DrawCircle(hp, rr, ring);
+            taken.Add(new SKRect(hp.X - rr, hp.Y - rr, hp.X + rr, hp.Y + rr));
+        }
+        foreach (var (nm, lon, lat) in Cities)
+        {
+            var cp = P(lat, lon);
+            canvas.DrawCircle(cp, 3f, cityDot);
+            var r = Spot(cp, cityText.MeasureText(nm), 17, force: true)!.Value;
+            canvas.DrawText(nm, r.Left, r.Bottom - 3, cityHalo);
+            canvas.DrawText(nm, r.Left, r.Bottom - 3, cityText);
+        }
+        var labelled = new HashSet<string>(cityNames); // обласні центри вже підписані
+        foreach (var (h, mis) in hot)
+        {
+            if (!labelled.Add(h.place)) continue; // і шахеди, і крилаті — одна назва
+            var hp = P(h.lat, h.lon);
+            float rr = RingR(h.score);
+            var col = mis ? CMissile : CDrone;
+            using var ht = new SKPaint { Color = col, IsAntialias = true, TextSize = 15, FakeBoldText = true };
+            using var hh = new SKPaint { Color = new SKColor(0x15, 0x16, 0x19), IsAntialias = true, TextSize = 15, FakeBoldText = true, Style = SKPaintStyle.Stroke, StrokeWidth = 4, StrokeJoin = SKStrokeJoin.Round };
+            // У щільному жмутку (Черкащина) — дрібнішим шрифтом, аби кільце не лишилось без назви.
+            foreach (var size in new[] { 15f, 12f })
+            {
+                ht.TextSize = hh.TextSize = size;
+                if (Spot(new SKPoint(hp.X + rr - 3, hp.Y + 4), ht.MeasureText(h.place), size, force: false) is not { } lr) continue;
+                canvas.DrawText(h.place, lr.Left, lr.Bottom - 2, hh);
+                canvas.DrawText(h.place, lr.Left, lr.Bottom - 2, ht);
+                break;
+            }
+        }
+
         // Місця пуску (шпилька + підпис): шахедні хвилі + балістика.
         using var pin = new SKPaint { Color = new SKColor(0xF5, 0xC5, 0x18), IsAntialias = true };
         using var pinText = new SKPaint { Color = new SKColor(0xD8, 0xDA, 0xE0), IsAntialias = true, TextSize = 15 };
@@ -637,7 +688,7 @@ public static class MapImage
         }
 
         // Підпис (лівий низ, над Румунією/Чорним морем).
-        float x0 = pad + 24, yb = H - 210;
+        float x0 = pad + 24, yb = H - 232;
         using var small = new SKPaint { Color = new SKColor(0xC8, 0xCB, 0xD2), IsAntialias = true, TextSize = 19 };
         using var big = new SKPaint { Color = SKColors.White, IsAntialias = true, TextSize = 38, FakeBoldText = true };
         using var stat = new SKPaint { Color = new SKColor(0xF5, 0xC5, 0x18), IsAntialias = true, TextSize = 19, FakeBoldText = true };
@@ -656,6 +707,7 @@ public static class MapImage
         {
             if (d.Launched > 0) parts.Add($"запущено ~{d.Launched}");
             if (d.MaxAir > 0) parts.Add($"макс. у повітрі ~{d.MaxAir}");
+            if (d.HadCruise) parts.Add("крилаті ракети");
             if (d.Ballistics.Count > 0) parts.Add($"балістика {d.Ballistics.Sum(b => b.N)}");
             if (d.Impacts.Count > 0) parts.Add($"вибухи {d.Impacts.Count}");
         }
@@ -669,10 +721,29 @@ public static class MapImage
             canvas.DrawLine(x, ly - 6, x + 26, ly - 6, lp);
             canvas.DrawText(label, x + 34, ly, small);
         }
-        LegLine(x0, CDrone, "шахеди");
-        LegLine(x0 + 150, CMissile, "крилаті ракети");
-        LegLine(x0 + 350, CBallistic, "балістика");
-        Burst(new SKPoint(x0 + 520, ly - 7), 10); canvas.DrawText("вибухи", x0 + 536, ly, small);
+        // Легенда з кількостями: «шахеди ~119 · крилаті ракети · балістика 18 · вибухи 3».
+        int drones = d.Official is { Drones: > 0 } od ? od.Drones : d.Launched;
+        var legend = new List<(SKColor? c, string label)>
+        {
+            (CDrone, drones > 0 ? $"шахеди ~{drones}" : "шахеди"),
+            (CMissile, d.Official is { Missiles: > 0 } om ? $"ракети {om.Missiles}" : "крилаті ракети"),
+            (CBallistic, d.Ballistics.Count > 0 ? $"балістика {d.Ballistics.Sum(b => b.N)}" : "балістика"),
+            (null, d.Impacts.Count > 0 ? $"вибухи {d.Impacts.Count}" : "вибухи"),
+        };
+        float lx = x0;
+        foreach (var (c, label) in legend)
+        {
+            if (c is { } lc) LegLine(lx, lc, label);
+            else { Burst(new SKPoint(lx + 10, ly - 7), 10); canvas.DrawText(label, lx + 26, ly, small); lx -= 8; }
+            lx += 34 + small.MeasureText(label) + 26;
+        }
+        // Кільця «куди летіло найбільше».
+        float ly2 = ly + 28;
+        using var lr1 = new SKPaint { Color = CDrone, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2.4f };
+        using var lr2 = new SKPaint { Color = CMissile, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2.4f };
+        canvas.DrawCircle(x0 + 7, ly2 - 6, 7, lr1);
+        canvas.DrawCircle(x0 + 24, ly2 - 6, 7, lr2);
+        canvas.DrawText("куди летіло найбільше (більше коло — частіше)", x0 + 40, ly2, small);
         using var brand = new SKPaint { Color = new SKColor(0x9A, 0x9E, 0xA8), IsAntialias = true, TextSize = 22, FakeBoldText = true };
         canvas.DrawText("WarAlarm", W - 150, H - 22, brand);
 
