@@ -447,7 +447,7 @@ public static class NightSummary
             sb.AppendLine("🟠 Крилаті ракети" + (d.Official is { Missiles: > 0 } ? "" : " (групи КР)") + ": курсом на "
                 + T(string.Join(", ", d.HotSpots("cruise", 7).Concat(d.HotSpots("hyper", 3)).Select(h => h.place).Distinct())));
         if (d.Count("hyper") is > 0 and var hy)
-            sb.AppendLine($"🔷 Циркони/Кинджали: ~{hy} — на " + T(string.Join(", ", d.HotSpots("hyper", 5).Select(h => h.place))));
+            sb.AppendLine($"🔷 Циркони: ~{hy} — на " + T(string.Join(", ", d.HotSpots("hyper", 5).Select(h => h.place))));
         if (d.Count("kab") is > 0 and var kb)
             sb.AppendLine($"💣 КАБ: ~{kb} — " + T(string.Join(", ", d.HotSpots("kab", 4).Select(h => h.place))));
         if (d.MaxAir > 0) sb.AppendLine($"🛸 Максимум одночасно в повітрі: ~{d.MaxAir}");

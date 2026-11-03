@@ -376,7 +376,7 @@ class _NowScreenState extends State<NowScreen> {
             if (data.nightCruiseAt.isNotEmpty || data.nightMissiles > 0)
               'Крилаті ракети${data.nightMissiles > 0 ? ' (ракет за ПС ЗСУ: ${data.nightMissiles})' : ''}'
                   '${data.nightCruiseAt.isNotEmpty ? ' — на ${data.nightCruiseAt}' : ''}',
-            if (data.nightHyper > 0) 'Циркони/Кинджали: ~${data.nightHyper}',
+            if (data.nightHyper > 0) 'Циркони: ~${data.nightHyper}',
             if (data.nightBallistic > 0) 'Балістика: ${data.nightBallistic}',
             if (data.nightKab > 0) 'КАБ: ~${data.nightKab}',
             if (data.nightTop.isNotEmpty) 'Найбільше: ${data.nightTop}',

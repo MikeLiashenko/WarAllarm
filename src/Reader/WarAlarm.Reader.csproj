@@ -18,6 +18,8 @@
   <ItemGroup>
     <!-- Learned shahed flows ("flows" command over journal/*.jsonl): markers move along them. -->
     <None Include="flows.txt" CopyToOutputDirectory="PreserveNewest" Condition="Exists('flows.txt')" />
+    <!-- Map images: Roboto (the app's font, Apache-2.0) and the app logo, same look locally and on the server. -->
+    <None Include="assets\*.ttf;assets\logo.png;assets\LICENSE-Roboto.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
