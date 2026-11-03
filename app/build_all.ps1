@@ -60,6 +60,18 @@ try {
     $win = Join-Path $out 'WarAlarm-Windows'
     Copy-Item (Join-Path $app 'build\windows\x64\runner\Release') $win -Recurse
     Compress-Archive -Path "$win\*" -DestinationPath (Join-Path $out 'WarAlarm-Windows.zip')
+
+    # The Start-menu shortcut runs app\WarAlarm-Windows\WarAlarm.exe with app\WarAlarm.ico:
+    # refresh that copy too, or the PC keeps the old app and icon (2026-11-03).
+    $inst = Join-Path $app 'WarAlarm-Windows'
+    $running = Get-Process WarAlarm -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$inst*" }
+    if ($running) { Write-Host 'Closing the running WarAlarm to update it...'; $running | Stop-Process -Force; Start-Sleep -Seconds 2 }
+    if (Test-Path $inst) { Remove-Item $inst -Recurse -Force }
+    Copy-Item (Join-Path $app 'build\windows\x64\runner\Release') $inst -Recurse
+    Copy-Item (Join-Path $app 'windows\runner\resources\app_icon.ico') (Join-Path $app 'WarAlarm.ico') -Force
+    & ie4uinit.exe -show
+    if ($running) { Start-Process (Join-Path $inst 'WarAlarm.exe') }
+    Write-Host "Installed copy updated: $inst"
 } catch { Write-Host $_ -ForegroundColor Red; $failed += 'exe' }
 
 Step 'Android .apk'
