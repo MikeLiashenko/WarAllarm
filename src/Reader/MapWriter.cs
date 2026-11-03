@@ -105,10 +105,11 @@ public static class MapWriter
         {
             var (t, amount) = merged[i];
             if (i > 0) sb.Append(',');
-            sb.Append("{\"label\":\"").Append(Esc(ThreatTracker.Label(t))).Append('"');
+            var jet = ThreatTracker.JetGuess(t, rawThreats);
+            sb.Append("{\"label\":\"").Append(Esc(jet is { } jg ? ThreatTracker.GuessLabel(jg) : ThreatTracker.Label(t))).Append('"');
             sb.Append(",\"id\":\"").Append(Esc(t.Id)).Append('"'); // стабільний ідентифікатор (вибір / стеження в застосунку)
             sb.Append(",\"zone\":\"").Append(Esc(t.Zone)).Append('"');
-            sb.Append(",\"cat\":\"").Append(CatOf(t)).Append('"');
+            sb.Append(",\"cat\":\"").Append(jet is not null ? "shahed" : CatOf(t)).Append('"');
             sb.Append(",\"stage\":\"").Append(t.Stage).Append('"');
             // Типовий маршрут далі (на Київ / на захід, або вздовж реального курсу): застосунок веде
             // мітку ним між постами й зупиняє на межі області без тривоги. Новий пост — новий старт.

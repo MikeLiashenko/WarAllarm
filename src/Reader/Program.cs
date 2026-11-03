@@ -361,6 +361,9 @@ if (args.Length >= 2 && args[0].Equals("mappng", StringComparison.OrdinalIgnoreC
         demoT.Add(T("Запоріжжя", ThreatKind.Drone, 47.86, 35.10, 300, 2, (47.55, 35.7)));
         demoT.Add(T("Кривий Ріг", ThreatKind.Fpv, 47.80, 33.55, 240, 1));
         demoT.Add(T("Бровари", ThreatKind.Drone, 50.52, 30.95, 245, 3, (50.75, 31.9), (50.62, 31.4)));
+        // Невідомі «цілі»: поодинці → реактивний, біля рою шахедів (Бровари) → звичайний.
+        demoT.Add(T("Вінниця", ThreatKind.Target, 49.30, 28.10, 70, 1, (49.0, 27.3)));
+        demoT.Add(T("Бориспіль", ThreatKind.Target, 50.38, 31.05, 260, 1, (50.3, 31.6)));
         demoT.Add(T("Суми", ThreatKind.Kab, 50.85, 34.95, 200, 1));
         demoT.Add(T("Миргород", ThreatKind.Missile, 49.95, 33.6, 290, 1, (49.4, 35.8), (49.7, 34.7)));
         // Ті самі моделі, що на живій карті: реактивний шахед, бандероль, балістика в польоті

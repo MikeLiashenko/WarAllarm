@@ -155,6 +155,8 @@ public static class MapImage
         // балістики/КАБ від місця пуску, коло досяжності «лише пуску», зони авіації над
         // РФ / окупованою, прогноз груп пуску, курс і слід. Однакові цілі ≤16 км — одна ×N.
         var now = DateTime.Now;
+        // Невідома «ціль» — БпЛА: поодинці (до 3) — реактивний, у рої — звичайний шахед.
+        string Cat(Threat t) => ThreatTracker.JetGuess(t, threats) is { } jet ? (jet ? "shahed_jet" : "shahed") : CatOf(t);
         bool IsFlight(Threat t) => !t.Launch && t.Kind is ThreatKind.Ballistic or ThreatKind.Kab && t.From is not null && t.To is not null;
         var flights = threats.Where(t => t.Pos is not null && IsFlight(t)).ToList();
         var launchOnly = threats.Where(t => t.Launch && t.From is not null).ToList();
@@ -162,7 +164,7 @@ public static class MapImage
         foreach (var t in threats)
         {
             if (t.Pos is not { } tp || IsFlight(t) || t.Launch) continue;
-            int i = drawn.FindIndex(d => CatOf(d.t) == CatOf(t) && ThreatGeo.Km(d.t.Pos!.Value, tp) < 16);
+            int i = drawn.FindIndex(d => Cat(d.t) == Cat(t) && ThreatGeo.Km(d.t.Pos!.Value, tp) < 16);
             if (i >= 0) drawn[i] = (drawn[i].t, drawn[i].n + t.Amount); else drawn.Add((t, t.Amount));
         }
         var zones = AviationFeed.MapZones();
@@ -205,7 +207,7 @@ public static class MapImage
         // «Лише пуск» (ціль невідома): коло, куди могла долетіти.
         foreach (var t in launchOnly)
         {
-            var c = CatColor(CatOf(t));
+            var c = CatColor(Cat(t));
             var at = P(t.From!.Value.lon, t.From!.Value.lat);
             double reach = Math.Min(t.Kind == ThreatKind.Ballistic ? 450 : 1200,
                 ThreatGeo.SpeedKmh(t.Kind, t.Ammo) / 60 * Math.Max(0, (now - t.LaunchAt).TotalMinutes));
@@ -221,7 +223,7 @@ public static class MapImage
         // Політ балістики / КАБ: увесь шлях пунктиром, пройдене — суцільно, приціл на цілі.
         foreach (var t in flights)
         {
-            var c = CatColor(CatOf(t));
+            var c = CatColor(Cat(t));
             var a = P(t.From!.Value.lon, t.From!.Value.lat);
             var b = P(t.To!.Value.lon, t.To!.Value.lat);
             var (at, _, left, landed) = FlightNow(t);
@@ -258,7 +260,7 @@ public static class MapImage
         {
             List<(double lat, double lon)> track; lock (t.Track) track = t.Track.TakeLast(6).ToList();
             if (track.Count < 2) continue;
-            var c = CatColor(CatOf(t));
+            var c = CatColor(Cat(t));
             for (int i = 1; i < track.Count; i++)
             {
                 byte a = (byte)(0x30 + 0x70 * i / (track.Count - 1));
@@ -271,7 +273,7 @@ public static class MapImage
         foreach (var (t, _) in drawn)
         {
             if (!t.OrbitingAt(now) || t.Down) continue;
-            var c = CatColor(CatOf(t));
+            var c = CatColor(Cat(t));
             var at = P(t.Pos!.Value.lon, t.Pos!.Value.lat);
             float r = Math.Max(Km2Px(t.Kind == ThreatKind.Fpv ? 3 : 8), 22);
             using (var ring = Dashed(c.WithAlpha(0xB3), 1.6f)) canvas.DrawCircle(at, r, ring);
@@ -285,7 +287,7 @@ public static class MapImage
             // Летить до названого міста: пунктир до нього і приціл, далі — нічого не вигадуємо.
             if (t.Approach is not null)
             {
-                var c0 = CatColor(CatOf(t));
+                var c0 = CatColor(Cat(t));
                 var dst = P(t.Pos!.Value.lon, t.Pos!.Value.lat);
                 using (var dash = Dashed(c0.WithAlpha(0x99), 1.5f)) canvas.DrawLine(DP(t), dst, dash);
                 using (var aim = new SKPaint { Color = c0.WithAlpha(0xCC), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.6f }) canvas.DrawCircle(dst, 6, aim);
@@ -297,7 +299,7 @@ public static class MapImage
             var to = (lat: from.lat + lead * Math.Cos(hd * Math.PI / 180) / 111,
                       lon: from.lon + lead * Math.Sin(hd * Math.PI / 180) / (111 * Math.Cos(from.lat * Math.PI / 180)));
             if (!OblastGeo.InUkraine(to.lat, to.lon) && OblastGeo.InUkraine(from.lat, from.lon)) continue; // не «в Румунію»
-            var c = CatColor(CatOf(t));
+            var c = CatColor(Cat(t));
             var ps = P(to.lon, to.lat);
             using (var dash = Dashed(c.WithAlpha(0x99), 1.5f)) canvas.DrawLine(P(from.lon, from.lat), ps, dash);
             using (var dot = new SKPaint { Color = c.WithAlpha(0xCC), IsAntialias = true }) canvas.DrawCircle(ps, 3.2f, dot);
@@ -320,11 +322,11 @@ public static class MapImage
             DrawFig(canvas, P(z.lon, z.lat), hdg, "avia", CatColor("avia"), Ppu);
         }
         foreach (var t in launchOnly)
-            DrawFig(canvas, P(t.From!.Value.lon, t.From!.Value.lat), t.Heading ?? 0, CatOf(t), CatColor(CatOf(t)), Ppu);
+            DrawFig(canvas, P(t.From!.Value.lon, t.From!.Value.lat), t.Heading ?? 0, Cat(t), CatColor(Cat(t)), Ppu);
         foreach (var t in flights)
         {
             var (at, hdg, _, landed) = FlightNow(t);
-            if (!landed) DrawFig(canvas, at, hdg, CatOf(t), CatColor(CatOf(t)), Ppu, glow: new SKColor(0xFF, 0x45, 0x3A), glowStrength: 0.9f);
+            if (!landed) DrawFig(canvas, at, hdg, Cat(t), CatColor(Cat(t)), Ppu, glow: new SKColor(0xFF, 0x45, 0x3A), glowStrength: 0.9f);
         }
         foreach (var g in groups)
         {
@@ -340,7 +342,7 @@ public static class MapImage
         }
         foreach (var (t, _) in drawn)
         {
-            var cat = CatOf(t);
+            var cat = Cat(t);
             var pt = DP(t);
             bool faded = t.Down || now - t.LastUpdate > TimeSpan.FromMinutes(6);
             bool near = t.Stage is TrackStage.Imminent or TrackStage.Overhead or TrackStage.Impact;
@@ -352,7 +354,7 @@ public static class MapImage
         }
 
         // ×N: ціль або група пуску з кількома бортами.
-        var pillsToDraw = drawn.Where(d => d.n > 1).Select(d => (pt: DP(d.t), n: d.n, c: CatColor(CatOf(d.t))))
+        var pillsToDraw = drawn.Where(d => d.n > 1).Select(d => (pt: DP(d.t), n: d.n, c: CatColor(Cat(d.t))))
             .Concat(groups.Where(g => g.Left > 1).Select(g => (pt: P(g.PosAt(now).lon, g.PosAt(now).lat), n: g.Left, c: CatColor(g.Reactive ? "shahed_jet" : "shahed"))))
             .ToList();
 
@@ -437,8 +439,8 @@ public static class MapImage
 
         // ── Картка-легенда в лівому нижньому куті (Молдова/Румунія — там порожньо) ──
         // Лише ті типи, що зараз є на карті (з польотами, пусками, групами й авіацією), з кількістю.
-        var kinds = drawn.Select(d => (cat: CatOf(d.t), n: d.n))
-            .Concat(flights.Concat(launchOnly).Select(t => (cat: CatOf(t), n: t.Amount)))
+        var kinds = drawn.Select(d => (cat: Cat(d.t), n: d.n))
+            .Concat(flights.Concat(launchOnly).Select(t => (cat: Cat(t), n: t.Amount)))
             .Concat(groups.Select(g => (cat: g.Reactive ? "shahed_jet" : "shahed", n: g.Left)))
             .Concat(zones.Select(z => (cat: "avia", n: 1)))
             .GroupBy(k => k.cat).Select(g => (cat: g.Key, n: g.Sum(k => k.n)))

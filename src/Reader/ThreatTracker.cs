@@ -971,6 +971,23 @@ public sealed class ThreatTracker
         return t.Ammo is { Length: > 0 } a ? $"{name} ({a})" : name;
     }
 
+    /// Невідома «ціль» (Target / Unknown) на карті — це БпЛА: звичайні шахеди налітають роєм,
+    /// реактивні — поодинці, до 3. Тож рахуємо БпЛА навколо (≤60 км, разом із самою ціллю):
+    /// до 3 — реактивний, більше — звичайний шахед. Для конкретного типу — null.
+    public static bool? JetGuess(Threat t, IEnumerable<Threat> all)
+    {
+        if (t.Kind is not (ThreatKind.Target or ThreatKind.Unknown) || t.Pos is not { } p) return null;
+        if (t.Amount > 3) return false;
+        int around = all.Where(o => o.Pos is { } q && !o.Launch && !o.Down
+                && o.Kind is ThreatKind.Drone or ThreatKind.Target or ThreatKind.Unknown
+                && ThreatGeo.Km(p, q) <= 60)
+            .Sum(o => o.Amount);
+        return Math.Max(around, t.Amount) <= 3;
+    }
+
+    /// Підпис невідомої цілі для карти: «Реактивний шахед (ймовірно)» / «Шахед (ймовірно)».
+    public static string GuessLabel(bool jet) => jet ? "Реактивний шахед (ймовірно)" : "Шахед (ймовірно)";
+
     public static string StageLabel(TrackStage s) => s switch
     {
         TrackStage.Approaching => "наближається",
