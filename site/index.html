@@ -624,15 +624,56 @@ if(/tgWebApp/.test(location.hash) || window.TelegramWebviewProxy){
   };
   document.head.append(sdk);
 }
-async function tick(){
+// Дані: живий потік Firebase (повний стан один раз, далі — лише змінені поля), а не
+// весь стан (~70 КБ) кожні 7 с з кожного відкритого браузера — це був платний трафік.
+// Схована вкладка закриває потік; якщо потік не працює — запасне опитування раз на 30 с.
+function stamp(){
+  document.getElementById('err').textContent = '';
+  const d = new Date(); document.getElementById('upd').textContent =
+    'оновлено '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+async function poll(){
+  try{ latest = (await fetch(DB+'/state.json', { cache:'no-store' }).then(r => r.json())) || {}; stamp(); }
+  catch(e){ document.getElementById('err').textContent = 'немає звʼязку з даними'; }
+}
+function applyEvent(kind, msg){
+  let m; try{ m = JSON.parse(msg.data); }catch(e){ return; }
+  if(!m || typeof m !== 'object') return;
+  const parts = (m.path || '/').split('/').filter(Boolean);
+  if(!parts.length){
+    if(kind === 'patch' && m.data && typeof m.data === 'object'){
+      latest = Object.assign({}, latest);
+      for(const k in m.data){ if(m.data[k] === null) delete latest[k]; else latest[k] = m.data[k]; }
+    } else latest = m.data || {};
+  } else {
+    latest = Object.assign({}, latest);
+    let node = latest;
+    for(const p of parts.slice(0, -1)){ node = node[p] = Object.assign({}, node[p] || {}); }
+    const k = parts[parts.length-1];
+    if(kind === 'patch' && m.data && typeof m.data === 'object') node[k] = Object.assign({}, node[k] || {}, m.data);
+    else if(m.data === null) delete node[k]; else node[k] = m.data;
+  }
+  stamp();
+}
+let es = null, pollTimer = null, fails = 0;
+function openStream(){
+  if(es || document.hidden) return;
+  if(!window.EventSource){ if(!pollTimer){ poll(); pollTimer = setInterval(poll, 30000); } return; }
+  es = new EventSource(DB+'/state.json');
+  es.addEventListener('put', e => { fails = 0; applyEvent('put', e); });
+  es.addEventListener('patch', e => { fails = 0; applyEvent('patch', e); });
+  es.onerror = () => {
+    if(++fails >= 5 && !pollTimer){
+      document.getElementById('err').textContent = 'немає звʼязку з даними';
+      poll(); pollTimer = setInterval(poll, 30000);
+    }
+  };
+}
+function closeStream(){ if(es){ es.close(); es = null; } }
+document.addEventListener('visibilitychange', () => { if(document.hidden) closeStream(); else openStream(); });
+function tick(){
   if(isDemo){ latest = demo(); document.getElementById('upd').textContent = 'ДЕМО'; return; }
-  try{
-    const s = await fetch(DB+'/state.json', { cache:'no-store' }).then(r => r.json());
-    latest = s || {};
-    document.getElementById('err').textContent = '';
-    const d = new Date(); document.getElementById('upd').textContent =
-      'оновлено '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-  }catch(e){ document.getElementById('err').textContent = 'немає звʼязку з даними'; }
+  openStream();
 }
 // Анімація (рух між постами, кружляння авіації, пульс прицілу) — ~30 кадрів/с.
 let last = 0;
@@ -669,7 +710,7 @@ if(home){
     clampView(); lastGesture = performance.now();
   };
 }
-computeFit(); tick(); setInterval(tick, 7000); requestAnimationFrame(frame);
+computeFit(); tick(); if(isDemo) setInterval(tick, 7000); requestAnimationFrame(frame);
 </script>
 </body>
 </html>
