@@ -70,7 +70,7 @@ public static class MapWriter
                            .Replace("/*__OBLASTS__*/", MapOblasts.Json)
                            .Replace("/*__RAIONS__*/", MapRaions.Json);
         try { File.WriteAllText(path, html, new UTF8Encoding(false)); } catch { /* карта не критична */ }
-        if (Publisher is { } pub) { _ = pub.Publish("state", state); } // fire-and-forget
+        Publisher?.PublishState(state); // не частіше раз на 4 с, лише змінені поля
     }
 
     /// Builds the live state JSON (threats + stats + rows + cfg + aiText).

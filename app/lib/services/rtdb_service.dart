@@ -155,7 +155,15 @@ class RtdbService {
     final value = decoded['data'];
 
     if (path == '/') {
-      write(value);
+      // `patch` at the root carries only the changed children — merge, don't replace.
+      final current = read();
+      if (event == 'patch' && value is Map && current is Map) {
+        final merged = Map<dynamic, dynamic>.from(current);
+        value.forEach((k, v) => v == null ? merged.remove(k) : merged[k] = v);
+        write(merged);
+      } else {
+        write(value);
+      }
       return;
     }
     // Nested path patch — merge into cache.
