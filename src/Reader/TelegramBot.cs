@@ -128,13 +128,21 @@ public sealed class TelegramBot
                 foreach (var u in await GetUpdates(ct))
                 {
                     _offset = u.Id + 1;
-                    try
+                    // Одна команда, що зависла (напр. історія каналу через MTProto під час
+                    // перепідключення), тримала весь цикл: бот мовчав годинами (2026-11-04).
+                    // Тепер максимум 90 с — далі вона доробляє у фоні, а бот відповідає іншим.
+                    var work = Task.Run(async () =>
                     {
-                        if (u.CbData != null) await HandleCallback(u.Chat, u.CbData, u.CbId!, u.MsgId);
-                        else if (u.Lat is { } la && u.Lon is { } lo) await SetPlaceByLocation(u.Chat, la, lo);
-                        else if (u.Text != null) await Handle(u.Chat, u.Text.Trim());
-                    }
-                    catch (Exception ex) { Console.Error.WriteLine("⚠ bot handle: " + ex.Message); }
+                        try
+                        {
+                            if (u.CbData != null) await HandleCallback(u.Chat, u.CbData, u.CbId!, u.MsgId);
+                            else if (u.Lat is { } la && u.Lon is { } lo) await SetPlaceByLocation(u.Chat, la, lo);
+                            else if (u.Text != null) await Handle(u.Chat, u.Text.Trim());
+                        }
+                        catch (Exception ex) { Console.Error.WriteLine("⚠ bot handle: " + ex.Message); }
+                    });
+                    if (await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(90), ct)) != work)
+                        Console.Error.WriteLine($"⚠ bot: «{u.CbData ?? u.Text ?? "геолокація"}» не відповіла за 90 с — пропускаю");
                 }
             }
             catch (OperationCanceledException) { break; }
