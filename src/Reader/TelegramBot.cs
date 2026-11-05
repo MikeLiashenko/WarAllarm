@@ -131,6 +131,8 @@ public sealed class TelegramBot
                     // Одна команда, що зависла (напр. історія каналу через MTProto під час
                     // перепідключення), тримала весь цикл: бот мовчав годинами (2026-11-04).
                     // Тепер максимум 90 с — далі вона доробляє у фоні, а бот відповідає іншим.
+                    var what = u.CbData ?? u.Text ?? "геолокація";
+                    Console.WriteLine($"🤖 бот ← {(what.Length > 40 ? what[..40] + "…" : what)}");
                     var work = Task.Run(async () =>
                     {
                         try
@@ -142,13 +144,17 @@ public sealed class TelegramBot
                         catch (Exception ex) { Console.Error.WriteLine("⚠ bot handle: " + ex.Message); }
                     });
                     if (await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(90), ct)) != work)
-                        Console.Error.WriteLine($"⚠ bot: «{u.CbData ?? u.Text ?? "геолокація"}» не відповіла за 90 с — пропускаю");
+                        Console.Error.WriteLine($"⚠ bot: «{what}» не відповіла за 90 с — пропускаю");
                 }
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("⚠ bot: " + ex.Message);
+                // 409 = хтось інший читає цього ж бота (локальний Reader з тим самим токеном):
+                // тоді частина повідомлень іде йому, і бот «не відповідає».
+                Console.Error.WriteLine(ex.Message.Contains("409")
+                    ? "⚠ bot: 409 — цього бота читає ще один Reader з тим самим токеном (вимкни локальний!)"
+                    : "⚠ bot: " + ex.Message);
                 try { await Task.Delay(3000, ct); } catch { break; }
             }
         }
@@ -475,6 +481,9 @@ public sealed class TelegramBot
     {
         var outp = new List<Upd>();
         using var doc = await GetJson($"{_api}/getUpdates?timeout=25&offset={_offset}&allowed_updates=[\"message\",\"callback_query\"]", ct);
+        if (doc.RootElement.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.False)
+            throw new Exception($"{(doc.RootElement.TryGetProperty("error_code", out var ec) ? ec.GetInt32() : 0)} "
+                + (doc.RootElement.TryGetProperty("description", out var de) ? de.GetString() : ""));
         foreach (var u in doc.RootElement.GetProperty("result").EnumerateArray())
         {
             var id = u.GetProperty("update_id").GetInt64();

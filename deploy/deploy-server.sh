@@ -43,6 +43,13 @@ command -v docker >/dev/null || { curl -fsSL https://get.docker.com | sudo sh; }
 sudo mkdir -p /opt/waralarm/data && cd /opt/waralarm
 sudo rm -rf app && sudo tar xzf /tmp/pkg.tgz
 if [ "$MODE" != "--code" ] && [ -f /tmp/data.tgz ]; then sudo tar xzf /tmp/data.tgz -C data; fi
+# Recreating the container drops its log — keep the old one (last 10) to see what
+# happened before the deploy (a bot outage on 2026-11-05 left no trace).
+sudo mkdir -p data/logs
+if sudo docker compose ps -q 2>/dev/null | grep -q .; then
+  sudo sh -c "docker compose logs --no-color > data/logs/run-$(date +%F_%H%M).log 2>&1" || true
+  ls -1t data/logs/run-*.log 2>/dev/null | tail -n +11 | xargs -r sudo rm -f
+fi
 sudo docker compose up -d --build
 echo "⏳ Чекаю на вхід у Telegram …"
 for i in $(seq 1 40); do sudo docker compose logs 2>/dev/null | grep -q "Вошли как" && break; sleep 3; done
