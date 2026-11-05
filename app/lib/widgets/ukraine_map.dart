@@ -93,6 +93,16 @@ class _BaseGeo {
       final p = poly(r);
       raionPaths.add((r.name, p));
       raionBorders.addPath(p, Offset.zero);
+      // Which oblast holds this raion (average of its outline points).
+      var sx = 0.0, sy = 0.0, n = 0;
+      for (final pt in r.rings.first) {
+        final q = fit.project(pt.dx, pt.dy);
+        sx += q.dx;
+        sy += q.dy;
+        n++;
+      }
+      final c = n > 0 ? Offset(sx / n, sy / n) : p.getBounds().center;
+      raionOblast.add(oblastPaths.indexWhere((o) => o.$2.contains(c)));
     }
     bounds = Rect.fromPoints(fit.project(_lon0, _lat1), fit.project(_lon0 + _lonSpan, _lat1 - _latSpan));
   }
@@ -103,7 +113,35 @@ class _BaseGeo {
   final raionPaths = <(String, Path)>[];
   final land = Path();
   final raionBorders = Path();
+  final raionOblast = <int>[]; // per raion: index in oblastPaths, -1 if none
   late final Rect bounds;
+
+  // Raions are simplified one by one, so neighbours leave thin gaps that showed as
+  // dark slivers in an alarmed oblast. An alarm area is therefore drawn as
+  // «the oblast minus its raions at another level» — oblast outlines are the union
+  // of the raions, so it lines up exactly. Cached per (oblast, level, quiet raions).
+  final _alarmAreas = <String, Path?>{};
+
+  Path? alarmArea(int oblast, String level, Map<String, String> raionLevel, String Function(String) norm) {
+    final quiet = <int>[];
+    for (var i = 0; i < raionPaths.length; i++) {
+      if (raionOblast[i] == oblast && raionLevel[norm(raionPaths[i].$1)] != level) quiet.add(i);
+    }
+    final key = '$oblast|$level|${quiet.join(',')}';
+    return _alarmAreas.putIfAbsent(key, () {
+      if (_alarmAreas.length > 200) _alarmAreas.clear();
+      if (quiet.isEmpty) return oblastPaths[oblast].$2;
+      final rest = Path()..fillType = PathFillType.evenOdd;
+      for (final i in quiet) {
+        rest.addPath(raionPaths[i].$2, Offset.zero);
+      }
+      try {
+        return Path.combine(PathOperation.difference, oblastPaths[oblast].$2, rest);
+      } catch (_) {
+        return null; // fall back to the raion-by-raion fill
+      }
+    });
+  }
 }
 
 /// Laid-out label paragraphs, reused across frames (layout + shadow setup was per frame).
@@ -215,11 +253,25 @@ class _BasePainter extends CustomPainter {
     //     so partially-alarmed oblasts show WHICH raions (official-style). ---
     final raiLvl = <String, String>{for (final e in raionLevels.entries) _MapPainter._napo(e.key): e.value};
     if (raiLvl.isNotEmpty) {
-      for (final (name, path) in geo.raionPaths) {
+      final done = <String>{}; // oblast|level already filled as one area
+      for (var i = 0; i < geo.raionPaths.length; i++) {
+        final (name, path) = geo.raionPaths[i];
         final lvl = raiLvl[_MapPainter._napo(name)];
         if (lvl == null) continue;
         final red = lvl == 'red';
-        canvas.drawPath(path, Paint()..color = (red ? _alarmRed : _alarmYellow).withValues(alpha: red ? 0.5 : 0.6));
+        final paint = Paint()..color = (red ? _alarmRed : _alarmYellow).withValues(alpha: red ? 0.5 : 0.6);
+        final ob = geo.raionOblast[i];
+        if (ob >= 0) {
+          if (oblastWhole[geo.oblastPaths[ob].$1] == lvl) continue; // already filled whole
+          if (!done.add('$ob|$lvl')) continue;
+          final area = geo.alarmArea(ob, lvl, raiLvl, _MapPainter._napo);
+          if (area != null) {
+            canvas.drawPath(area, paint);
+            continue;
+          }
+          done.remove('$ob|$lvl');
+        }
+        canvas.drawPath(path, paint);
       }
     }
     canvas.drawPath(
