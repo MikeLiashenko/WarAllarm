@@ -116,47 +116,123 @@ public sealed class TelegramBot
     static readonly object NoKb = new { inline_keyboard = Array.Empty<object[]>() };
 
     // ── Фонові цикли ──────────────────────────────────────────────────────────
+    // Бот не має права вмерти. Що вже траплялося:
+    //  • 2026-11-04: одна зависла команда тримала весь цикл — бот мовчав годинами;
+    //  • 2026-11-07: Telegram відповів 429/502, наступний запит вийшов за таймаут, а таймаут
+    //    HttpClient — це OperationCanceledException, і цикл вирішив, що його зупиняють: break,
+    //    бот мертвий до перезапуску контейнера.
+    // Тепер: опитування лише читає й ставить у чергу (ніщо його не блокує); будь-яка помилка —
+    // пауза й далі (429 — скільки просить Telegram); сторож перезапускає опитування, якщо
+    // воно мовчить 3 хв; команди виконує окремий обробник по черзі, ≤60 с кожна, а повторні
+    // натискання тієї ж кнопки, поки перша ще в черзі чи в роботі, не дублюються.
+    readonly System.Threading.Channels.Channel<Upd> _queue =
+        System.Threading.Channels.Channel.CreateBounded<Upd>(new System.Threading.Channels.BoundedChannelOptions(300)
+            { FullMode = System.Threading.Channels.BoundedChannelFullMode.DropOldest });
+    readonly HashSet<string> _pending = new(); // chat|команда — уже в черзі або виконується
+    DateTime _lastPoll = DateTime.UtcNow;
+
+    static string KeyOf(Upd u) => $"{u.Chat}|{u.CbData ?? u.Text ?? $"{u.Lat},{u.Lon}"}";
+    static string Short(string s) => s.Length > 40 ? s[..40] + "…" : s;
+
     public async Task RunAsync(CancellationToken ct = default)
     {
         try { await InitOffset(); } catch { }
         try { await SetCommands(); } catch { }
         _ = RunUserAlarms(ct);                 // персональні тривоги в особисті
+        _ = Task.Run(() => Worker(ct));
+        while (!ct.IsCancellationRequested)
+        {
+            using var loop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _lastPoll = DateTime.UtcNow;
+            var poll = Task.Run(() => PollLoop(loop.Token));
+            while (!poll.IsCompleted && !ct.IsCancellationRequested)
+            {
+                await Task.WhenAny(poll, Task.Delay(TimeSpan.FromSeconds(20)));
+                if (DateTime.UtcNow - _lastPoll > TimeSpan.FromMinutes(3))
+                {
+                    Console.Error.WriteLine("⚠ bot: опитування мовчить 3 хв — перезапускаю");
+                    loop.Cancel();
+                    break;
+                }
+            }
+            if (poll.IsFaulted) Console.Error.WriteLine("⚠ bot: опитування впало — " + poll.Exception?.GetBaseException().Message);
+            try { await Task.Delay(2000, ct); } catch { break; }
+        }
+    }
+
+    async Task PollLoop(CancellationToken ct)
+    {
+        var errors = 0;
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                foreach (var u in await GetUpdates(ct))
+                var ups = await GetUpdates(ct);
+                _lastPoll = DateTime.UtcNow;
+                errors = 0;
+                foreach (var u in ups)
                 {
                     _offset = u.Id + 1;
-                    // Одна команда, що зависла (напр. історія каналу через MTProto під час
-                    // перепідключення), тримала весь цикл: бот мовчав годинами (2026-11-04).
-                    // Тепер максимум 90 с — далі вона доробляє у фоні, а бот відповідає іншим.
                     var what = u.CbData ?? u.Text ?? "геолокація";
-                    Console.WriteLine($"🤖 бот ← {(what.Length > 40 ? what[..40] + "…" : what)}");
-                    var work = Task.Run(async () =>
+                    bool dup;
+                    lock (_pending) dup = !_pending.Add(KeyOf(u));
+                    if (dup)
                     {
-                        try
-                        {
-                            if (u.CbData != null) await HandleCallback(u.Chat, u.CbData, u.CbId!, u.MsgId);
-                            else if (u.Lat is { } la && u.Lon is { } lo) await SetPlaceByLocation(u.Chat, la, lo);
-                            else if (u.Text != null) await Handle(u.Chat, u.Text.Trim());
-                        }
-                        catch (Exception ex) { Console.Error.WriteLine("⚠ bot handle: " + ex.Message); }
-                    });
-                    if (await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(90), ct)) != work)
-                        Console.Error.WriteLine($"⚠ bot: «{what}» не відповіла за 90 с — пропускаю");
+                        Console.WriteLine($"🤖 бот ← {Short(what)} (повтор, уже виконую)");
+                        if (u.CbId != null) _ = Call("answerCallbackQuery", new { callback_query_id = u.CbId });
+                        continue;
+                    }
+                    Console.WriteLine($"🤖 бот ← {Short(what)}");
+                    _queue.Writer.TryWrite(u);
                 }
             }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception ex)
             {
+                _lastPoll = DateTime.UtcNow; // живий, просто Telegram відповідає помилкою
+                errors++;
                 // 409 = хтось інший читає цього ж бота (локальний Reader з тим самим токеном):
                 // тоді частина повідомлень іде йому, і бот «не відповідає».
                 Console.Error.WriteLine(ex.Message.Contains("409")
                     ? "⚠ bot: 409 — цього бота читає ще один Reader з тим самим токеном (вимкни локальний!)"
                     : "⚠ bot: " + ex.Message);
-                try { await Task.Delay(3000, ct); } catch { break; }
+                var m = Regex.Match(ex.Message, @"retry after (\d+)");
+                var wait = m.Success ? int.Parse(m.Groups[1].Value) + 1 : Math.Min(30, 3 * errors);
+                try { await Task.Delay(TimeSpan.FromSeconds(wait), ct); } catch { return; }
             }
+        }
+    }
+
+    async Task Worker(CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var u in _queue.Reader.ReadAllAsync(ct))
+            {
+                var what = u.CbData ?? u.Text ?? "геолокація";
+                var key = KeyOf(u);
+                var work = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (u.CbData != null) await HandleCallback(u.Chat, u.CbData, u.CbId!, u.MsgId);
+                        else if (u.Lat is { } la && u.Lon is { } lo) await SetPlaceByLocation(u.Chat, la, lo);
+                        else if (u.Text != null) await Handle(u.Chat, u.Text.Trim());
+                    }
+                    catch (Exception ex) { Console.Error.WriteLine("⚠ bot handle: " + ex.Message); }
+                });
+                // Повільна команда лишається «в роботі», доки не закінчиться: повтори не множаться.
+                _ = work.ContinueWith(_ => { lock (_pending) _pending.Remove(key); });
+                if (await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(60), ct)) != work)
+                    Console.Error.WriteLine($"⚠ bot: «{Short(what)}» не відповіла за 60 с — далі без неї");
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            // Обробник теж не має вмирати: перезапускаємо його.
+            Console.Error.WriteLine("⚠ bot worker: " + ex.Message);
+            if (!ct.IsCancellationRequested) _ = Task.Run(() => Worker(ct));
         }
     }
 
@@ -513,8 +589,18 @@ public sealed class TelegramBot
 
     async Task<HttpResponseMessage> Call(string method, object payload)
     {
-        using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        return await Http.PostAsync($"{_api}/{method}", content);
+        var json = JsonSerializer.Serialize(payload);
+        for (var attempt = 0; ; attempt++)
+        {
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var resp = await Http.PostAsync($"{_api}/{method}", content);
+            // 429: Telegram каже, скільки чекати — чекаємо (≤30 с) і пробуємо ще раз, а не губимо відповідь.
+            if ((int)resp.StatusCode != 429 || attempt >= 2) return resp;
+            var body = await resp.Content.ReadAsStringAsync();
+            var m = Regex.Match(body, @"""retry_after""\s*:\s*(\d+)");
+            resp.Dispose();
+            await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, m.Success ? int.Parse(m.Groups[1].Value) + 1 : 3)));
+        }
     }
 
     // Надсилає HTML-повідомлення; повертає його id (для редагування) або null.
