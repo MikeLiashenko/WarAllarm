@@ -867,6 +867,13 @@ public sealed class SourceHub
                 { kind = cx.kind; extra ??= cx.extra; }
                 // «Далее Мерефа» без типу, а контексту дрона нема — краще «ціль», ніж вигаданий КАБ.
                 if (kind == ThreatKind.Kab && ev.Kind != ThreatKind.Kab && Continue.IsMatch(ev.Raw)) kind = ThreatKind.Target;
+                // КАБ, успадкований з попереднього поста, — лише поруч із тим місцем: «Запоріжжя КАБи!!»,
+                // а за хвилину «на Васильків» — це вже інша ціль (2026-11-07: «КАБ» на Київщині).
+                if (kind == ThreatKind.Kab && ev.Kind != ThreatKind.Kab
+                    && !(_lastPlaced.TryGetValue(src.User, out var kp) && kp.kind == ThreatKind.Kab && ThreatGeo.Km(kp.pos, pos) <= 120))
+                    kind = ThreatKind.Target;
+                // КАБ туди, куди він не долітає (тил), — помилка розбору, а не КАБ.
+                if (kind == ThreatKind.Kab && !AviationFeed.KabPlausible(gp.lat, gp.lon)) kind = ThreatKind.Target;
                 RememberKind(src.User, kind, extra, at);
                 _lastPlaced[src.User] = (gp.name, pos, kind, at);
                 st.Threats++;

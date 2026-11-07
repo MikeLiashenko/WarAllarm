@@ -46,6 +46,10 @@ public static class AviationFeed
         bool planes = Planes.IsMatch(text), kab = Kab.IsMatch(text);
         var named = OblastsIn(text);
         var regions = named.Count > 0 ? named : fallback.ToList();
+        // Лише області, куди авіація реально дістає (є AirBase). @shahedradar пише «КАБи!!»
+        // про всю Україну, а область каналу за замовчуванням — Київська: так з'являвся
+        // «КАБ над Київщиною» в статусі бота.
+        regions = regions.Where(r => AirBase.ContainsKey(r)).ToList();
         if (regions.Count == 0) return false;
         lock (Gate)
         {
@@ -130,6 +134,11 @@ public static class AviationFeed
 
     // На скільки км КАБ з УМПК летить від точки скиду (40–70 км) — коло досяжності.
     const int KabReachKm = 65;
+
+    /// Чи може сюди взагалі долетіти КАБ: літак скидає над РФ / окупованою, плюс ~65 км польоту.
+    /// Точки AirBase стоять у глибині, тому запас 200 км; Київщина (≥280 км) — ні.
+    public static bool KabPlausible(double lat, double lon) =>
+        AirBase.Values.Any(b => ThreatGeo.Km((b.lat, b.lon), (lat, lon)) <= 200);
 
     static (string where, double lat, double lon)? Point(AviationZone z) =>
         z.Side is { } s && AirBase.TryGetValue(z.Canon + ":" + s, out var ps) ? ps
