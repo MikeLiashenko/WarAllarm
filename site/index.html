@@ -28,6 +28,46 @@
   /* У Telegram назву вже показує шапка міні-застосунку. */
   .tg #hud b{display:none}
   /* На вузькому екрані час — під рядком тривог, а не поверх нього. */
+  /* Легенда: живі типи на карті з кількістю; натиск — показати лише цей тип. */
+  #legend{position:fixed;left:12px;bottom:12px;max-width:min(330px,calc(100vw - 76px));
+    background:rgba(17,22,29,.93);border:1px solid rgba(76,147,255,.22);border-radius:16px;
+    box-shadow:0 8px 28px rgba(0,0,0,.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    font-size:13px;color:#C7D2E3;user-select:none;-webkit-user-select:none;overflow:hidden}
+  #legend button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  #lgHead{display:flex;align-items:center;gap:8px;width:100%;padding:11px 12px 9px;text-align:left}
+  #lgTitle{font-weight:800;font-size:14px;color:var(--tx)}
+  #lgHead .tot{margin-left:auto;font-weight:800;font-size:12px;padding:2px 8px;border-radius:999px;background:#22303F;color:var(--tx)}
+  #lgHead .chev{color:var(--mut);font-size:12px;transition:transform .2s}
+  #legend.min .chev{transform:rotate(-90deg)}
+  #legend.min #lgBody{display:none}
+  #legend.min #lgHead{padding:9px 12px}
+  #lgBody{padding:0 8px 10px}
+  #lgKinds{display:flex;flex-direction:column;gap:2px}
+  .kind{display:flex;align-items:center;gap:9px;width:100%;padding:5px 6px;border-radius:10px;text-align:left;transition:background .15s,opacity .15s}
+  .kind:hover{background:#1C2531}
+  .kind img{width:24px;height:24px;flex:none}
+  .kind .n{margin-left:auto;min-width:26px;text-align:center;font-weight:800;font-size:12px;padding:1px 7px;border-radius:999px;
+    color:var(--c);background:color-mix(in srgb,var(--c) 18%,transparent)}
+  .kind .fc{margin-left:auto;font-size:11px;color:var(--mut);white-space:nowrap}
+  .kind .fc + .n{margin-left:6px}
+  .kind.on{background:color-mix(in srgb,var(--c) 14%,#161D27);box-shadow:inset 3px 0 0 var(--c)}
+  #legend.focus .kind:not(.on){opacity:.45}
+  #lgAlarm{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 6px 2px;margin-top:4px;border-top:1px solid #222A35;font-size:12.5px}
+  #lgAlarm i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  #lgFoot{display:flex;align-items:center;gap:10px;padding:6px 6px 0;font-size:11.5px;color:var(--mut)}
+  #lgFoot button{color:#8DBBFF;font-weight:700;padding:2px 0}
+  #lgFoot .hint{margin-left:auto;text-align:right}
+  #lgInfo{padding:6px 6px 0;font-size:12px;line-height:1.45;color:#AEB9C8}
+  #lgInfo div{display:flex;gap:8px;align-items:center;padding:2px 0}
+  #lgInfo svg{flex:none}
+  @media(max-width:600px){
+    #legend{left:10px;bottom:10px;border-radius:14px}
+    #lgKinds{flex-direction:row;flex-wrap:wrap;gap:6px}
+    .kind{width:auto;padding:4px 9px 4px 5px;border-radius:999px;background:#1A222D;gap:6px;font-size:12.5px}
+    .kind img{width:20px;height:20px}
+    .kind .n{margin-left:2px;min-width:0;padding:0 6px}
+    #lgFoot .hint{display:none}
+  }
   @media(max-width:600px){ #upd{left:16px;right:auto;top:62px} .tg #upd{top:36px}
     #zoom{top:auto;bottom:12px;right:10px} #err{bottom:auto;top:62px} .tg #err{top:36px} }
 </style>
@@ -37,6 +77,23 @@
 <div id="hud"><b>WarAlarm · Карта тривог</b><div id="sub">завантаження…</div></div>
 <div id="upd"></div>
 <div id="err"></div>
+<div id="legend">
+  <button id="lgHead" aria-expanded="true"><span id="lgTitle">На карті зараз</span><span class="tot" id="lgTot"></span><span class="chev">▼</span></button>
+  <div id="lgBody">
+    <div id="lgKinds"></div>
+    <div id="lgAlarm"></div>
+    <div id="lgFoot"><button id="lgInfoBtn">ⓘ Що на карті?</button><span class="hint" id="lgHint">натисни тип — покажу лише його</span></div>
+    <div id="lgInfo" hidden>
+      <div><svg width="26" height="12" viewBox="0 0 26 12"><line x1="1" y1="6" x2="25" y2="6" stroke="#9AA5B4" stroke-width="2" stroke-dasharray="4 3"/></svg>курс — куди летить найближчі хвилини</div>
+      <div><svg width="26" height="12" viewBox="0 0 26 12"><line x1="1" y1="6" x2="25" y2="6" stroke="#9AA5B4" stroke-width="2" opacity=".6"/></svg>пройдений шлях</div>
+      <div><svg width="26" height="12" viewBox="0 0 26 12"><circle cx="13" cy="6" r="5" fill="none" stroke="#FF3B30" stroke-width="1.6"/><path d="M9 6h8M13 2v8" stroke="#FF3B30" stroke-width="1.2"/></svg>приціл — куди летить ракета, балістика, КАБ</div>
+      <div><svg width="26" height="12" viewBox="0 0 26 12"><circle cx="13" cy="6" r="5" fill="rgba(255,145,36,.12)" stroke="#FF9124" stroke-width="1.2" stroke-dasharray="3 2"/></svg>пунктирне коло — куди могла долетіти / де шукати</div>
+      <div><svg width="26" height="12" viewBox="0 0 26 12"><text x="13" y="10" text-anchor="middle" font-size="11" font-weight="800" fill="#ECF0F5">×3</text></svg>кілька цілей разом</div>
+      <div><svg width="26" height="12" viewBox="0 0 26 12"><path d="M13 1l3 9h-6z" fill="#FFE14D" opacity=".45"/></svg>бліда — давно не бачили або прогноз</div>
+      <div><svg width="26" height="12" viewBox="0 0 26 12"><circle cx="13" cy="6" r="4" fill="#4C93FF" stroke="#ECF0F5" stroke-width="1.5"/></svg>твоє місце</div>
+    </div>
+  </div>
+</div>
 <div id="zoom"><button id="zin" title="Наблизити">+</button><button id="zout" title="Віддалити">−</button><button id="zfit" title="Уся країна">⤢</button><button id="zhome" title="Моє місто" hidden>📍</button></div>
 <script>
 const DB = "https://waralarm-c8c1f-default-rtdb.europe-west1.firebasedatabase.app";
@@ -275,7 +332,7 @@ function motionOf(t, now, alarm){
 }
 
 // ── Полотно ────────────────────────────────────────────────────────────────────
-const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const cv = document.getElementById('cv'); let ctx = cv.getContext('2d');
 let W=0, H=0, dpr=1, fit=null, latest=null, base=null, baseKey='', baseView=null, alarmVer=0, alarmSet=null;
 let baseLabels = []; // підписи міст на підкладці — щоб дописати поверх значка цілі
 function computeFit(){
@@ -459,6 +516,7 @@ function draw(){
 
   // Гарячі зони під скупченнями.
   for(const t of threats){
+    if(focusCat && iconKey(t.cat, t.label) !== focusCat) continue;
     const mh = motionOf(t, now, null), q = P(mh.lon, mh.lat), r = (22 + 5*Math.min(t.n||1, 8))*(fit.narrow ? 0.55 : 1);
     const g = ctx.createRadialGradient(q[0], q[1], 0, q[0], q[1], r);
     g.addColorStop(0, 'rgba(255,59,48,.16)'); g.addColorStop(1, 'rgba(255,59,48,0)');
@@ -470,6 +528,7 @@ function draw(){
     const cat = iconKey(t.cat, t.label), color = KC[cat] || KC.other;
     const mo = motionOf(t, now, alarmSet && alarmSet.set);
     const [x, y] = P(mo.lon, mo.lat);
+    ctx.save(); if(focusCat && cat !== focusCat) ctx.globalAlpha = .12;
     if(mo.launch){
       const r = mo.reach*kmPx;
       if(r > 2){ ctx.fillStyle = hexA(color,.06); ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill(); dashed(() => ctx.arc(x,y,r,0,7), hexA(color,.7), 1.4); }
@@ -520,6 +579,7 @@ function draw(){
         ctx.fillStyle = hexA(color,.8); ctx.beginPath(); ctx.arc(q[0],q[1],2.6,0,7); ctx.fill();
       }
     }
+    ctx.restore();
     icons.push({ t, cat, color, x, y, mo });
   }
   // Силуети — поверх ліній.
@@ -527,9 +587,11 @@ function draw(){
     if(mo.landed) continue;
     const faded = (mo.quiet||0) >= 6 || t.down || t.forecast;
     const near = ['Imminent','Overhead','Impact'].includes(t.stage);
-    ctx.save(); if(faded) ctx.globalAlpha = .5;
+    const dim = focusCat && cat !== focusCat;
+    ctx.save(); if(dim) ctx.globalAlpha = .15; else if(faded) ctx.globalAlpha = .5;
     drawIcon(x, y, mo.heading, cat, color, badgeR/7.8, near || mo.progress != null ? PAL.near : color, near ? .55+.45*pulse : .55);
     ctx.restore();
+    if(dim) continue;
     if(t.forecast) text('прогноз', x, y+badgeR+12, 10.5, hexA(color,.9), 'center');
     if(t.down) text(t.altNote || 'падає', x, y+badgeR+13, 11, '#FF6B5E', 'center');
     if((t.n||1) > 1) text('×'+t.n, x, y-badgeR-3, 13, PAL.tx, 'center');
@@ -548,40 +610,72 @@ function draw(){
     ctx.fillStyle = PAL.primary; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = PAL.tx; ctx.stroke();
     text(home.name, hx, hy-10, 12, PAL.tx, 'center');
   }
-  // На телефоні при наближенні карта на весь екран — легенда її не закриває.
-  if(!(fit.narrow && view.s > 1.05)) drawLegend(icons);
-
   const red = (s.alerts && s.alerts.redCount) || 0, yel = (s.alerts && s.alerts.yellowCount) || 0;
+  updateLegend(icons, red, yel);
   const total = threats.reduce((a,t) => a+(t.n||1), 0);
   const sub = document.getElementById('sub');
   sub.textContent = `Тривога: ${red} обл · жовтий рівень: ${yel} · цілей: ${total}`;
   sub.style.color = red > 0 ? '#FF453A' : yel > 0 ? '#F4C550' : '#2FD17C';
 }
 
-// Легенда-картка: лише типи, що зараз на карті, з їхніми силуетами й кількістю.
-function drawLegend(icons){
-  const kinds = {};
-  for(const { t, cat } of icons) kinds[cat] = (kinds[cat]||0) + (cat === 'avia' ? 0 : (t.n||1));
-  const list = Object.entries(kinds).sort((a,b) => b[1]-a[1]);
-  const cols = W < 520 ? 1 : 2, colW = 150, rows = Math.ceil(list.length/cols);
-  const cw = 20 + cols*colW, ch = 34 + rows*24 + 24;
-  const x0 = fit.narrow ? 10 : 14, y0 = H-(fit.narrow ? 10 : 14)-ch;
-  ctx.fillStyle = 'rgba(17,22,29,.92)'; ctx.strokeStyle = hexA(PAL.primary,.25); ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.roundRect(x0, y0, cw, ch, 12); ctx.fill(); ctx.stroke();
-  ctx.font = '700 14px "Segoe UI",system-ui,sans-serif';
-  if(list.length){ ctx.fillStyle = PAL.tx; ctx.fillText('На карті зараз', x0+12, y0+22); }
-  else { ctx.fillStyle = '#2FD17C'; ctx.fillText('Цілей на карті немає', x0+12, y0+22); }
-  ctx.font = '600 12.5px "Segoe UI",system-ui,sans-serif';
-  list.forEach(([cat, n], i) => {
-    const x = x0+12+(i%cols)*colW, y = y0+44+Math.floor(i/cols)*24;
-    drawIcon(x+8, y-4, 0, cat, KC[cat], 1.0, KC[cat], .35);
-    ctx.fillStyle = '#C7D2E3'; ctx.fillText(cat === 'avia' ? KIND_LABEL.avia : `${KIND_LABEL[cat]} ${n}`, x+22, y);
-  });
-  const y = y0+ch-12;
-  ctx.fillStyle = hexA(PAL.red,.8); ctx.fillRect(x0+12, y-10, 12, 12);
-  ctx.fillStyle = '#C7D2E3'; ctx.fillText('тривога', x0+30, y);
-  ctx.fillStyle = hexA(PAL.yellow,.8); ctx.fillRect(x0+100, y-10, 12, 12);
-  ctx.fillStyle = '#C7D2E3'; ctx.fillText('жовтий рівень', x0+118, y);
+// Легенда: живі типи на карті з кількістю. Натиск на тип — на карті лише він (решта
+// бліді), ще раз — усі. Згортається в рядок; на телефоні згортається сама при наближенні.
+let focusCat = null, legendKey = '', userMin = null;
+const iconCache = {};
+function iconURL(cat){
+  if(iconCache[cat]) return iconCache[cat];
+  const c = document.createElement('canvas'); c.width = c.height = 48;
+  const keep = ctx, keepDpr = dpr;
+  try{ ctx = c.getContext('2d'); dpr = 1; drawIcon(24, 25, 0, cat, KC[cat] || KC.other, 1.75, KC[cat] || KC.other, .45); }
+  finally{ ctx = keep; dpr = keepDpr; }
+  return iconCache[cat] = c.toDataURL();
+}
+try{ const v = localStorage.getItem('lg_min'); if(v !== null) userMin = v === '1'; }catch(e){}
+const lg = document.getElementById('legend');
+function setMin(m, remember){
+  lg.classList.toggle('min', m);
+  document.getElementById('lgHead').setAttribute('aria-expanded', String(!m));
+  if(remember){ userMin = m; try{ localStorage.setItem('lg_min', m ? '1' : '0'); }catch(e){} }
+}
+document.getElementById('lgHead').onclick = () => setMin(!lg.classList.contains('min'), true);
+document.getElementById('lgInfoBtn').onclick = () => { const i = document.getElementById('lgInfo'); i.hidden = !i.hidden; };
+document.getElementById('lgKinds').onclick = e => {
+  const b = e.target.closest('.kind'); if(!b) return;
+  focusCat = focusCat === b.dataset.cat ? null : b.dataset.cat;
+  legendKey = ''; draw();
+};
+function updateLegend(icons, red, yel){
+  // Прогноз (група з пуску, ще без звітів) — окремо: це не побачені цілі.
+  const kinds = {}, fc = {};
+  for(const { t, cat } of icons){
+    kinds[cat] = kinds[cat] || 0;
+    if(t.forecast) fc[cat] = (fc[cat]||0) + (t.n||1);
+    else kinds[cat] += cat === 'avia' ? (t.areaKm ? 0 : 1) : (t.n||1);
+  }
+  const list = Object.entries(kinds).sort((a,b) => b[1]-a[1] || (fc[b[0]]||0)-(fc[a[0]]||0));
+  if(focusCat && !kinds[focusCat]) focusCat = null;
+  const total = list.reduce((a, [c, n]) => a + (c === 'avia' ? 0 : n), 0);
+  const zoomed = fit.narrow && view.s > 1.05;
+  const key = JSON.stringify([list, fc, focusCat, red, yel, zoomed]);
+  if(key === legendKey) return;
+  legendKey = key;
+  // На телефоні, коли наближено, — лише рядок-заголовок, щоб не закривати карту.
+  setMin(zoomed ? true : userMin != null ? userMin : false, false);
+  const title = document.getElementById('lgTitle'), tot = document.getElementById('lgTot');
+  title.textContent = list.length ? 'На карті зараз' : 'Цілей на карті немає';
+  title.style.color = list.length ? '' : '#2FD17C';
+  tot.textContent = total ? (total + ' ' + (total % 10 === 1 && total % 100 !== 11 ? 'ціль' : total % 10 >= 2 && total % 10 <= 4 && (total % 100 < 10 || total % 100 >= 20) ? 'цілі' : 'цілей')) : '';
+  tot.hidden = !total;
+  lg.classList.toggle('focus', !!focusCat);
+  document.getElementById('lgKinds').innerHTML = list.map(([cat, n]) =>
+    `<button class="kind${cat === focusCat ? ' on' : ''}" data-cat="${cat}" style="--c:${KC[cat] || KC.other}" title="${cat === focusCat ? 'Показати всі' : 'Показати лише ' + KIND_LABEL[cat]}">` +
+    `<img alt="" src="${iconURL(cat)}"><span>${KIND_LABEL[cat] || cat}</span>` +
+    (fc[cat] ? `<span class="fc">+${fc[cat]} прогноз</span>` : '') +
+    (n ? `<span class="n">${n}</span>` : '') + `</button>`).join('');
+  document.getElementById('lgHint').textContent = focusCat ? 'натисни ще раз — усі цілі' : list.length > 1 ? 'натисни тип — покажу лише його' : '';
+  document.getElementById('lgAlarm').innerHTML =
+    `<span><i style="background:${hexA(PAL.red,.85)}"></i>тривога${red ? ' · ' + red + ' обл' : ''}</span>` +
+    `<span><i style="background:${hexA(PAL.yellow,.85)}"></i>жовтий рівень${yel ? ' · ' + yel : ''}</span>`;
 }
 
 // ?demo=1 — усі типи, як на живій карті (без мережі).

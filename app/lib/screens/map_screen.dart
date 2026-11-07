@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../controllers/alarm_controller.dart';
+import '../data/ukraine_geo.dart';
 import '../controllers/alerts_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/nav_controller.dart';
@@ -47,6 +48,7 @@ class _MapScreenState extends State<MapScreen> {
   );
 
   bool _legend = false;
+  String? _kind; // tapped counter chip: only this kind on the map
 
   /// Re-draws the target card every second (distance, ETA, flight progress).
   final _tick = Stream<int>.periodic(
@@ -67,7 +69,12 @@ class _MapScreenState extends State<MapScreen> {
     final settings = context.watch<SettingsController>();
     final focus = context.watch<TargetFocusController>();
     // Real targets + launch groups flying their typical route (forecast, map only).
-    final mapTargets = [...data.targets, ...data.launches, ...data.aviation];
+    final allTargets = [...data.targets, ...data.launches, ...data.aviation];
+    // A chip was tapped: only that kind on the map (it vanished — show all again).
+    final kind = _kind != null && allTargets.any((t) => iconKey(t.cat, t.label) == _kind) ? _kind : null;
+    final mapTargets = kind == null
+        ? allTargets
+        : allTargets.where((t) => iconKey(t.cat, t.label) == kind || t.id == focus.id).toList();
     final s = Situation(data, alarm, alerts);
     final selected = focus.id == null
         ? null
@@ -175,7 +182,12 @@ class _MapScreenState extends State<MapScreen> {
           left: pad.left + 12,
           right: 72,
           top: pad.top + 12,
-          child: ThreatCounters(data: data, alerts: alerts),
+          child: ThreatCounters(
+            data: data,
+            alerts: alerts,
+            focusKind: kind,
+            onKind: (k) => setState(() => _kind = k),
+          ),
         ),
         Positioned(right: 12, top: pad.top + 12, child: _controls(context)),
         if (_legend)

@@ -941,9 +941,21 @@ class ThreatCounters extends StatelessWidget {
     required this.data,
     required this.alerts,
     this.onSurface = false,
+    this.focusKind,
+    this.onKind,
   });
   final MapDataController data;
   final AlertsController alerts;
+
+  /// On the map: chips carry a short name, and tapping one shows only that kind
+  /// on the map (tap again — all). [focusKind] is the kind shown alone.
+  final String? focusKind;
+  final ValueChanged<String?>? onKind;
+
+  static const _short = {
+    'shahed': 'шахеди', 'shahed_jet': 'реакт.', 'banderol': 'бандеролі', 'missile': 'ракети',
+    'balist': 'балістика', 'kab': 'КАБ', 'avia': 'авіація', 'fpv': 'ФПВ', 'other': 'інше',
+  };
 
   /// On a plain page (not over the map): skip the timestamp chip — the hero
   /// card already shows freshness.
@@ -960,6 +972,10 @@ class ThreatCounters extends StatelessWidget {
       counts[k] = (counts[k] ?? 0) + t.amount;
     }
     final stale = data.stale;
+    // Names on the chips: wide screens, or few kinds; on a phone with many kinds only
+    // the picked one is named (more rows of chips would cover the map).
+    final named = onKind != null &&
+        (MediaQuery.sizeOf(context).width >= 600 || counts.values.where((n) => n > 0).length <= 3);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -969,18 +985,32 @@ class ThreatCounters extends StatelessWidget {
           children: [
             for (final k in _order)
               if ((counts[k] ?? 0) > 0)
-                Glass(
-                  radius: 14,
-                  padding: const EdgeInsets.fromLTRB(10, 7, 12, 7),
-                  child: Opacity(
-                    opacity: stale ? 0.5 : 1,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ThreatGlyph(k, size: 20),
-                        const SizedBox(width: 8),
-                        Text('${counts[k]}', style: AppText.number(20)),
-                      ],
+                AnimatedOpacity(
+                  duration: const Duration(milliseconds: 150),
+                  opacity: focusKind != null && focusKind != k ? 0.45 : 1,
+                  child: Glass(
+                    radius: 14,
+                    padding: const EdgeInsets.fromLTRB(10, 7, 12, 7),
+                    borderColor: focusKind == k ? kThreatColors[k] : null,
+                    onTap: onKind == null ? null : () => onKind!(focusKind == k ? null : k),
+                    child: Opacity(
+                      opacity: stale ? 0.5 : 1,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ThreatGlyph(k, size: 20),
+                          const SizedBox(width: 8),
+                          Text('${counts[k]}', style: AppText.number(20)),
+                          if (named || (onKind != null && focusKind == k)) ...[
+                            const SizedBox(width: 5),
+                            Text(_short[k] ?? k,
+                                style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: focusKind == k ? kThreatColors[k] : AppColors.textSecondary)),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
