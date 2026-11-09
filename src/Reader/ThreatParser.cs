@@ -225,7 +225,7 @@ public static class ThreatParser
         int count = 1;
         // Кол-во в начале строки: «3 БпЛА» и множитель «2х/2x/2×» (формат @rozvidkaneba).
         // Але «16 Фонтана/Лиманка» — це зупинка в Одесі (16-та станція Великого Фонтану), а не 16 цілей.
-        var mc = Regex.Match(line, @"^\s*(?:(?:і\s+)?ще\s+|\+\s*)?(\d+)(?!\d|\s*(?:-?(?:а|та|ти)\s+)?(?:фонтан|станці|ст\.\s|км\b|хв))\s*[хx×]?\s*(?=\S)", RegexOptions.IgnoreCase); // «Ще 2 балістики», «+3»
+        var mc = Regex.Match(line, @"^\s*(?:(?:і\s+)?ще\s+|\+\s*)?(\d+)(?!\d|\s*(?:-?(?:а|та|ти)\s+)?(?:фонтан|станці|ст\.\s|км\b|хв|м(?!\p{L})))\s*[хx×]?\s*(?=\S)", RegexOptions.IgnoreCase); // «Ще 2 балістики», «+3»; «1800м на Вербове» — висота
         if (mc.Success) int.TryParse(mc.Groups[1].Value, out count);
         // «З'явилися 2 бандеролі на Самар», «Павлоград, 4 бандеролі …» — число перед засобом усередині рядка.
         else if (Regex.Match(line, @"(?<![\p{L}\d\-])(\d{1,2})\s*[хx×]?\s+" + Slang.Weapon, RegexOptions.IgnoreCase) is { Success: true } mw)

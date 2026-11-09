@@ -554,6 +554,11 @@ public sealed class SourceHub
     static readonly Regex AfterNews = new(
         @"наслідк|поранен|загинул|поміран|постраждал|пошкоджен|зруйнов|госпіталізов|ворог (?:атакував|наніс|завдав)|завдали удару|удар по|влучив|влучанн[яю] (?:в|у) |— суспільне|, — \w+|isw|за даними|повідомив|повідомила|уражен|за тиждень|за добу|протягом \d|прогноз погоди|поїзд|результати тижня|ворог здійснив|обстріл",
         RegexOptions.IgnoreCase);
+    const int MaxPlaceCount = 60;
+    // «173 російських безпілотників знищено над Запоріжжям», «тривають бої… просування» — підсумок/фронт, не ціль у повітрі.
+    static readonly Regex Summary = new(
+        @"\d+\s+(?:\p{L}+\s+){0,2}(?:безпілотник|бпла|дрон|шахед|ракет|ціл)\p{L}*\s+(?:було\s+)?(?:знищен|збит|знешкоджен|уражен|подавлен)|просуван\p{L}*\s+(?:зсу|військ)|тривають\s+бої",
+        RegexOptions.IgnoreCase);
     static readonly Regex Impact = new(@"удар по|приліт|прилет|влучанн|загибл|загинул|поранен|за попередньою інформацією|—\s*терехов", RegexOptions.IgnoreCase);
     static readonly Regex Clear = new(
         @"^(?:✅|⚪️|❎|🟢)?\s*(?:відбій|отбой)|(?:область|київ|харків|місто|небо)\s*[—:-]?\s*чисто|наразі чисто|локаційно чисто|^\W*\p{L}+(?:щина|ччина)\s*[—:-]\s*чисто|над \w+ наразі чисто|^чисто\b|^[А-ЯІЇЄҐ][\w'ʼ’-]*\s+чисто\W*$",
@@ -704,7 +709,7 @@ public sealed class SourceHub
             // «⚡️Прилет Новобаварском районе», «є загиблі. — Терехов» — постфактум навіть коротко: ціль
             // уже не летить, а «Терехов» ставав селом Терни.
             if (text.TrimStart().StartsWith("🗞") || Impact.IsMatch(clean) && clean.Length < 200
-                || AfterNews.IsMatch(clean) && clean.Length > 70)
+                || AfterNews.IsMatch(clean) && clean.Length > 70 || Summary.IsMatch(clean))
             { st.News++; return new(HubVerdict.News, [], "новина (не жива загроза)"); }
 
             // «Запоріжжя/район – без локаційних загроз» — повідомлення, що цілі нема.
@@ -893,7 +898,10 @@ public sealed class SourceHub
                 bool newSrc = !c.Votes.ContainsKey(src.User);
                 c.Votes[src.User] = Math.Max(c.Votes.GetValueOrDefault(src.User), w);
                 // Новіше точне число заміняє старе («8 на Лубни» → «4 на Лубни»); без числа — не зменшує.
-                c.MaxCount = ev.Count > 1 ? ev.Count : Math.Max(c.MaxCount, ev.Count);
+                // Понад 60 в одному місці не буває: це висота («1800м на Вербове»), підсумок
+                // («173 безпілотники знищено над Запоріжжям») чи номер — рахуємо як одну ціль.
+                var evCount = ev.Count > MaxPlaceCount ? 1 : ev.Count;
+                c.MaxCount = evCount > 1 ? evCount : Math.Max(Math.Min(c.MaxCount, MaxPlaceCount), evCount);
                 // Тип: конкретніший перемагає «ціль».
                 var prevKind = c.Ev?.Kind ?? ThreatKind.Target;
                 var bestKind = prevKind == ThreatKind.Target ? kind : prevKind;
