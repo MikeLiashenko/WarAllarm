@@ -37,7 +37,25 @@ public static class MapImage
         bool showHome = true,
         Dictionary<string, string>? raionLevels = null,
         Dictionary<string, string>? oblastWhole = null,
-        string tone = "")
+        string tone = "",
+        string? logo = null)
+    {
+        // [logo] — інший логотип з assets/ (міські канали); null — звичайний logo.png.
+        _logoOverride = logo is null ? null : Logo(logo);
+        try { return RenderCore(home, threats, title, subtitle, oblastLevels, showHome, raionLevels, oblastWhole, tone); }
+        finally { _logoOverride = null; }
+    }
+
+    static byte[] RenderCore(
+        (double lat, double lon) home,
+        IReadOnlyList<Threat> threats,
+        string title,
+        string subtitle,
+        Dictionary<string, string>? oblastLevels,
+        bool showHome,
+        Dictionary<string, string>? raionLevels,
+        Dictionary<string, string>? oblastWhole,
+        string tone)
     {
         const int W = 1000, padTop = 80, pad = 16;
         double midLat = (Lat1 + (Lat1 - LatSpan)) / 2;
@@ -869,11 +887,14 @@ public static class MapImage
     }
     static readonly SKTypeface Ui = Face("Regular", SKFontStyleWeight.Normal), UiMed = Face("Medium", SKFontStyleWeight.Medium),
         UiBold = Face("Bold", SKFontStyleWeight.Bold), UiBlack = Face("Black", SKFontStyleWeight.Black);
-    static readonly SKBitmap? LogoBmp = LoadLogo();
-    static SKBitmap? LoadLogo()
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SKBitmap?> Logos = new();
+    static readonly SKBitmap? DefaultLogo = Logo("logo.png");
+    [ThreadStatic] static SKBitmap? _logoOverride;
+    static SKBitmap? LogoBmp => _logoOverride ?? DefaultLogo;
+    static SKBitmap? Logo(string file) => Logos.GetOrAdd(file, f =>
     {
-        try { var f = Path.Combine(AssetDir, "logo.png"); return File.Exists(f) ? SKBitmap.Decode(f) : null; } catch { return null; }
-    }
+        try { var p = Path.Combine(AssetDir, f); return File.Exists(p) ? SKBitmap.Decode(p) : null; } catch { return null; }
+    });
 
     /// Іконка застосунку (прапор, щит, тризуб) із заокругленими кутами.
     static void DrawLogo(SKCanvas c, float x, float y, float size)
