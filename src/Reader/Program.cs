@@ -388,7 +388,8 @@ if (args.Length >= 2 && args[0].Equals("mappng", StringComparison.OrdinalIgnoreC
     var a0 = RiskModel.For((HomeLat, HomeLon), demoT.Select(t => (t, t.Amount)).ToList());
     var png = MapImage.Render((HomeLat, HomeLon), demoT, $"WarAlarm · {MyCity}",
         $"Ймовірність удару: {a0.Percent}% — {a0.Verdict}", snap0.ByPolygon,
-        showHome: true, raionLevels: snap0.ByRaion, oblastWhole: snap0.ByOblastWhole, tone: a0.Cls);
+        showHome: true, raionLevels: snap0.ByRaion, oblastWhole: snap0.ByOblastWhole, tone: a0.Cls,
+        logo: args.Length >= 4 && CityChannel.Find(args[3]) is { } lc ? $"logo_{lc.Key}.png" : null); // mappng out.png demo kyiv
     File.WriteAllBytes(args[1], png);
     Console.WriteLine($"🖼 {args[1]}: {png.Length / 1024} КБ");
     return;
@@ -806,6 +807,45 @@ if (args.Length >= 3 && args[0].Equals("geo", StringComparison.OrdinalIgnoreCase
     return;
 }
 
+// ── Міські канали (оффлайн, до входу в Telegram) ─────────────────────────────
+//   dotnet run -- channeltest kyiv|kharkiv   — тестовий пост (карта з міським логотипом)
+//   dotnet run -- channelsetup kyiv|kharkiv  — аватар + опис + перевірка прав бота
+//   dotnet run -- citysim kyiv|kharkiv       — сухий прогон *_samples.txt: що пішло б у канал
+if (args.Length >= 2 && args[0].ToLowerInvariant() is "channeltest" or "channelsetup")
+{
+    if (CityChannel.Find(args[1]) is not { } cityInfo) { Console.WriteLine($"❌ Невідоме місто «{args[1]}». Є: kyiv, kharkiv"); return; }
+    var cn = SecretOpt($"telegram_channel_{cityInfo.Key}");
+    var ct = SecretOpt($"telegram_channel_{cityInfo.Key}_bot_token") ?? SecretOpt("telegram_channel_bot_token");
+    if (string.IsNullOrWhiteSpace(ct) || string.IsNullOrWhiteSpace(cn))
+    {
+        Console.WriteLine($"❌ Немає telegram_channel_{cityInfo.Key}=@... (або токена telegram_channel_bot_token) у secrets.local.txt");
+        return;
+    }
+    if (args[0].Equals("channelsetup", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine($"🛠 Оформлення {cn} ({cityInfo.Name})...\n");
+        var todo = await CityChannel.Setup(ct!, cn!, cityInfo, CityChannel.FindDesign($"{cityInfo.Key}_avatar.png"));
+        Console.WriteLine(todo.Count == 0 ? "\n✅ Все гаразд: бот має потрібні права, аватар і опис стоять."
+            : "\n📋 Що зробити руками в Telegram:\n" + string.Join("\n", todo.Select(t => "  • " + t)));
+        return;
+    }
+    var cc = new CityChannel(cityInfo, cn!, new ChannelPoster(ct!, cn!));
+    Console.WriteLine($"📢 Тестовий пост у {cn} ({cityInfo.Name}) ...");
+    var cpng = await BuildBotMapPng(channel: true, logo: cc.LogoFile);
+    var cid = await cc.Post(cityInfo.Ru
+        ? $"🔔 <b>Тест WarAlarm {H(cityInfo.Title)}</b>\nЗдесь будут тревога и отбой по городу, цели возле города и данные локальных мониторов.\n\n{cc.Foot}"
+        : $"🔔 <b>Тест WarAlarm {H(cityInfo.Title)}</b>\nТут будуть тривога й відбій по місту, цілі біля міста та дані локальних моніторів.\n\n{cc.Foot}", cpng, silent: true);
+    Console.WriteLine(cid is null ? "❌ Не надіслано — див. помилку вище (бот адмін у каналі? є право «Публікувати»?)"
+        : $"✅ Надіслано (id {cid}){(cpng is null ? ", лише текст — карта не згенерувалась" : ": карта + текст")}.");
+    return;
+}
+if (args.Length >= 2 && args[0].Equals("citysim", StringComparison.OrdinalIgnoreCase))
+{
+    if (CityChannel.Find(args[1]) is not { } cityInfo) { Console.WriteLine($"❌ Невідоме місто «{args[1]}». Є: kyiv, kharkiv"); return; }
+    await RunCitySim(cityInfo, args.Length >= 3 ? args[2] : $"{cityInfo.Key}_samples.txt");
+    return;
+}
+
 // ── Тестовий пост у канал з картою (оффлайн):  dotnet run -- channeltest ─────
 if (args.Length >= 1 && args[0].Equals("channeltest", StringComparison.OrdinalIgnoreCase))
 {
@@ -917,6 +957,24 @@ if (channelPoster is not null)
     Console.WriteLine($"📢 Новинний канал ВКЛ → {channelName} (вся Україна, виділення Київ/Харків/Дніпро).\n");
 else
     Console.WriteLine("📢 Канал ВИКЛ. Додай  telegram_channel_bot_token=...  і  telegram_channel=@name  у secrets.local.txt.\n");
+// 🏙 Міські канали (Київ, Харків): поруч з основним, кожен — свій ChannelPoster.
+var cityChannels = new List<CityChannel>();
+foreach (var c in CityChannel.Known)
+{
+    var cName = SecretOpt($"telegram_channel_{c.Key}");
+    var cToken = SecretOpt($"telegram_channel_{c.Key}_bot_token") ?? channelToken;
+    if (string.IsNullOrWhiteSpace(cName) || string.IsNullOrWhiteSpace(cToken))
+    {
+        Console.WriteLine($"📢 Канал {c.Name} ВИКЛ. Додай  telegram_channel_{c.Key}=@name  у secrets.local.txt.");
+        continue;
+    }
+    cityChannels.Add(new CityChannel(c, cName!, new ChannelPoster(cToken!, cName!)));
+    bool watched = c.Key == "kyiv" ? WatchKyiv : WatchKharkiv;
+    Console.WriteLine($"📢 Канал {c.Name} ВКЛ → {cName} (тривога/відбій, цілі біля міста, локальні монітори{(c.Key == "kyiv" ? ", світло" : "")})."
+        + (watched ? "" : $"\n   ⚠ watch_{c.Key}=false у settings.local.txt — локальних моніторів {c.Name} не буде, лише тривоги й дошка."));
+}
+Console.WriteLine();
+CityChannel? CityOf(string zone) => cityChannels.FirstOrDefault(c => c.Name == zone);
 // Денні лічильники для авто-зведення в канал (оголошення тривог по областях
 // + помічені цілі за типом/місцем). Накопичуються в циклах, скидаються після зведення.
 var dayRed = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -941,6 +999,11 @@ if (channelPoster is not null)
     _ = RunMapLoop(channelPoster);
     _ = RunDailyDigest(channelPoster);
 }
+// Міські канали: жива дошка цілей лише біля свого міста (тривога/відбій — у RunAlertsLoop).
+foreach (var cc in cityChannels)
+    _ = RunLiveBoard(cc.Poster!, t => NearBigCity(t) == cc.Name,
+        (active, ppo) => (BuildCityRaidPost(active, new List<string> { cc.Name }, ppo, cc.Ru), new HashSet<string> { cc.Name }),
+        cc.CloseText, cc.Foot, cc.LiveFoot, cc.Name);
 
 // ── 🌙 Підсумок ночі: зібрати з історії каналів → карта + текст + state ────────
 async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNight(DateTime from, DateTime to)
@@ -1295,6 +1358,15 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             }
             warnedFail = false;
 
+            // 🏙 Міські канали: тривога/відбій по точці центру міста (власний стан, свій try).
+            foreach (var cc in cityChannels)
+                try
+                {
+                    if (cc.AlertStep(snap.LevelAt(cc.Center.lat, cc.Center.lon), DateTime.Now) is { } post)
+                        await cc.Post(post, await BuildBotMapPng(channel: true, logo: cc.LogoFile));
+                }
+                catch (Exception ex) { Console.Error.WriteLine($"⚠ alerts {cc.Name}: " + ex.Message); }
+
             // ── Офіційний відбій прибирає цілі (щоб шахеди не висіли після відбою) ──
             // ByPolygon = області з червоною/жовтою тривогою. Коли область виходить із
             // цього набору — офіційно відбій, прибираємо цілі, що фізично в ній.
@@ -1579,7 +1651,23 @@ static string BuildClearPost(List<string> cleared, int remaining)
 // Новий пост (зі звуком) — лише коли сталося важливе: нове велике місто під нальотом,
 // новий «💥 Гучно / ❗ На підльоті / ⚠️ Над… / 🛡 ППО», або дошка застаріла (30 хв) чи її
 // засипало іншими постами. Решта — тихе редагування того самого поста.
-async Task RunThreatNews(ChannelPoster channel)
+Task RunThreatNews(ChannelPoster channel) => RunLiveBoard(channel, _ => true, (active, ppoNow) =>
+    {
+        foreach (var t in active) daySeen.Add($"{t.Kind}|{t.LastPlace}"); // для зведення
+        // Налёт на велике місто (Київ/Харків/Дніпро) → короткий формат; інакше — по областях.
+        var raidCities = active.Select(NearBigCity).Where(c => c != null).Select(c => c!).Distinct().ToList();
+        var core = raidCities.Count > 0
+            ? BuildCityRaidPost(active, raidCities, ppoNow)
+            : BuildOblastPost(active, AirborneNow(active.Sum(t => t.Amount)));
+        return (core, raidCities.ToHashSet());
+    }, "Цілей у повітрі більше не видно", ChannelFoot, LiveFoot, "");
+
+// Спільна логіка «живої дошки» (основний канал і міські): [filter] — які цілі дошка бачить,
+// [build] — текст (без підпису) + міста під нальотом, [closeText]/[closeFoot] — фінальний рядок,
+// коли небо чисте 2 хв, [liveFoot] — рядок «🕒 оновлюється», [tag] — для логів.
+async Task RunLiveBoard(ChannelPoster channel, Func<Threat, bool> filter,
+    Func<List<Threat>, HashSet<string>, (string core, HashSet<string> cities)> build,
+    string closeText, string closeFoot, Func<string> liveFoot, string tag)
 {
     long? liveId = null;
     string liveCore = "";
@@ -1595,32 +1683,26 @@ async Task RunThreatNews(ChannelPoster channel)
         await Task.Delay(TimeSpan.FromSeconds(5));
         try
         {
-            var active = tracker.Active.Where(t => t.Pos is not null).ToList();
+            var active = tracker.Active.Where(t => t.Pos is not null && filter(t)).ToList();
             if (active.Count == 0)
             {
                 // Небо чисте ≥2 хв → закриваємо дошку підсумком «тихо» (редагуванням, без нового поста).
                 if (liveId is { } done && DateTime.Now - lastActive > TimeSpan.FromMinutes(2))
                 {
-                    await channel.Edit(done, liveCore + $"✅ <b>Цілей у повітрі більше не видно</b> · {DateTime.Now:HH:mm}\n\n" + ChannelFoot);
+                    await channel.Edit(done, liveCore + $"✅ <b>{closeText}</b> · {DateTime.Now:HH:mm}\n\n" + closeFoot);
                     liveId = null; liveCore = ""; liveCities.Clear(); liveHot.Clear();
                 }
                 continue;
             }
             lastActive = DateTime.Now;
-            foreach (var t in active) daySeen.Add($"{t.Kind}|{t.LastPlace}"); // для зведення
-            // Налёт на велике місто (Київ/Харків/Дніпро) → короткий формат; інакше — по областях.
-            var raidCities = active.Select(NearBigCity).Where(c => c != null).Distinct().ToList();
             // Міста, де щойно (≤3 хв) згадали роботу ППО — для банера «🛡 Працює ППО».
             var ppoNow = new HashSet<string>(
                 ppoSeen.Where(kv => DateTime.Now - kv.Value < TimeSpan.FromMinutes(3)).Select(kv => kv.Key));
-            var core = raidCities.Count > 0
-                ? BuildCityRaidPost(active, raidCities!, ppoNow)
-                : BuildOblastPost(active, AirborneNow(active.Sum(t => t.Amount)));
+            var (core, cities) = build(active, ppoNow);
             if (core == liveCore) continue;                                     // нічого нового
             if (DateTime.Now - lastChange < TimeSpan.FromSeconds(20)) continue; // не частіше за 20 с
             lastChange = DateTime.Now;
 
-            var cities = raidCities.Select(c => c!).ToHashSet();
             var hot = core.Split('\n').Where(l => l.StartsWith("💥") || l.StartsWith("❗") || l.StartsWith("⚠️") || l.StartsWith("🛡")).ToHashSet();
             // Важливе: нове місто під нальотом — одразу; новий «💥/❗/⚠️» — не частіше ніж раз
             // на хвилину (ціль «над районом» перебирає райони — це не привід дзенькати щоразу).
@@ -1628,7 +1710,7 @@ async Task RunThreatNews(ChannelPoster channel)
                 || (!hot.IsSubsetOf(liveHot) && DateTime.Now - liveAt > TimeSpan.FromMinutes(1));
             bool buried = channel.LastId != liveId && DateTime.Now - liveAt > TimeSpan.FromMinutes(5);
             bool stale = DateTime.Now - liveAt > TimeSpan.FromMinutes(30);
-            var text = core + LiveFoot();
+            var text = core + liveFoot();
 
             if (liveId is not { } id || important || buried || stale || !await channel.Edit(id, text))
             {
@@ -1637,7 +1719,7 @@ async Task RunThreatNews(ChannelPoster channel)
             }
             liveCore = core; liveCities = cities; liveHot = hot;
         }
-        catch (Exception ex) { Console.Error.WriteLine("⚠ threatnews: " + ex.Message); }
+        catch (Exception ex) { Console.Error.WriteLine($"⚠ threatnews{(tag.Length > 0 ? " " + tag : "")}: " + ex.Message); }
     }
 }
 
@@ -1704,7 +1786,8 @@ static string BuildOblastPost(List<Threat> active, int airborne = -1)
 
 // Режим налёту на велике місто: коротко — місто + райони/напрямки.
 // [ppoCities] — міста, де щойно згадали роботу ППО (показуємо банер «🛡 Працює ППО»).
-static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSet<string>? ppoCities = null)
+// [ru] — російською (харківський міський канал); основний канал — завжди українською.
+static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSet<string>? ppoCities = null, bool ru = false)
 {
     // Стиль локальних каналів («Реальний Київ»): короткі живі рядки по стадії —
     // «🛩 Троєщина», «💥 Гучно», «🇺🇦 Далі на Теремки». Швидкість читання під нальотом.
@@ -1712,13 +1795,13 @@ static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSe
     foreach (var city in cities)
     {
         var near = active.Where(t => NearBigCity(t) == city).OrderBy(t => t.DistKm ?? 1e9).ToList();
-        sb.Append("🚨 <b>").Append(H(city.ToUpper())).AppendLine("</b>");
-        if (ppoCities != null && ppoCities.Contains(city)) sb.AppendLine("🛡 <b>Працює ППО</b>");
+        sb.Append("🚨 <b>").Append(H((ru ? CityChannel.RuPlace(city) : city).ToUpper())).AppendLine("</b>");
+        if (ppoCities != null && ppoCities.Contains(city)) sb.AppendLine(ru ? "🛡 <b>Работает ПВО</b>" : "🛡 <b>Працює ППО</b>");
         var seen = new HashSet<string>();
         int n = 0;
         foreach (var t in near)
         {
-            var line = RaidLine(t);
+            var line = RaidLine(t, ru);
             if (!seen.Add(line)) continue;
             if (n++ >= 8) { sb.AppendLine("…"); break; }
             sb.AppendLine(line);
@@ -1729,9 +1812,18 @@ static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSe
 }
 
 // Один короткий рядок про ціль у стилі локальних каналів.
-static string RaidLine(Threat t)
+static string RaidLine(Threat t, bool ru = false)
 {
-    var p = t.LastPlace;
+    var p = ru ? CityChannel.RuPlace(t.LastPlace) : t.LastPlace;
+    if (ru) return t.Stage switch
+    {
+        TrackStage.Impact   => p.Length > 0 ? $"💥 Громко — {H(p)}" : "💥 Громко",
+        TrackStage.Passed   => p.Length > 0 ? $"🇺🇦 Дальше на {H(p)}" : "🇺🇦 Пролетела дальше",
+        TrackStage.Overhead => p.Length > 0 ? $"⚠️ Над {H(p)}" : "⚠️ Над районом",
+        TrackStage.Imminent => p.Length > 0 ? $"❗ На подлёте — {H(p)}" : "❗ На подлёте",
+        _ when t.Orbit      => p.Length > 0 ? $"🔄 Кружит — {H(p)}" : "🔄 Кружит",
+        _                   => p.Length > 0 ? $"{ThreatParser.Icon(t.Kind)} {H(p)}" : $"{ThreatParser.Icon(t.Kind)} цель",
+    };
     return t.Stage switch
     {
         TrackStage.Impact   => p.Length > 0 ? $"💥 Гучно — {H(p)}" : "💥 Гучно",
@@ -1826,7 +1918,8 @@ string? AlarmEtaText(double lat, double lon)
 // Малює поточну карту загроз у PNG: області за ОФІЦІЙНОЮ тривогою (red/yellow),
 // цілі — детальні силуети за курсом (як у застосунку), міста з підписами.
 // channel=true → нейтральний заголовок для каналу (без дому й «ймовірності»).
-async Task<byte[]?> BuildBotMapPng(bool channel = false, (double lat, double lon)? at = null, string? name = null)
+// [logo] — файл логотипа в assets/ (міські канали: logo_kyiv.png / logo_kharkiv.png).
+async Task<byte[]?> BuildBotMapPng(bool channel = false, (double lat, double lon)? at = null, string? name = null, string? logo = null)
 {
     var live = tracker.Active.Where(t => t.Pos is not null).ToList();
     var snap = await OfficialAlerts.FetchFull();
@@ -1834,7 +1927,7 @@ async Task<byte[]?> BuildBotMapPng(bool channel = false, (double lat, double lon
     {
         var subtitle = $"Тривога: {snap.RedUa.Count} обл · жовтий рівень: {snap.YellowUa.Count} · у повітрі: ~{AirborneNow(live.Sum(t => t.Amount))}";
         return MapImage.Render((HomeLat, HomeLon), live, "WarAlarm · Карта тривог", subtitle, snap.ByPolygon,
-            showHome: false, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole);
+            showHome: false, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole, logo: logo);
     }
     // at — місто користувача бота (своя точка й своя ймовірність); інакше — дім.
     var home = at ?? (HomeLat, HomeLon);
@@ -2592,6 +2685,8 @@ async Task OnUpdate(Update update)
             await Alert(new AlarmInfo(time, src, head, string.Join("\n", lines), ThreatKind.Unknown, Urgent: false, Power: true));
             if (channelPoster is not null)
                 await channelPoster.Post($"💡 <b>Світло в Києві{H(at)}</b>\n{H(string.Join("\n", lines))}\n\n<i>🤖 WarAlarm</i>", null, silent: true);
+            if (CityOf("Київ") is { } kc) // і в київський канал (лише Київ)
+                await kc.Post($"💡 <b>Світло{H(at)}</b>\n{H(string.Join("\n", lines))}\n\n{kc.Foot}", null, silent: true);
             return;
         }
 
@@ -2605,6 +2700,8 @@ async Task OnUpdate(Update update)
             await Alert(new AlarmInfo(time, src, $"{icon} {word} — {area}", oneLine, ThreatKind.Unknown, Urgent: false, Power: true)); // пуш + консоль
             if (channelPoster is not null) // і в канал (район без «твій»)
                 await channelPoster.Post($"{icon} <b>{H(word)} — {H(pe.Area)}</b>\n{H(CleanQuote(msg))}\n\n<i>🤖 WarAlarm</i>", null, silent: true);
+            if (CityOf("Київ") is { } kc)
+                await kc.Post($"{icon} <b>{H(word)} — {H(pe.Area)}</b>\n{H(CleanQuote(msg))}\n\n{kc.Foot}", null, silent: true);
         }
         else
             Ui.Line(ConsoleColor.DarkGray, $"💡 [{time}] {src} · {(pe.Kind == PowerKind.Schedule ? "графік відключень" : "новина про світло")} (тихо)");
@@ -2852,15 +2949,25 @@ bool SeenRecently(string text)
 // Общая обработка события KharkivMonitor/KyivMonitor: пульс / тихо / тревога+push.
 async Task HandleKh(KhEvent e, string src, string time, string zone)
 {
+    // 🏙 Міський канал цієї зони (Київ/Харків): короткий пост про подію. Зі звуком — лише
+    // нова загроза місту (до події біля міста цілей не було) або загроза балістики.
+    var city = CityOf(zone);
+    bool hadCity = city is not null && tracker.Active.Any(t => NearBigCity(t) == zone);
+    async Task CityPost(TrackUpdate? u)
+    {
+        if (city?.EventPost(e, u, hadCity, BallisticThreatText, DateTime.Now) is { } p) await city.Post(p.text, null, p.silent);
+    }
     if (e.Signal == KhSignal.News)
     {
         Ui.Line(ConsoleColor.DarkGray, $"·  [{time}] {src} — новина/реклама, пропуск"); // пульс
+        await CityPost(null); // хіба що «працює ППО»
         return;
     }
     // «Загроза балістики» — попередження без цілі на карті: ракету ще не запустили.
     if (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw))
     {
         Ui.Line(ConsoleColor.Red, $"☄ [{time}] {src} · загроза балістики (пуску ще нема)");
+        await CityPost(null);
         if (!(lastBallistic is { } lb0 && DateTime.Now - lb0 < TimeSpan.FromMinutes(5)))
         {
             lastBallistic = DateTime.Now;
@@ -2874,6 +2981,7 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
         var hit = tracker.MarkShotZone(zone, shotN, DateTime.Now);
         Ui.Line(ConsoleColor.Green, $"🎯 [{time}] {src} · мінус{(hit is null ? " (цілі на карті нема)" : $" — {ThreatTracker.Label(hit)} · {hit.LastPlace}")}");
         if (hit is not null) MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
+        await CityPost(null);
         return;
     }
     var (emoji, label) = KharkivMonitor.Verdict(e);
@@ -2887,6 +2995,7 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
     if (e.Signal == KhSignal.AlarmOn)
     {
         Ui.Line(ConsoleColor.Cyan, $"🔔 [{time}] {src} · оголошено тривогу (чекаю конкретну ціль){kind}{place}");
+        await CityPost(null); // офіційну тривогу постить RunAlertsLoop; тут — хіба що ППО
         return;
     }
 
@@ -2894,6 +3003,7 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
     if (e.Signal == KhSignal.Threat)
     {
         var up = tracker.Ingest(e, zone, DateTime.Now);
+        await CityPost(up);
         if (up is { } u)
         {
             lock (u.Threat.Srcs) u.Threat.Srcs.Add(src.TrimStart('@'));
@@ -2939,6 +3049,7 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
 
     // ── Отбой/чисто — гасим цели зоны на карте + тихий зелёный пуш ──────────────
     Ui.Line(ConsoleColor.Green, $"{emoji} [{time}] {src} · {label}");
+    await CityPost(null);
     if (tracker.Sweep(zone).Count > 0) MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
     await Notify(zone, new AlarmInfo(time, src, $"✅ Відбій — {zone} чисто", oneLine, ThreatKind.AllClear, false), clear: true);
 }
@@ -3255,6 +3366,68 @@ void RunKharkivSim(string myDistrict, string path)
     }
     Console.WriteLine($"\n✅ Симуляція завершена. Карта: {Path.GetFullPath(MapPath)}");
     Console.WriteLine("   Так само вона малюється наживо (dotnet run) і в `check` по свіжих постах.");
+}
+
+// ── 🏙 Сухий прогон міського каналу:  dotnet run -- citysim kyiv|kharkiv ─────
+// Ті самі кроки, що наживо (HandleKh → EventPost, дошка BuildCityRaidPost, AlertStep),
+// але нічого не надсилає — друкує, що пішло б у канал.
+async Task RunCitySim(CityChannel.City info, string path)
+{
+    if (!File.Exists(path)) { Console.WriteLine($"❌ Не знайдено файл: {path}"); return; }
+    var blocks = Regex.Split(File.ReadAllText(path).Replace("\r", ""), @"(?m)^-----\s*$")
+        .Select(b => b.Trim()).Where(b => b.Length > 0).ToList();
+    var cc = new CityChannel(info, "(сухий прогон)", null);
+    Console.WriteLine($"🏙 citysim {info.Name}: {blocks.Count} постів з {path}. Нічого не надсилається.\n");
+
+    // 1) Офіційна тривога: поточний стан API + приклад постів тривоги/відбою.
+    var snap = await OfficialAlerts.FetchFull();
+    var lvl = snap.Ok ? snap.LevelAt(info.Lat, info.Lon) : null;
+    Console.WriteLine($"🛰 API тривог: {(snap.Ok ? $"зараз у точці центру ({OblastGeo.PolyName(info.Lat, info.Lon)}) — {lvl ?? "без тривоги"}" : "не відповів (це не відбій)")}\n");
+    var t0 = DateTime.Now;
+    cc.AlertStep(null, t0);                              // перший знімок — без поста
+    foreach (var (lv, min) in new[] { ("red", 1), ("red", 2), (null as string, 3), ("red", 4), (null, 30), (null, 31) })
+        if (cc.AlertStep(lv, t0.AddMinutes(min)) is { } ap) await cc.Post(ap);
+    Console.WriteLine("   (вище: тривога; один «пропуск» на 3-й хв — не відбій; відбій — після двох опитувань без тривоги)\n");
+
+    // 2) Пости локальних моніторів + жива дошка (показуємо, коли її текст змінюється).
+    var zone = info.Name;
+    string board = "";
+    int posts = 0, boards = 0;
+    DateTime? ppoAt = null; // як ppoSeen[zone] наживо
+    var now = DateTime.Now;
+    foreach (var block in blocks)
+    {
+        string channel = "@?", body = block;
+        var nl = block.IndexOf('\n');
+        if (block.StartsWith("@")) { channel = nl > 0 ? block[..nl].Trim() : block; body = nl > 0 ? block[(nl + 1)..].Trim() : ""; }
+        now = now.AddSeconds(40);
+        var e = info.Key == "kyiv" ? KyivMonitor.Analyze(body) : KharkivMonitor.Analyze(body, MyDistrict);
+        if (PpoMention(body)) ppoAt = now;
+        bool hadCity = tracker.Active.Any(t => NearBigCity(t) == zone);
+        TrackUpdate? th = null;
+        // Той самий порядок гілок, що в HandleKh.
+        if (e.Signal == KhSignal.News || (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw)) || e.Signal == KhSignal.AlarmOn) { }
+        else if (Slang.ShotCount(e.Raw) is { } shotN) tracker.MarkShotZone(zone, shotN, now);
+        else if (e.Signal == KhSignal.Threat) th = tracker.Ingest(e, zone, now);
+        else tracker.Sweep(zone);
+
+        var one = body.Replace("\n", " ⏎ ");
+        Console.WriteLine($"⇢ {channel} · {(one.Length > 70 ? one[..67] + "…" : one)}");
+        if (cc.EventPost(e, th, hadCity, BallisticThreatText, now) is { } p) { posts++; await cc.Post(p.text, null, p.silent); }
+
+        var active = tracker.Active.Where(t => t.Pos is not null && NearBigCity(t) == zone).ToList();
+        var ppoNow = ppoAt is { } pa && now - pa < TimeSpan.FromMinutes(3) ? new HashSet<string> { zone } : new HashSet<string>();
+        var core = active.Count == 0 ? "" : BuildCityRaidPost(active, new List<string> { zone }, ppoNow, cc.Ru);
+        if (core != board)
+        {
+            boards++;
+            Console.WriteLine(core.Length == 0
+                ? $"📋 [дошка {zone}] ✅ {cc.CloseText} (закриття — через 2 хв тиші)\n"
+                : $"📋 [дошка {zone}] (редагування)\n{CityChannel.Plain(core + cc.LiveFoot())}\n");
+            board = core;
+        }
+    }
+    Console.WriteLine($"Σ постів моніторів: {blocks.Count} → коротких постів у канал: {posts} · змін дошки: {boards}");
 }
 
 // ── Демонстрация киевского монитора (оффлайн, гость в Киеве) ──────────────────
