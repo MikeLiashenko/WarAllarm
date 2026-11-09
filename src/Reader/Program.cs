@@ -832,7 +832,9 @@ if (args.Length >= 2 && args[0].ToLowerInvariant() is "channeltest" or "channels
     var cc = new CityChannel(cityInfo, cn!, new ChannelPoster(ct!, cn!));
     Console.WriteLine($"📢 Тестовий пост у {cn} ({cityInfo.Name}) ...");
     var cpng = await BuildBotMapPng(channel: true, logo: cc.LogoFile);
-    var cid = await cc.Post($"🔔 <b>Тест WarAlarm {H(cityInfo.Name)}</b>\nТут будуть тривога й відбій по місту, цілі біля міста та дані локальних моніторів.\n\n{cc.Foot}", cpng, silent: true);
+    var cid = await cc.Post(cityInfo.Ru
+        ? $"🔔 <b>Тест WarAlarm {H(cityInfo.Title)}</b>\nЗдесь будут тревога и отбой по городу, цели возле города и данные локальных мониторов.\n\n{cc.Foot}"
+        : $"🔔 <b>Тест WarAlarm {H(cityInfo.Title)}</b>\nТут будуть тривога й відбій по місту, цілі біля міста та дані локальних моніторів.\n\n{cc.Foot}", cpng, silent: true);
     Console.WriteLine(cid is null ? "❌ Не надіслано — див. помилку вище (бот адмін у каналі? є право «Публікувати»?)"
         : $"✅ Надіслано (id {cid}){(cpng is null ? ", лише текст — карта не згенерувалась" : ": карта + текст")}.");
     return;
@@ -1000,8 +1002,8 @@ if (channelPoster is not null)
 // Міські канали: жива дошка цілей лише біля свого міста (тривога/відбій — у RunAlertsLoop).
 foreach (var cc in cityChannels)
     _ = RunLiveBoard(cc.Poster!, t => NearBigCity(t) == cc.Name,
-        (active, ppo) => (BuildCityRaidPost(active, new List<string> { cc.Name }, ppo), new HashSet<string> { cc.Name }),
-        "Цілей більше не видно", cc.Foot, cc.LiveFoot, cc.Name);
+        (active, ppo) => (BuildCityRaidPost(active, new List<string> { cc.Name }, ppo, cc.Ru), new HashSet<string> { cc.Name }),
+        cc.CloseText, cc.Foot, cc.LiveFoot, cc.Name);
 
 // ── 🌙 Підсумок ночі: зібрати з історії каналів → карта + текст + state ────────
 async Task<(byte[] png, string html, string plain, NightSummary.Data d)> BuildNight(DateTime from, DateTime to)
@@ -1784,7 +1786,8 @@ static string BuildOblastPost(List<Threat> active, int airborne = -1)
 
 // Режим налёту на велике місто: коротко — місто + райони/напрямки.
 // [ppoCities] — міста, де щойно згадали роботу ППО (показуємо банер «🛡 Працює ППО»).
-static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSet<string>? ppoCities = null)
+// [ru] — російською (харківський міський канал); основний канал — завжди українською.
+static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSet<string>? ppoCities = null, bool ru = false)
 {
     // Стиль локальних каналів («Реальний Київ»): короткі живі рядки по стадії —
     // «🛩 Троєщина», «💥 Гучно», «🇺🇦 Далі на Теремки». Швидкість читання під нальотом.
@@ -1792,13 +1795,13 @@ static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSe
     foreach (var city in cities)
     {
         var near = active.Where(t => NearBigCity(t) == city).OrderBy(t => t.DistKm ?? 1e9).ToList();
-        sb.Append("🚨 <b>").Append(H(city.ToUpper())).AppendLine("</b>");
-        if (ppoCities != null && ppoCities.Contains(city)) sb.AppendLine("🛡 <b>Працює ППО</b>");
+        sb.Append("🚨 <b>").Append(H((ru ? CityChannel.RuPlace(city) : city).ToUpper())).AppendLine("</b>");
+        if (ppoCities != null && ppoCities.Contains(city)) sb.AppendLine(ru ? "🛡 <b>Работает ПВО</b>" : "🛡 <b>Працює ППО</b>");
         var seen = new HashSet<string>();
         int n = 0;
         foreach (var t in near)
         {
-            var line = RaidLine(t);
+            var line = RaidLine(t, ru);
             if (!seen.Add(line)) continue;
             if (n++ >= 8) { sb.AppendLine("…"); break; }
             sb.AppendLine(line);
@@ -1809,9 +1812,18 @@ static string BuildCityRaidPost(List<Threat> active, List<string> cities, HashSe
 }
 
 // Один короткий рядок про ціль у стилі локальних каналів.
-static string RaidLine(Threat t)
+static string RaidLine(Threat t, bool ru = false)
 {
-    var p = t.LastPlace;
+    var p = ru ? CityChannel.RuPlace(t.LastPlace) : t.LastPlace;
+    if (ru) return t.Stage switch
+    {
+        TrackStage.Impact   => p.Length > 0 ? $"💥 Громко — {H(p)}" : "💥 Громко",
+        TrackStage.Passed   => p.Length > 0 ? $"🇺🇦 Дальше на {H(p)}" : "🇺🇦 Пролетела дальше",
+        TrackStage.Overhead => p.Length > 0 ? $"⚠️ Над {H(p)}" : "⚠️ Над районом",
+        TrackStage.Imminent => p.Length > 0 ? $"❗ На подлёте — {H(p)}" : "❗ На подлёте",
+        _ when t.Orbit      => p.Length > 0 ? $"🔄 Кружит — {H(p)}" : "🔄 Кружит",
+        _                   => p.Length > 0 ? $"{ThreatParser.Icon(t.Kind)} {H(p)}" : $"{ThreatParser.Icon(t.Kind)} цель",
+    };
     return t.Stage switch
     {
         TrackStage.Impact   => p.Length > 0 ? $"💥 Гучно — {H(p)}" : "💥 Гучно",
@@ -3405,12 +3417,12 @@ async Task RunCitySim(CityChannel.City info, string path)
 
         var active = tracker.Active.Where(t => t.Pos is not null && NearBigCity(t) == zone).ToList();
         var ppoNow = ppoAt is { } pa && now - pa < TimeSpan.FromMinutes(3) ? new HashSet<string> { zone } : new HashSet<string>();
-        var core = active.Count == 0 ? "" : BuildCityRaidPost(active, new List<string> { zone }, ppoNow);
+        var core = active.Count == 0 ? "" : BuildCityRaidPost(active, new List<string> { zone }, ppoNow, cc.Ru);
         if (core != board)
         {
             boards++;
             Console.WriteLine(core.Length == 0
-                ? $"📋 [дошка {zone}] ✅ Цілей більше не видно (закриття — через 2 хв тиші)\n"
+                ? $"📋 [дошка {zone}] ✅ {cc.CloseText} (закриття — через 2 хв тиші)\n"
                 : $"📋 [дошка {zone}] (редагування)\n{CityChannel.Plain(core + cc.LiveFoot())}\n");
             board = core;
         }

@@ -13,13 +13,18 @@ using System.Text.Json;
 // токен — telegram_channel_<key>_bot_token або спільний telegram_channel_bot_token.
 public sealed class CityChannel
 {
-    public readonly record struct City(string Key, string Name, double Lat, double Lon);
+    /// [Name] — зона моніторів (укр.), [Ru] — канал російською, [Title] — назва в постах.
+    public readonly record struct City(string Key, string Name, double Lat, double Lon, bool Ru = false, string? TitleRu = null)
+    {
+        public string Title => Ru ? TitleRu ?? Name : Name;
+    }
 
     /// Підтримувані міста: ключ у командах/секретах, назва (= зона моніторів), центр.
+    /// Харківський канал — російською (як місцеві монітори).
     public static readonly City[] Known =
     {
         new("kyiv", "Київ", 50.4501, 30.5234),
-        new("kharkiv", "Харків", 49.9935, 36.2304),
+        new("kharkiv", "Харків", 49.9935, 36.2304, Ru: true, TitleRu: "Харьков"),
     };
 
     public static City? Find(string s) =>
@@ -29,6 +34,9 @@ public sealed class CityChannel
     public City Info { get; }
     public string Key => Info.Key;
     public string Name => Info.Name;
+    public string Title => Info.Title;
+    public bool Ru => Info.Ru;
+    string T(string ua, string ru) => Ru ? ru : ua;
     public (double lat, double lon) Center => (Info.Lat, Info.Lon);
     public string Handle { get; }
     /// null — сухий прогон (citysim): пости лише друкуються в консоль.
@@ -40,10 +48,14 @@ public sealed class CityChannel
     }
 
     /// Підпис постів міського каналу (аналог ChannelFoot).
-    public string Foot => FootFor(Name);
-    public static string FootFor(string city) => $"<i>🤖 WarAlarm {city} · дані приблизні</i>";
+    public string Foot => T($"<i>🤖 WarAlarm {Title} · дані приблизні</i>", $"<i>🤖 WarAlarm {Title} · данные приблизительные</i>");
     /// Рядок «оновлюється» під живою дошкою.
-    public string LiveFoot() => $"<i>🕒 {DateTime.Now:HH:mm} · оновлюється · 🤖 WarAlarm {Name}</i>";
+    public string LiveFoot() => T($"<i>🕒 {DateTime.Now:HH:mm} · оновлюється · 🤖 WarAlarm {Title}</i>",
+                                  $"<i>🕒 {DateTime.Now:HH:mm} · обновляется · 🤖 WarAlarm {Title}</i>");
+    /// Фінальний рядок дошки, коли небо чисте.
+    public string CloseText => T("Цілей більше не видно", "Целей больше не видно");
+    /// Загроза балістики російською (укр. — спільний BallisticThreatText з Program.cs).
+    const string BallisticRu = "⚠️ Угроза баллистики: пуска ещё нет, будь ближе к укрытию";
     /// Логотип міста для карт (assets/logo_<key>.png).
     public string LogoFile => $"logo_{Key}.png";
 
@@ -70,17 +82,19 @@ public sealed class CityChannel
             _miss = 0;
             if (_alarm == true) return null;
             _alarm = true; _alarmAt = now;
-            return $"🔴 <b>Повітряна тривога — {H(Name)}</b>\nУсім в укриття.\n\n{Foot}";
+            return T($"🔴 <b>Повітряна тривога — {H(Title)}</b>\nУсім в укриття.\n\n{Foot}",
+                     $"🔴 <b>Воздушная тревога — {H(Title)}</b>\nВсем в укрытие.\n\n{Foot}");
         }
         if (_alarm == false) return null;
         if (++_miss < 2) return null;    // зникла вперше — ще тривога (як у RunAlertsLoop)
         _alarm = false; _miss = 0;
-        var dur = _alarmAt is { } at ? $"\nТривала {Dur(now - at)}." : "";
+        var dur = _alarmAt is { } at ? T($"\nТривала {Dur(now - at)}.", $"\nДлилась {Dur(now - at)}.") : "";
         _alarmAt = null;
-        return $"🟢 <b>Відбій — {H(Name)}</b>{dur}\n\n{Foot}";
+        return $"🟢 <b>{T("Відбій", "Отбой")} — {H(Title)}</b>{dur}\n\n{Foot}";
     }
 
-    static string Dur(TimeSpan d) => d.TotalMinutes < 60 ? $"{Math.Max(1, (int)d.TotalMinutes)} хв" : $"{(int)d.TotalHours} год {d.Minutes} хв";
+    string Dur(TimeSpan d) => d.TotalMinutes < 60 ? $"{Math.Max(1, (int)d.TotalMinutes)} {T("хв", "мин")}"
+        : $"{(int)d.TotalHours} {T("год", "ч")} {d.Minutes} {T("хв", "мин")}";
 
     // ── 3. Пости з локальних моніторів ───────────────────────────────────────
     readonly Dictionary<string, DateTime> _recent = new();
@@ -96,24 +110,25 @@ public sealed class CityChannel
         if (e.Signal == KhSignal.News) { }
         else if (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw))
         {
-            if (now - _ballAt > TimeSpan.FromMinutes(5)) { line = ballisticText; loud = true; _ballAt = now; }
+            if (now - _ballAt > TimeSpan.FromMinutes(5)) { line = Ru ? BallisticRu : ballisticText; loud = true; _ballAt = now; }
         }
         else if (Slang.ShotCount(e.Raw) is { } n)
         {   // «мінус» без цілей біля міста — не про нас (або запізнілий перепост)
-            if (hadCityThreat) line = n > 1 ? $"🎯 Мінус {n}" : "🎯 Мінус";
+            if (hadCityThreat) line = $"🎯 {T("Мінус", "Минус")}" + (n > 1 ? $" {n}" : "");
         }
         else if (e.Signal == KhSignal.Threat && u is { Threat: { Recon: false, Pos: { } p } t } && ThreatGeo.Km(p, Center) <= 40
                  // без власного місця («Над вами!», «ховайтеся») — лише щойно вибух / над районом, інакше це шум
                  && (e.Places.Count > 0 || (u.Value.StageChanged && t.Stage is TrackStage.Impact or TrackStage.Overhead)))
         {
-            line = ThreatLine(e, t, u.Value.StageChanged);
+            line = ThreatLine(e, t, u.Value.StageChanged, Ru);
             loud = !hadCityThreat;
         }
 
         if (Ppo(e.Raw) && now - _ppoAt > TimeSpan.FromMinutes(3))
         {
             _ppoAt = now;
-            line = line is null ? "🛡 Працює ППО" : line + "\n🛡 Працює ППО";
+            var ppoLine = T("🛡 Працює ППО", "🛡 Работает ПВО");
+            line = line is null ? ppoLine : line + "\n" + ppoLine;
         }
         if (line is null) return null;
 
@@ -127,9 +142,10 @@ public sealed class CityChannel
     }
 
     // [fresh] — стадія змінилась саме цією подією (інакше «💥» від минулого вибуху липне до нових постів).
-    static string ThreatLine(KhEvent e, Threat t, bool fresh)
+    static string ThreatLine(KhEvent e, Threat t, bool fresh, bool ru)
     {
         var places = e.Places.Count > 0 ? string.Join(", ", e.Places) : t.LastPlace;
+        if (ru) places = RuPlace(places);
         var icon = e.Kind switch
         {
             ThreatKind.Drone => "🛵",
@@ -145,22 +161,73 @@ public sealed class CityChannel
         {
             ThreatKind.Drone => "Шахед",
             ThreatKind.Missile => "Ракета",
-            ThreatKind.Ballistic => "Балістика",
+            ThreatKind.Ballistic => ru ? "Баллистика" : "Балістика",
             ThreatKind.Kab => "КАБ",
-            ThreatKind.Aviation => "Авіація",
-            ThreatKind.Fpv => "ФПВ",
-            _ => "Ціль",
+            ThreatKind.Aviation => ru ? "Авиация" : "Авіація",
+            ThreatKind.Fpv => ru ? "FPV" : "ФПВ",
+            _ => ru ? "Цель" : "Ціль",
         };
+        if (ru) label = RuWord(label);
         var stage = fresh ? t.Stage : TrackStage.Approaching;
-        if (stage == TrackStage.Impact) return places.Length > 0 ? $"💥 Гучно — {places}" : "💥 Гучно";
+        var boom = ru ? "💥 Громко" : "💥 Гучно";
+        if (stage == TrackStage.Impact) return places.Length > 0 ? $"{boom} — {places}" : boom;
         var what = $"{icon} {label}";
         if (places.Length == 0) return what;
         return stage switch
         {
             TrackStage.Overhead => $"⚠️ {what} над {places}",
-            TrackStage.Imminent => $"❗ {what} на підльоті — {places}",
+            TrackStage.Imminent => ru ? $"❗ {what} на подлёте — {places}" : $"❗ {what} на підльоті — {places}",
             _ => $"{what} → {places}",
         };
+    }
+
+    // ── Російська для харківського каналу: місця й слова з моніторів (укр.) ──────
+    // Спершу словник (райони й місця Харкова та області), далі — грубі правила транслітерації.
+    static readonly Dictionary<string, string> RuDict = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Харків"] = "Харьков", ["Київ"] = "Киев", ["Харківщина"] = "Харьковщина", ["Бєлгород"] = "Белгород",
+        ["Шевченківський"] = "Шевченковский", ["Київський"] = "Киевский", ["Салтівський"] = "Салтовский",
+        ["Немишлянський"] = "Немышлянский", ["Індустріальний"] = "Индустриальный", ["Слобідський"] = "Слободской",
+        ["Основ'янський"] = "Основянский", ["Основʼянський"] = "Основянский", ["Холодногірський"] = "Холодногорский",
+        ["Новобаварський"] = "Новобаварский",
+        ["Салтівка"] = "Салтовка", ["Північна Салтівка"] = "Северная Салтовка", ["Олексіївка"] = "Алексеевка",
+        ["Дергачі"] = "Дергачи", ["Циркуни"] = "Циркуны", ["Кутузівка"] = "Кутузовка", ["Слатине"] = "Слатино",
+        ["Козача Лопань"] = "Казачья Лопань", ["Васищеве"] = "Васищево", ["Безлюдівка"] = "Безлюдовка",
+        ["Кулиничі"] = "Кулиничи", ["П'ятихатки"] = "Пятихатки", ["Чугуїв"] = "Чугуев", ["Мерефа"] = "Мерефа",
+        ["Пісочин"] = "Песочин", ["Липці"] = "Липцы", ["Золочів"] = "Золочев", ["Вовчанськ"] = "Волчанск",
+        ["Ізюм"] = "Изюм", ["Куп'янськ"] = "Купянск", ["Лозова"] = "Лозовая", ["Балаклія"] = "Балаклея",
+        ["Богодухів"] = "Богодухов", ["Люботин"] = "Люботин", ["Рогань"] = "Рогань", ["Валки"] = "Валки",
+        ["Сортувальна"] = "Сортировка", ["Основа"] = "Основа", ["Нові Будинки"] = "Новые Дома",
+        ["Павлове Поле"] = "Павлово Поле", ["Шишківка"] = "Шишковка", ["Журавлівка"] = "Журавлевка",
+        ["Велика Данилівка"] = "Большая Даниловка", ["Мала Данилівка"] = "Малая Даниловка",
+        ["Приколотне"] = "Приколотное", ["Барвінкове"] = "Барвенково", ["Близнюки"] = "Близнецы",
+        ["Балістика"] = "Баллистика", ["Молнія"] = "Молния", ["Бандероль"] = "Бандероль",
+        ["Реакт. шахед"] = "Реакт. шахед", ["Розвідник"] = "Разведчик", ["Шахед"] = "Шахед",
+    };
+
+    /// «Салтівка, Немишлянський» → «Салтовка, Немышлянский».
+    public static string RuPlace(string s) => string.Join(", ", s.Split(", ").Select(RuWord));
+
+    static string RuWord(string w)
+    {
+        if (w.Length == 0) return w;
+        if (RuDict.TryGetValue(w, out var hit)) return hit;
+        // Правила: закінчення, потім літери (и→ы раніше за і→и).
+        var r = w;
+        foreach (var (a, b) in new[] { ("ський", "ский"), ("цький", "цкий"), ("івка", "овка"), ("ївка", "евка"), ("ичі", "ичи"), ("ів", "ов") })
+            if (r.EndsWith(a)) { r = r[..^a.Length] + b; break; }
+        var sb = new StringBuilder();
+        for (int i = 0; i < r.Length; i++)
+        {
+            char c = r[i], lo = char.ToLower(c);
+            string o = lo switch
+            {
+                'и' => (i > 0 && "цжшчщкгх".Contains(char.ToLower(r[i - 1]))) || (i + 1 < r.Length && r[i + 1] == 'й') ? "и" : "ы",
+                'і' => "и", 'ї' => "йи", 'є' => "е", 'ґ' => "г", '\'' or 'ʼ' or '’' => "", _ => lo.ToString(),
+            };
+            sb.Append(char.IsUpper(c) && o.Length > 0 ? char.ToUpper(o[0]) + o[1..] : o);
+        }
+        return sb.ToString();
     }
 
     static bool Ppo(string s) => System.Text.RegularExpressions.Regex.IsMatch(s.ToLowerInvariant(), @"\bппо\b|протиповітрян|зенітн");
@@ -236,8 +303,10 @@ public sealed class CityChannel
         }
 
         // Опис (≤255 симв.)
-        var desc = $"Повітряні тривоги та загрози — {city.Name}. Тривога/відбій, цілі біля міста, дані локальних моніторів"
-                 + (city.Key == "kyiv" ? ", світло" : "") + ". Дані приблизні — слухай офіційну тривогу. 🤖 WarAlarm";
+        var desc = city.Ru
+            ? $"Воздушные тревоги и угрозы — {city.Title}. Тревога/отбой, цели возле города, данные локальных мониторов. Данные приблизительные — слушай официальную тревогу. 🤖 WarAlarm"
+            : $"Повітряні тривоги та загрози — {city.Title}. Тривога/відбій, цілі біля міста, дані локальних моніторів"
+              + (city.Key == "kyiv" ? ", світло" : "") + ". Дані приблизні — слухай офіційну тривогу. 🤖 WarAlarm";
         var r = await Call("setChatDescription", new { chat_id = channel, description = desc });
         // «description is not modified» — теж ок
         Console.WriteLine(r is not null ? "📝 Опис встановлено:\n   " + desc : "   (якщо вище «not modified» — опис уже такий самий)");
