@@ -113,6 +113,12 @@ public sealed class TelegramBot
     // Під відбоєм: «чи було чути вибух?» (краудсорс точності).
     static readonly object BoomKb = Inline(new[] { Btn("💥 Чув вибух", "boom_yes"), Btn("🤫 Було тихо", "boom_no") });
     static readonly object UntrackKb = Inline(new[] { Btn("⏹ Не стежити", "untrk") });
+    // 🏙 Ціль у 3D над справжнім містом (Ukraine-3D: кожен будинок з OSM). go/ сам знаходить ціль за id
+    // у живому стані й відкриває потрібну область; сторінка веде модель цілі разом із ботом/застосунком.
+    const string City3dUrl = "https://mikeliashenko.github.io/Ukraine-3D/go/?id=";
+    static object TrackKb(long chat, string id) => chat < 0 ? UntrackKb : Inline(
+        new object[] { new { text = "🏙 Ціль у 3D над містом", web_app = new { url = City3dUrl + Uri.EscapeDataString(id) } } },
+        new object[] { Btn("⏹ Не стежити", "untrk") });
     static readonly object NoKb = new { inline_keyboard = Array.Empty<object[]>() };
 
     // ── Фонові цикли ──────────────────────────────────────────────────────────
@@ -294,12 +300,12 @@ public sealed class TelegramBot
                         if (inf.stage != tr.stage)
                         {
                             await EditMarkup(chat, tr.msg, NoKb);
-                            var id = await Send(chat, $"🛰 <b>Ціль: {H(inf.stage)}</b>\n\n" + inf.text, UntrackKb);
+                            var id = await Send(chat, $"🛰 <b>Ціль: {H(inf.stage)}</b>\n\n" + inf.text, TrackKb(chat, tr.id));
                             _tracking[chat] = (tr.id, inf.text, inf.stage, id ?? tr.msg);
                         }
                         else
                         {
-                            await Edit(chat, tr.msg, "👁 <b>Стежу за ціллю</b> · оновлюється\n\n" + inf.text, UntrackKb);
+                            await Edit(chat, tr.msg, "👁 <b>Стежу за ціллю</b> · оновлюється\n\n" + inf.text, TrackKb(chat, tr.id));
                             _tracking[chat] = (tr.id, inf.text, inf.stage, tr.msg);
                         }
                     }
@@ -686,7 +692,7 @@ public sealed class TelegramBot
             if (info is not { } inf) { await AnswerCallback(cbId, "Ця ціль уже зникла з радарів"); return; }
             if (_tracking.TryGetValue(chat, out var old)) await EditMarkup(chat, old.msg, NoKb);
             await AnswerCallback(cbId, "👁 Стежу");
-            var id = await Send(chat, "👁 <b>Стежу за ціллю</b> · оновлюється\n\n" + inf.text, UntrackKb);
+            var id = await Send(chat, "👁 <b>Стежу за ціллю</b> · оновлюється\n\n" + inf.text, TrackKb(chat, tid));
             if (id is { } m) _tracking[chat] = (tid, inf.text, inf.stage, m);
             return;
         }

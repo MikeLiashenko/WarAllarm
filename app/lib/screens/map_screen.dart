@@ -26,6 +26,7 @@ import '../widgets/map_legend.dart';
 import '../widgets/target_card.dart';
 import '../widgets/ukraine_map.dart';
 import 'now_screen.dart';
+import 'target_3d_screen.dart';
 
 /// Full-screen threat map: our vector map with the live counters, map
 /// controls and a compact glass place card floating over it (tap → «Зараз»).
@@ -114,9 +115,12 @@ class _MapScreenState extends State<MapScreen> {
                   place: s.place,
                   following: focus.follow,
                   stateTs: data.stateTs,
-                  onFollow: (v) => v
-                      ? focus.select(focus.id!, follow: true)
-                      : focus.setFollow(false),
+                  onFollow: (v) {
+                    if (!v) return focus.setFollow(false);
+                    focus.select(focus.id!, follow: true);
+                    // «Стежити» also opens the target in 3D over the real city.
+                    if (selected != null) openTarget3d(context, selected);
+                  },
                   onShow: () => _show(selected),
                   onClose: focus.clear,
                 ),
