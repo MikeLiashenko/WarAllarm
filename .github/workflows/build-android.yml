@@ -6,8 +6,7 @@
 #   ANDROID_KEYSTORE_BASE64  — base64 файлу ключа. Для ключа з ПК (Windows, PowerShell):
 #       [Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\.android\debug.keystore")) | Set-Clipboard
 #   (необов'язково, якщо ключ не debug) ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
-# Без секретів APK підписується постійним ключем app/android/waralarm-ci.keystore (у репозиторії):
-# один раз видали застосунок, зібраний на ПК, далі кожна нова версія ставиться поверх.
+# Без секретів APK підписується стандартним debug-ключем збірки.
 name: Build Android (.apk)
 
 on:
@@ -63,15 +62,8 @@ jobs:
             } >> "$GITHUB_ENV"
             echo "🔑 Підпис ключем із секретів"
           else
-            # Постійний ключ із репозиторію: кожен новий APK ставиться поверх попереднього.
-            {
-              echo "WARALARM_KEYSTORE=$GITHUB_WORKSPACE/app/android/waralarm-ci.keystore"
-              echo "WARALARM_KEYSTORE_PASSWORD=waralarm-ci"
-              echo "WARALARM_KEY_ALIAS=waralarm"
-              echo "WARALARM_KEY_PASSWORD=waralarm-ci"
-              echo "SIGNED=repo"
-            } >> "$GITHUB_ENV"
-            echo "🔑 Підпис постійним ключем із репозиторію (app/android/waralarm-ci.keystore)"
+            echo "SIGNED=debug" >> "$GITHUB_ENV"
+            echo "Без секретів — стандартний debug-підпис"
           fi
 
       - run: flutter pub get
@@ -91,7 +83,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$SIGNED" = secret ]; then SIG="ключ із секретів"; else SIG="постійний ключ WarAlarm CI — нові версії ставляться поверх"; fi
+          if [ "$SIGNED" = secret ]; then SIG="ключ із секретів"; else SIG="стандартний debug-підпис"; fi
           gh release delete apk-latest --yes --cleanup-tag || true
           gh release create apk-latest WarAlarm.apk \
             --target "$GITHUB_SHA" --prerelease \
