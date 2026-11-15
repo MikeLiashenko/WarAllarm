@@ -721,6 +721,20 @@ function demo(){
 }
 
 const isDemo = location.search.indexOf('demo') >= 0;
+// Свіжа версія сторінки: Telegram (міні-застосунок) і браузери довго тримають стару в кеші. Якщо на сервері
+// новіша — один раз перезавантажуємось на неї з ?v=… (нова адреса — повз кеш). При змінах сторінки міняй SITE_VER.
+const SITE_VER = '2026-11-15.2';
+(async () => {
+  try{
+    const t = await fetch(location.pathname + '?ver=' + Date.now(), { cache:'no-store' }).then(r => r.text());
+    const m = t.match(/const SITE_VER = '([^']+)'/);
+    if(m && m[1] !== SITE_VER && sessionStorage.getItem('site_ver') !== m[1]){
+      sessionStorage.setItem('site_ver', m[1]);
+      const q = new URLSearchParams(location.search); q.set('v', m[1]);
+      location.replace(location.pathname + '?' + q + location.hash);
+    }
+  }catch(e){}
+})();
 // Місто з кнопки бота: #home=широта,довгота,назва. У фрагменті — на сервер сторінки воно не йде.
 const home = (() => {
   const m = location.hash.match(/[#&]home=([^&]+)/);
@@ -804,12 +818,12 @@ addEventListener('resize', () => { computeFit(); draw(); });
 cv.addEventListener('wheel', e => { e.preventDefault(); zoomAt(e.offsetX, e.offsetY, e.deltaY < 0 ? 1.2 : 1/1.2); }, { passive:false });
 cv.addEventListener('dblclick', e => zoomAt(e.offsetX, e.offsetY, 1.8));
 const ptrs = new Map(); let pinch = null;
-cv.addEventListener('pointerdown', e => { tap = ptrs.size ? null : { x:e.offsetX, y:e.offsetY, t:performance.now() }; cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]); cv.classList.add('drag'); pinch = null; });
+cv.addEventListener('pointerdown', e => { tap = ptrs.size ? null : { x:e.offsetX, y:e.offsetY, t:performance.now(), touch:e.pointerType !== 'mouse' }; cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]); cv.classList.add('drag'); pinch = null; });
 cv.addEventListener('pointermove', e => {
   if(!ptrs.has(e.pointerId)) return;
   const prev = ptrs.get(e.pointerId), cur = [e.offsetX, e.offsetY];
   ptrs.set(e.pointerId, cur);
-  if(tap && Math.hypot(cur[0]-tap.x, cur[1]-tap.y) > 8) tap = null;
+  if(tap && Math.hypot(cur[0]-tap.x, cur[1]-tap.y) > (tap.touch ? 14 : 8)) tap = null;
   if(ptrs.size === 1){ view.tx += cur[0]-prev[0]; view.ty += cur[1]-prev[1]; clampView(); lastGesture = performance.now(); return; }
   const [a, b] = [...ptrs.values()];
   const d = Math.hypot(a[0]-b[0], a[1]-b[1]), mid = [(a[0]+b[0])/2, (a[1]+b[1])/2];
@@ -818,7 +832,7 @@ cv.addEventListener('pointermove', e => {
 });
 const up = e => {
   ptrs.delete(e.pointerId); pinch = null; if(!ptrs.size) cv.classList.remove('drag');
-  if(e.type === 'pointerup' && tap && !ptrs.size && performance.now()-tap.t < 600) onTap(tap.x, tap.y);
+  if(e.type === 'pointerup' && tap && !ptrs.size && performance.now()-tap.t < 700) onTap(tap.x, tap.y, tap.touch);
   tap = null;
 };
 cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
@@ -842,8 +856,8 @@ var drawn = { icons: [], r: 10 }, tap = null; let cardId = null, v3dId = null, v
 const C3D = (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('c3d')) || 'https://mikeliashenko.github.io/Ukraine-3D/go/';
 const tcard = document.getElementById('tcard'), v3d = document.getElementById('v3d'), v3dF = document.getElementById('v3dF');
 const findT = id => ((latest && Array.isArray(latest.threats)) ? latest.threats : []).find(t => t && t.id === id);
-function onTap(x, y){
-  let best = null, bd = Math.max(26, drawn.r*2.2);
+function onTap(x, y, touch){
+  let best = null, bd = Math.max(touch ? 36 : 26, drawn.r*2.2);
   for(const i of drawn.icons){
     if(i.mo.landed || (focusCat && i.cat !== focusCat) || !i.t.id || findT(i.t.id) !== i.t) continue;   // лише справжні цілі, не зони й пуски
     const d = Math.hypot(i.x-x, i.y-y); if(d < bd){ bd = d; best = i; }

@@ -73,7 +73,8 @@ public sealed class TelegramBot
     static object Inline(params object[][] rows) => new { inline_keyboard = rows };
 
     // Жива карта як міні-застосунок: та сама сторінка, що й сайт. Місто — у фрагменті URL.
-    const string MiniAppUrl = "https://mikeliashenko.github.io/WarAllarm/site/";
+    // ?v=… — нова адреса повз кеш Telegram (він довго тримає стару сторінку); далі сторінка сама підтягує свіжу версію.
+    const string MiniAppUrl = "https://mikeliashenko.github.io/WarAllarm/site/?v=2";
     static object? LiveMapKb(long chat, Place? pl)
     {
         if (chat < 0) return null; // кнопки web_app працюють лише в особистих чатах
