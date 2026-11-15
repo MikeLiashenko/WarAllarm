@@ -70,6 +70,24 @@
   }
   @media(max-width:600px){ #upd{left:16px;right:auto;top:62px} .tg #upd{top:36px}
     #zoom{top:auto;bottom:12px;right:10px} #err{bottom:auto;top:62px} .tg #err{top:36px} }
+  /* Картка цілі (натиск на ціль) і 3D над містом (Ukraine-3D у вбудованому вікні). */
+  #tcard{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:20;width:min(400px,calc(100vw - 20px));
+    background:rgba(17,22,29,.97);border:1px solid rgba(76,147,255,.3);border-radius:16px;box-shadow:0 10px 32px rgba(0,0,0,.55);
+    padding:12px 12px 12px 14px;display:none}
+  #tcard.on{display:block}
+  #tcard .h{display:flex;gap:10px;align-items:center}
+  #tcard img{width:34px;height:34px;flex:none}
+  #tcard .t{font-weight:800;font-size:15px}
+  #tcard .s{color:var(--mut);font-size:12.5px;margin-top:2px;line-height:1.35}
+  #tcard .x{margin-left:auto;align-self:flex-start;background:none;border:0;color:var(--mut);font-size:18px;cursor:pointer;padding:0 2px}
+  #tcard .go{display:block;width:100%;margin-top:10px;background:var(--primary);color:#fff;border:0;border-radius:12px;padding:11px;
+    font:inherit;font-weight:800;font-size:14.5px;cursor:pointer}
+  #tcard .go:hover{background:#3B7FE6}
+  #v3d{position:fixed;inset:0;z-index:50;background:var(--bg);display:none}
+  #v3d.on{display:block}
+  #v3d iframe{width:100%;height:100%;border:0;display:block}
+  #v3dX{position:fixed;right:14px;bottom:14px;z-index:51;width:46px;height:46px;border-radius:50%;background:rgba(17,22,29,.92);
+    border:1px solid #2A3442;color:var(--tx);font-size:20px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5)}
 </style>
 </head>
 <body>
@@ -94,6 +112,9 @@
     </div>
   </div>
 </div>
+<div id="tcard" role="dialog" aria-label="Ціль"><div class="h"><img id="tcImg" alt=""><div><div class="t" id="tcT"></div><div class="s" id="tcS"></div></div>
+  <button class="x" id="tcX" title="Закрити">✕</button></div><button class="go" id="tcGo">🏙 Стежити у 3D</button></div>
+<div id="v3d"><iframe id="v3dF" title="Ціль у 3D над містом" allow="fullscreen"></iframe><button id="v3dX" title="Закрити 3D">✕</button></div>
 <div id="zoom"><button id="zin" title="Наблизити">+</button><button id="zout" title="Віддалити">−</button><button id="zfit" title="Уся країна">⤢</button><button id="zhome" title="Моє місто" hidden>📍</button></div>
 <script>
 const DB = "https://waralarm-c8c1f-default-rtdb.europe-west1.firebasedatabase.app";
@@ -610,6 +631,7 @@ function draw(){
     ctx.fillStyle = PAL.primary; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = PAL.tx; ctx.stroke();
     text(home.name, hx, hy-10, 12, PAL.tx, 'center');
   }
+  drawn = { icons, r: badgeR };
   const red = (s.alerts && s.alerts.redCount) || 0, yel = (s.alerts && s.alerts.yellowCount) || 0;
   updateLegend(icons, red, yel);
   const total = threats.reduce((a,t) => a+(t.n||1), 0);
@@ -782,18 +804,23 @@ addEventListener('resize', () => { computeFit(); draw(); });
 cv.addEventListener('wheel', e => { e.preventDefault(); zoomAt(e.offsetX, e.offsetY, e.deltaY < 0 ? 1.2 : 1/1.2); }, { passive:false });
 cv.addEventListener('dblclick', e => zoomAt(e.offsetX, e.offsetY, 1.8));
 const ptrs = new Map(); let pinch = null;
-cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]); cv.classList.add('drag'); pinch = null; });
+cv.addEventListener('pointerdown', e => { tap = ptrs.size ? null : { x:e.offsetX, y:e.offsetY, t:performance.now() }; cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]); cv.classList.add('drag'); pinch = null; });
 cv.addEventListener('pointermove', e => {
   if(!ptrs.has(e.pointerId)) return;
   const prev = ptrs.get(e.pointerId), cur = [e.offsetX, e.offsetY];
   ptrs.set(e.pointerId, cur);
+  if(tap && Math.hypot(cur[0]-tap.x, cur[1]-tap.y) > 8) tap = null;
   if(ptrs.size === 1){ view.tx += cur[0]-prev[0]; view.ty += cur[1]-prev[1]; clampView(); lastGesture = performance.now(); return; }
   const [a, b] = [...ptrs.values()];
   const d = Math.hypot(a[0]-b[0], a[1]-b[1]), mid = [(a[0]+b[0])/2, (a[1]+b[1])/2];
   if(pinch){ view.tx += mid[0]-pinch.mid[0]; view.ty += mid[1]-pinch.mid[1]; zoomAt(mid[0], mid[1], d/pinch.d); }
   pinch = { d, mid };
 });
-const up = e => { ptrs.delete(e.pointerId); pinch = null; if(!ptrs.size) cv.classList.remove('drag'); };
+const up = e => {
+  ptrs.delete(e.pointerId); pinch = null; if(!ptrs.size) cv.classList.remove('drag');
+  if(e.type === 'pointerup' && tap && !ptrs.size && performance.now()-tap.t < 600) onTap(tap.x, tap.y);
+  tap = null;
+};
 cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
 document.getElementById('zin').onclick = () => zoomAt(W/2, H/2, 1.5);
 document.getElementById('zout').onclick = () => zoomAt(W/2, H/2, 1/1.5);
@@ -808,6 +835,73 @@ if(home){
     clampView(); lastGesture = performance.now();
   };
 }
+// ── Картка цілі і «Стежити у 3D»: модель цілі над справжнім містом (Ukraine-3D), як у застосунку й боті ──
+// Сторінка 3D сама вибирає область за точкою; поки вона відкрита, ми щосекунди передаємо їй, де ціль зараз
+// (той самий рух, що й на цій карті), тож обидві показують одне.
+var drawn = { icons: [], r: 10 }, tap = null; let cardId = null, v3dId = null, v3dTimer = 0, v3dTrail = false, v3dHad = false;
+const C3D = (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('c3d')) || 'https://mikeliashenko.github.io/Ukraine-3D/go/';
+const tcard = document.getElementById('tcard'), v3d = document.getElementById('v3d'), v3dF = document.getElementById('v3dF');
+const findT = id => ((latest && Array.isArray(latest.threats)) ? latest.threats : []).find(t => t && t.id === id);
+function onTap(x, y){
+  let best = null, bd = Math.max(26, drawn.r*2.2);
+  for(const i of drawn.icons){
+    if(i.mo.landed || (focusCat && i.cat !== focusCat) || !i.t.id || findT(i.t.id) !== i.t) continue;   // лише справжні цілі, не зони й пуски
+    const d = Math.hypot(i.x-x, i.y-y); if(d < bd){ bd = d; best = i; }
+  }
+  if(best) showCard(best.t, best.cat); else hideCard();
+}
+function showCard(t, cat){
+  cardId = t.id;
+  document.getElementById('tcImg').src = iconURL(cat);
+  document.getElementById('tcT').textContent = (t.label || KIND_LABEL[cat] || 'Ціль') + ((t.n||1) > 1 ? ' ×'+t.n : '');
+  document.getElementById('tcS').textContent = [t.place, t.stageLabel, t.alt > 0 ? '~'+(t.alt >= 1000 ? (t.alt/1000).toFixed(1)+' км' : Math.round(t.alt)+' м') : ''].filter(Boolean).join(' · ');
+  tcard.classList.add('on');
+}
+function hideCard(){ cardId = null; tcard.classList.remove('on'); }
+document.getElementById('tcX').onclick = hideCard;
+document.getElementById('tcGo').onclick = () => { const t = findT(cardId); if(t) open3d(t); };
+function open3d(t){
+  const mo = motionOf(t, Date.now(), alarmSet && alarmSet.set), q = new URLSearchParams({ id:t.id, lat:mo.lat.toFixed(5), lon:mo.lon.toFixed(5), cat:t.cat });
+  if(mo.heading != null) q.set('hdg', String(Math.round(mo.heading)));
+  if(t.label) q.set('label', t.label);
+  if(t.kmh > 0) q.set('kmh', String(Math.round(t.kmh)));
+  v3dId = t.id; v3dTrail = false; v3dHad = true;
+  v3dF.src = C3D + '?' + q; v3d.classList.add('on'); hideCard();
+  clearInterval(v3dTimer); v3dTimer = setInterval(push3d, 1000);
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if(tg && tg.BackButton){ tg.BackButton.onClick(close3d); tg.BackButton.show(); }
+}
+function close3d(){
+  clearInterval(v3dTimer); v3dId = null; v3d.classList.remove('on'); v3dF.src = 'about:blank';
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if(tg && tg.BackButton){ tg.BackButton.offClick(close3d); tg.BackButton.hide(); }
+}
+document.getElementById('v3dX').onclick = close3d;
+addEventListener('keydown', e => { if(e.key === 'Escape'){ if(v3dId) close3d(); else hideCard(); } });
+function push3d(){
+  if(!v3dId || !v3dF.contentWindow) return;
+  const t = findT(v3dId);
+  let msg;
+  if(!t) msg = { gone: true };
+  else {
+    const now = Date.now(), al = alarmSet && alarmSet.set, mo = motionOf(t, now, al), m2 = motionOf(t, now+2000, al);
+    const v = mo.landed ? 0 : kmBetween(mo.lat, mo.lon, m2.lat, m2.lon)*1800;           // км/год показаного руху
+    let ahead = [];
+    if(mo.progress != null && t.to) ahead = [t.to];
+    else if((t.route||[]).length >= 2 && !t.down){
+      const from0 = kmBetween(t.route[0][0], t.route[0][1], mo.lat, mo.lon);
+      ahead = t.route.slice(1).filter(p => kmBetween(t.route[0][0], t.route[0][1], p[0], p[1]) > from0+1);
+    }
+    msg = { id:t.id, cat:t.cat, label:t.label||'', place:t.place||'', n:t.n||1, stageLabel:t.stageLabel||'',
+      lat:mo.lat, lon:mo.lon, hdg:mo.heading, kmh:t.kmh||0, v, moving:v > 1, altNote:t.altNote||'', down:!!t.down,
+      uncertKm:mo.uncert||0, quiet:mo.quiet||0, orbit:false, ahead };
+    if(t.alt > 0) msg.alt = t.alt;
+    if(mo.progress != null){ msg.progress = mo.progress; if(t.from && t.to) msg.distKm = kmBetween(t.from[0], t.from[1], t.to[0], t.to[1]); }
+    if(!v3dTrail && Array.isArray(t.trail)){ msg.trail = t.trail; v3dTrail = true; }
+  }
+  try{ v3dF.contentWindow.postMessage(Object.assign({ wa:'target' }, msg), '*'); }catch(e){}
+}
+
 computeFit(); tick(); if(isDemo) setInterval(tick, 7000); requestAnimationFrame(frame);
 </script>
 </body>
