@@ -95,6 +95,13 @@ flutter build windows --release # build/windows/x64/runner/Release/waralarm.exe
 flutter build apk --release     # build/app/outputs/flutter-apk/app-release.apk
 ```
 
+Without a PC: every push to `main` that touches `app/` builds the APK on GitHub
+Actions (`.github/workflows/build-android.yml`) and publishes it as the
+`android-latest` release — download
+<https://github.com/MikeLiashenko/WarAllarm/releases/download/android-latest/WarAlarm.apk>.
+Set the `ANDROID_KEYSTORE_*` repository secrets (see the workflow header) so the
+APK installs over an existing copy.
+
 Requirements: Flutter 3.44+, and for Windows the "Desktop development with C++"
 Visual Studio workload.
 

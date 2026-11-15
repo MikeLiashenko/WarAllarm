@@ -1,0 +1,99 @@
+# Android .apk без ПК: GitHub собирает APK и кладёт его в релиз «android-latest».
+# Скачать (можно прямо с телефона):
+#   https://github.com/MikeLiashenko/WarAllarm/releases/download/android-latest/WarAlarm.apk
+# С веток claude/** — только артефакт запуска (вкладка Actions), релиз не трогается.
+#
+# Подпись (secrets репозитория, необязательно, но без них APK не обновит уже установленное
+# приложение — каждый раз новый debug-ключ раннера):
+#   ANDROID_KEYSTORE_BASE64   keystore в base64
+#   ANDROID_KEYSTORE_PASSWORD пароль хранилища
+#   ANDROID_KEY_ALIAS         алиас ключа
+#   ANDROID_KEY_PASSWORD      пароль ключа (если пусто — как у хранилища)
+# Чтобы APK ставился поверх версии, собранной на своём ПК, можно загрузить тот же debug-ключ:
+#   [Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\.android\debug.keystore")) | Set-Clipboard
+#   пароль: android, алиас: androiddebugkey
+name: Build Android (.apk)
+
+on:
+  push:
+    branches: [main, 'claude/**']
+    paths:
+      - 'app/**'
+      - '.github/workflows/build-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.4
+          channel: stable
+          cache: true
+
+      - name: Signing key (from secrets, optional)
+        id: sign
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: signing with a throwaway debug key (won't update an installed app)."
+            echo "signed=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.jks
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          } > android/key.properties
+          echo "signed=yes" >> "$GITHUB_OUTPUT"
+
+      - run: flutter pub get
+
+      - run: flutter build apk --release
+
+      - name: Rename
+        run: cp build/app/outputs/flutter-apk/app-release.apk WarAlarm.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WarAlarm-apk
+          path: app/WarAlarm.apk
+          retention-days: 14
+
+      - name: Publish release android-latest
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ steps.sign.outputs.signed }}
+        run: |
+          if [ "$SIGNED" = "yes" ]; then sig="Подписан ключом из secrets."; else sig="⚠️ Подписан временным debug-ключом: поверх установленной версии не встанет (сначала удалить)."; fi
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest WarAlarm.apk \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Android build ($GITHUB_REF_NAME @ ${GITHUB_SHA::7})" \
+            --notes "Скачать: https://github.com/${GITHUB_REPOSITORY}/releases/download/android-latest/WarAlarm.apk
+          $sig"
