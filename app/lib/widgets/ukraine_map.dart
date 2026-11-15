@@ -1156,15 +1156,25 @@ class _MapPainter extends CustomPainter {
 
       // Badge — faded once nothing new was heard for a while.
       final faded = mo.quietMin >= 6 || t.down || t.forecast;
-      if (faded) canvas.saveLayer(Rect.fromCircle(center: scr, radius: badgeR + 8), Paint()..color = Colors.white.withValues(alpha: 0.5));
+      // Zoomed in: a group «×3» becomes 3 icons in a wedge along the course.
+      final spread = t.amount > 1 && scale >= kSpreadScale;
+      final wing = spread
+          ? groupFormation(math.min(t.amount, kSpreadMax), mo.heading, badgeR * 2.1)
+          : const [Offset.zero];
+      final bounds = wing.fold<Rect>(Rect.fromCircle(center: scr, radius: badgeR + 8),
+          (r, o) => r.expandToInclude(Rect.fromCircle(center: scr + o, radius: badgeR + 8)));
+      if (faded) canvas.saveLayer(bounds, Paint()..color = Colors.white.withValues(alpha: 0.5));
       // No disc / ring — just the silhouette with a glow (Mike: «просто красиві іконки»).
       final picked = selectedId != null && t.id == selectedId;
       final near = (kRank[t.stage] ?? 0) >= 3 && !dimTargets;
-      _drawIcon(canvas, scr, mo.heading, cat, color, badgeR / 7.8,
-          glow: picked ? AppColors.highlight : near ? const Color(0xFFFF453A) : color,
-          glowStrength: picked ? 1.0 : near ? 0.55 + 0.45 * pulse : 0.55);
+      // Wingmen first (slightly smaller), the lead on top.
+      for (var i = wing.length - 1; i >= 0; i--) {
+        _drawIcon(canvas, scr + wing[i], mo.heading, cat, color, badgeR / 7.8 * (i == 0 ? 1 : 0.86),
+            glow: picked ? AppColors.highlight : near ? const Color(0xFFFF453A) : color,
+            glowStrength: picked ? 1.0 : near ? 0.55 + 0.45 * pulse : 0.55);
+        iconBoxes.add(Rect.fromCircle(center: scr + wing[i], radius: badgeR * 1.4));
+      }
       if (faded) canvas.restore();
-      iconBoxes.add(Rect.fromCircle(center: scr, radius: badgeR * 1.4));
       if (t.forecast) {
         _text(canvas, 'прогноз', scr + Offset(0, badgeR + 11), 9.5, color.withValues(alpha: 0.85),
             center: true, stroke: true, bold: true);
@@ -1174,8 +1184,8 @@ class _MapPainter extends CustomPainter {
             const Color(0xFFFF6B5E), center: true, stroke: true, bold: true);
       }
 
-      // ×N cluster label above the badge.
-      if (t.amount > 1) {
+      // ×N cluster label above the badge (when not spread out, or more than we draw).
+      if (t.amount > 1 && (!spread || t.amount > kSpreadMax)) {
         _text(canvas, '×${t.amount}', scr + Offset(0, -badgeR - 2), 12.5,
             AppColors.textPrimary, center: true, stroke: true, bold: true);
       }
@@ -1310,4 +1320,26 @@ class _Legend extends StatelessWidget {
       ),
     );
   }
+}
+
+/// From this zoom on, a group of N targets is drawn as N icons.
+const double kSpreadScale = 1.8;
+
+/// At most this many icons per group (more → ×N label stays).
+const int kSpreadMax = 12;
+
+/// Screen offsets of [n] icons in a wedge (like a flight): the lead at the
+/// origin, wingmen alternating left/right behind it along [headingDeg]
+/// (compass degrees, 0 = north = up). [gap] — distance between neighbours.
+List<Offset> groupFormation(int n, double headingDeg, double gap) {
+  final h = headingDeg * math.pi / 180;
+  final back = Offset(-math.sin(h), math.cos(h)); // opposite to the course
+  final side = Offset(math.cos(h), math.sin(h)); // to the right of the course
+  return [
+    for (var i = 0; i < n; i++)
+      if (i == 0)
+        Offset.zero
+      else
+        back * (((i + 1) ~/ 2) * gap * 0.8) + side * ((i.isOdd ? -1 : 1) * ((i + 1) ~/ 2) * gap * 0.72),
+  ];
 }

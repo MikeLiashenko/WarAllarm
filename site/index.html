@@ -375,6 +375,14 @@ function computeFit(){
 }
 // Вид: масштаб і зсув (колесо, щипок, перетягування, кнопки). 1 = уся країна.
 const view = { s:1, tx:0, ty:0 };
+// Група з N цілей: з цього наближення — N іконок (не більше SPREAD_MAX), інакше одна з «×N».
+const SPREAD_SCALE = 1.8, SPREAD_MAX = 12;
+// Зсуви іконок клином: ведучий у центрі, ведені по черзі ліворуч/праворуч позаду (курс у градусах, 0 = північ).
+function formation(n, hdg, gap){
+  const h = hdg*Math.PI/180, bx = -Math.sin(h), by = Math.cos(h), sx = Math.cos(h), sy = Math.sin(h), out = [[0,0]];
+  for(let i = 1; i < n; i++){ const r = (i+1)>>1, sd = i % 2 ? -1 : 1; out.push([bx*r*gap*.8 + sx*sd*r*gap*.72, by*r*gap*.8 + sy*sd*r*gap*.72]); }
+  return out;
+}
 let lastGesture = 0;
 const P = (lon, lat) => [view.tx + view.s*(fit.ox+((lon-B.lon0)/B.lonSpan)*fit.pw), view.ty + view.s*(fit.oy+((B.lat1-lat)/B.latSpan)*fit.ph)];
 const pxPerKm = () => view.s*fit.ph/B.latSpan/111;
@@ -609,13 +617,17 @@ function draw(){
     const faded = (mo.quiet||0) >= 6 || t.down || t.forecast;
     const near = ['Imminent','Overhead','Impact'].includes(t.stage);
     const dim = focusCat && cat !== focusCat;
+    // Наближено: група «×3» — це 3 іконки клином по курсу.
+    const n = t.n||1, spread = n > 1 && view.s >= SPREAD_SCALE;
+    const wing = spread ? formation(Math.min(n, SPREAD_MAX), mo.heading||0, badgeR*2.1) : [[0,0]];
     ctx.save(); if(dim) ctx.globalAlpha = .15; else if(faded) ctx.globalAlpha = .5;
-    drawIcon(x, y, mo.heading, cat, color, badgeR/7.8, near || mo.progress != null ? PAL.near : color, near ? .55+.45*pulse : .55);
+    for(let i = wing.length-1; i >= 0; i--)
+      drawIcon(x+wing[i][0], y+wing[i][1], mo.heading, cat, color, badgeR/7.8*(i ? .86 : 1), near || mo.progress != null ? PAL.near : color, near ? .55+.45*pulse : .55);
     ctx.restore();
     if(dim) continue;
     if(t.forecast) text('прогноз', x, y+badgeR+12, 10.5, hexA(color,.9), 'center');
     if(t.down) text(t.altNote || 'падає', x, y+badgeR+13, 11, '#FF6B5E', 'center');
-    if((t.n||1) > 1) text('×'+t.n, x, y-badgeR-3, 13, PAL.tx, 'center');
+    if(n > 1 && (!spread || n > SPREAD_MAX)) text('×'+n, x, y-badgeR-3, 13, PAL.tx, 'center');
   }
   // Значок цілі на підписі міста («…цьк», «ркаси») — підпис дописуємо поверх.
   if(baseView && baseView.s === view.s && baseView.tx === view.tx && baseView.ty === view.ty)
