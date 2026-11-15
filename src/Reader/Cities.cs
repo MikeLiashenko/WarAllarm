@@ -5342,30 +5342,50 @@ public static class Cities
         ("Новоселівка", 50.6764, 33.1303), // Талалаївська громада
     };
 
+    // «Біла-Церква» = «біла церква», «Кам’янське» = «Кам'янське»: регістр, апостроф, дефіс, пробіли.
+    public static string Norm(string? s) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            (s ?? "").ToLowerInvariant().Replace('’', '\'').Replace('ʼ', '\'').Replace('`', '\'').Replace('-', ' '),
+            @"\s+", " ").Trim();
+
+    static string[]? _norm;
+    static string[] Normed => _norm ??= All.Select(c => Norm(c.name)).ToArray();
+
+    /// Лише точний збіг назви (без «починається з / містить»).
+    public static (string name, double lat, double lon)? FindExact(string q)
+    {
+        var low = Norm(q);
+        var n = Normed;
+        for (int i = 0; i < All.Length; i++) if (n[i] == low) return All[i];
+        return null;
+    }
+
     /// Найкращий збіг за назвою: точний → починається з → містить.
     public static (string name, double lat, double lon)? Find(string q)
     {
-        var low = (q ?? "").Trim().ToLowerInvariant();
+        var low = Norm(q);
         if (low.Length < 2) return null;
-        (string, double, double)? starts = null, contains = null;
-        foreach (var c in All)
+        var n = Normed;
+        int starts = -1, contains = -1;
+        for (int i = 0; i < All.Length; i++)
         {
-            var n = c.name.ToLowerInvariant();
-            if (n == low) return c;
-            if (starts == null && n.StartsWith(low)) starts = c;
-            else if (contains == null && n.Contains(low)) contains = c;
+            if (n[i] == low) return All[i];
+            if (starts < 0 && n[i].StartsWith(low)) starts = i;
+            else if (contains < 0 && n[i].Contains(low)) contains = i;
         }
-        return starts ?? contains;
+        int best = starts >= 0 ? starts : contains;
+        return best >= 0 ? All[best] : null;
     }
 
     /// Кілька підказок, якщо точного міста не знайдено.
     public static List<string> Suggest(string q, int n = 6)
     {
-        var low = (q ?? "").Trim().ToLowerInvariant();
+        var low = Norm(q);
         var outp = new List<string>();
         if (low.Length < 2) return outp;
-        foreach (var c in All)
-            if (c.name.ToLowerInvariant().Contains(low)) { outp.Add(c.name); if (outp.Count >= n) break; }
+        var nn = Normed;
+        for (int i = 0; i < All.Length; i++)
+            if (nn[i].Contains(low)) { outp.Add(All[i].name); if (outp.Count >= n) break; }
         return outp;
     }
 }

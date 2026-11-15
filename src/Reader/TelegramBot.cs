@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 // ── WarAlarm · Telegram-бот (персональний) ───────────────────────────────────
 // Кожен користувач задає СВОЄ місто (пошук по великому списку ~5330 міст, як у
-// застосунку, кнопкою або геолокацією). Далі статус, ризик, карта, тривоги — по його
+// застосунку, кнопкою або геолокацією; мікрорайон чи адресу — через OSM, див. Geocode). Далі статус, ризик, карта, тривоги — по його
 // місту. Бот сам шле сповіщення в особисті, коли загроза поруч із містом користувача.
 // Токен — secrets.local.txt (telegram_bot_token=...). Окремий від каналу.
 //
@@ -43,6 +43,8 @@ public sealed class TelegramBot
     // Ключі кнопок — короткі (callback_data ≤ 64 байти, а id цілі кирилицею довший).
     readonly Dictionary<long, (string id, string last, string stage, long msg)> _tracking = new();
     readonly Dictionary<string, string> _trackKeys = new();
+    // 📍 Кілька збігів адреси — чекають на вибір кнопкою «geo:N» (у callback_data не влазить назва).
+    readonly Dictionary<long, List<Geocode.Hit>> _geoPending = new();
     long _offset;
 
     public TelegramBot(string token, BotFeatures features)
@@ -66,7 +68,7 @@ public sealed class TelegramBot
         },
         resize_keyboard = true,
         is_persistent = true,
-        input_field_placeholder = "Назва міста або кнопка нижче",
+        input_field_placeholder = "Місто, мікрорайон чи адреса",
     };
 
     static object Btn(string text, string data) => new { text, callback_data = data };
@@ -335,7 +337,8 @@ public sealed class TelegramBot
                 await Send(chat,
                     "👋 <b>Вітаю у WarAlarm!</b>\n\n"
                     + "Я стежу за повітряними загрозами й попереджаю, коли щось летить до <b>твого</b> міста.\n\n"
-                    + "<b>Обери місто</b> 👇 кнопкою, надішли геолокацію 📍 або просто напиши назву (напр. «Бровари»).",
+                    + "<b>Обери місто</b> 👇 кнопкою, надішли геолокацію 📍 або просто напиши назву (напр. «Бровари»), "
+                    + "мікрорайон чи адресу (напр. «Харків, 603-й мікрорайон», «Київ, вул. Хрещатик 22»).",
                     CityKb);
                 await Send(chat, "📍 Або поділись геолокацією — так точніше:", LocationKb);
                 return;
@@ -359,14 +362,15 @@ public sealed class TelegramBot
         }
         if (Match(text, cmd, "⬅️", "скасувати"))
         {
-            await Send(chat, hasCity ? "👌 Гаразд." : "👌 Гаразд. Місто можна обрати будь-коли — просто напиши назву.", MainKb);
+            await Send(chat, hasCity ? "👌 Гаразд." : "👌 Гаразд. Місто можна обрати будь-коли — просто напиши назву чи адресу.", MainKb);
             return;
         }
         if (Match(text, cmd, "/place", "📍", "моє місто", "мое место", "місто", "город"))
         {
             await Send(chat,
                 (hasCity ? $"📍 Зараз: <b>{H(pl!.Name)}</b>\n\n" : "")
-                + "Напиши назву міста (напр. «Львів», «Ірпінь», «Ізюм») або обери 👇", CityKb);
+                + "Напиши назву міста (напр. «Львів», «Ірпінь», «Ізюм»), мікрорайон чи адресу "
+                + "(«Харків, 603-й мікрорайон», «Дніпро, просп. Яворницького 50») або обери 👇", CityKb);
             await Send(chat, "…чи поділись геолокацією:", LocationKb);
             return;
         }
@@ -458,7 +462,7 @@ public sealed class TelegramBot
         + "<b>☰ Ще</b>\n"
         + "🎯 Ризик · 🔮 Що вночі · 🌙 Підсумок ночі · 📈 Аналітика · 📡 Джерела · 🤖 ШІ-аналіз\n\n"
         + "<b>Налаштування</b>\n"
-        + "📍 /place — змінити місто" + (place is { } p ? $" (зараз: {H(p.Name)})" : "") + "\n"
+        + "📍 /place — змінити місто (можна мікрорайон чи адресу)" + (place is { } p ? $" (зараз: {H(p.Name)})" : "") + "\n"
         + "🔕 /stop — вимкнути сповіщення\n\n"
         + "🔔 Сповіщення приходять самі: 🔴 тривога поруч → 🟢 відбій.\n"
         + "<i>Бот — допоміжний. Завжди зважай на офіційну тривогу.</i>";
@@ -488,14 +492,33 @@ public sealed class TelegramBot
 
     async Task SetPlaceByName(long chat, string text)
     {
-        var hit = Cities.Find(text);
-        if (hit is { } c) { await SetPlace(chat, new Place(c.name, c.lat, c.lon)); return; }
+        text = text.Trim();
+        if (Cities.FindExact(text) is { } exact) { await SetPlace(chat, new Place(exact.name, exact.lat, exact.lon)); return; }
+        // Назва міста (частково) — як раніше; адресу/мікрорайон не підміняємо першим-ліпшим містом.
+        bool addr = Geocode.LooksLikeAddress(text);
+        if (!addr && Cities.Find(text) is { } c) { await SetPlace(chat, new Place(c.name, c.lat, c.lon)); return; }
+
+        // Мікрорайон, вулиця, будинок — OpenStreetMap.
+        await Action(chat, "find_location");
+        var geo = text.Length >= 3 ? await Geocode.Search(text) : new List<Geocode.Hit>();
+        if (geo.Count == 1) { await SetPlace(chat, new Place(geo[0].Label, geo[0].Lat, geo[0].Lon)); return; }
+        if (geo.Count > 1)
+        {
+            _geoPending[chat] = geo;
+            await Send(chat, $"📍 Знайшов кілька місць для «{H(text)}». Яке твоє?",
+                new { inline_keyboard = geo.Select((g, i) => new[] { Btn(g.Label, $"geo:{i}") }).ToArray() });
+            return;
+        }
+        if (addr && Cities.Find(text) is { } c2) { await SetPlace(chat, new Place(c2.name, c2.lat, c2.lon)); return; }
+
         var sug = Cities.Suggest(text).Where(n => Encoding.UTF8.GetByteCount("city:" + n) <= 64).Take(6).ToList();
         if (sug.Count > 0)
             await Send(chat, $"🤔 Не знайшов «{H(text)}» точно. Може, одне з цих?",
                 new { inline_keyboard = sug.Chunk(2).Select(r => r.Select(n => Btn(n, "city:" + n)).ToArray()).ToArray() });
         else
-            await Send(chat, $"🤔 Не знайшов міста «{H(text)}».\nСпробуй інакше — українською, напр. «Біла Церква» — або надішли геолокацію 📍");
+            await Send(chat, $"🤔 Не знайшов «{H(text)}».\n"
+                + "Спробуй інакше — українською, з містом: «Біла Церква», «Харків, 603-й мікрорайон», "
+                + "«Львів, вул. Городоцька 100» — або надішли геолокацію 📍");
     }
 
     async Task SetPlaceByLocation(long chat, double lat, double lon)
@@ -515,7 +538,7 @@ public sealed class TelegramBot
         await Send(chat,
             $"✅ <b>Готово! Твоє місто — {H(p.Name)}</b>\n"
             + "🔔 Напишу, щойно загроза буде поруч, і дам відбій, коли мине.\n"
-            + "Змінити місто — просто напиши іншу назву.", MainKb);
+            + "Змінити місто — просто напиши іншу назву чи адресу.", MainKb);
         await SendStatus(chat, p);
     }
 
@@ -672,6 +695,18 @@ public sealed class TelegramBot
         {
             await AnswerCallback(cbId, "");
             await SetPlaceByName(chat, data[5..]);
+            return;
+        }
+        if (data.StartsWith("geo:"))
+        {
+            if (_geoPending.TryGetValue(chat, out var hits) && int.TryParse(data[4..], out var gi) && gi >= 0 && gi < hits.Count)
+            {
+                _geoPending.Remove(chat);
+                await AnswerCallback(cbId, "");
+                await EditMarkup(chat, msg, NoKb);
+                await SetPlace(chat, new Place(hits[gi].Label, hits[gi].Lat, hits[gi].Lon));
+            }
+            else await AnswerCallback(cbId, "Список застарів — напиши адресу ще раз");
             return;
         }
         if (data.StartsWith("upd:"))
