@@ -28,11 +28,26 @@ android {
         versionName = flutter.versionName
     }
 
+    // GitHub Actions (build-android.yml) gives the keystore via WARALARM_KEYSTORE so its APK is
+    // signed with the SAME key as the PC build and installs over it. Locally nothing is set →
+    // the debug key, as before.
+    val ciKeystore = System.getenv("WARALARM_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (ciKeystore != null) {
+            create("ci") {
+                storeFile = ciKeystore
+                storePassword = System.getenv("WARALARM_KEYSTORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("WARALARM_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword = System.getenv("WARALARM_KEY_PASSWORD") ?: "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (ciKeystore != null) "ci" else "debug")
         }
     }
 }
