@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 
 /// Screen heading: big title, optional muted subtitle, optional trailing
 /// action. The icon renders as a small tile to the left.
@@ -11,12 +10,16 @@ class SectionHeader extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.icon,
+    this.iconColor,
     this.trailing,
   });
 
   final String title;
   final String? subtitle;
   final IconData? icon;
+
+  /// Tone of the icon tile (defaults to the interactive blue).
+  final Color? iconColor;
   final Widget? trailing;
 
   @override
@@ -26,14 +29,22 @@ class SectionHeader extends StatelessWidget {
       children: [
         if (icon != null) ...[
           Container(
-            width: 40,
-            height: 40,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
-              color: AppColors.surface2,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: AppColors.border),
+              borderRadius: BorderRadius.circular(15),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  (iconColor ?? AppColors.primary).withValues(alpha: AppColors.isDark ? 0.32 : 0.20),
+                  (iconColor ?? AppColors.primary).withValues(alpha: AppColors.isDark ? 0.10 : 0.06),
+                ],
+              ),
+              border: Border.all(
+                  color: (iconColor ?? AppColors.primary).withValues(alpha: 0.35)),
             ),
-            child: Icon(icon, color: AppColors.textPrimary, size: 20),
+            child: Icon(icon, color: iconColor ?? AppColors.primary, size: 24),
           ),
           const SizedBox(width: 14),
         ],
@@ -44,8 +55,8 @@ class SectionHeader extends StatelessWidget {
               Text(
                 title,
                 style: TextStyle(
-                  fontSize: 24,
-                  height: 1.15,
+                  fontSize: 27,
+                  height: 1.12,
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary,
                   letterSpacing: -0.6,
@@ -56,7 +67,8 @@ class SectionHeader extends StatelessWidget {
                 Text(
                   subtitle!,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: 13.5,
+                    height: 1.3,
                     color: AppColors.textSecondary,
                   ),
                 ),

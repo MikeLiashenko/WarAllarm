@@ -64,15 +64,15 @@ String fmtAge(Duration d) {
 }
 
 /// Phone navigation, floating over the content: a round menu button and a
-/// glass capsule of the main destinations with a signal-yellow indicator.
+/// glass capsule of the main destinations (icon + short label, active pill).
 class FloatingNavBar extends StatelessWidget {
   const FloatingNavBar({super.key});
 
   static const _items = [
     AppTab.now,
     AppTab.map,
+    AppTab.analytics,
     AppTab.myPlaces,
-    AppTab.chat,
     AppTab.settings,
   ];
 
@@ -83,17 +83,17 @@ class FloatingNavBar extends StatelessWidget {
       children: [
         GlassIconButton(
           icon: Icons.menu_rounded,
-          size: 54,
+          size: 58,
           tooltip: 'Меню',
           onTap: () => showAppMenu(context),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: Glass(
-            radius: 27,
-            padding: const EdgeInsets.symmetric(horizontal: 6),
+            radius: 29,
+            padding: const EdgeInsets.symmetric(horizontal: 5),
             child: SizedBox(
-              height: 54,
+              height: 58,
               child: Row(
                 children: [
                   for (final t in _items)
@@ -114,6 +114,15 @@ class FloatingNavBar extends StatelessWidget {
   }
 }
 
+/// Short labels that fit under a nav icon.
+String _shortLabel(AppTab t) => switch (t) {
+      AppTab.myPlaces => 'Місця',
+      AppTab.settings => 'Опції',
+      AppTab.ai => 'ШІ',
+      AppTab.apiKeys => 'API',
+      _ => t.label,
+    };
+
 class _NavIcon extends StatelessWidget {
   const _NavIcon({
     required this.tab,
@@ -129,48 +138,68 @@ class _NavIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final indicator = AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      width: vertical ? 3 : (active ? 18 : 0),
-      height: vertical ? (active ? 18 : 0) : 3,
-      decoration: BoxDecoration(
-        color: AppColors.highlight,
-        borderRadius: BorderRadius.circular(2),
-      ),
+    final fg = active ? AppColors.primary : AppColors.textSecondary;
+    final body = Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          width: vertical ? 54 : 46,
+          height: vertical ? 34 : 28,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(17),
+            gradient: active
+                ? LinearGradient(
+                    colors: [
+                      AppColors.primary.withValues(alpha: AppColors.isDark ? 0.30 : 0.18),
+                      AppColors.accent.withValues(alpha: AppColors.isDark ? 0.18 : 0.10),
+                    ],
+                  )
+                : null,
+          ),
+          child: Icon(active ? tab.activeIcon : tab.icon, size: vertical ? 22 : 21, color: fg),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          _shortLabel(tab),
+          maxLines: 1,
+          overflow: TextOverflow.fade,
+          softWrap: false,
+          style: TextStyle(
+            fontSize: vertical ? 11 : 10.5,
+            height: 1.1,
+            fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+            color: active ? AppColors.textPrimary : AppColors.textMuted,
+          ),
+        ),
+      ],
     );
-    final icon = Icon(active ? tab.activeIcon : tab.icon,
-        size: 23,
-        color: active ? AppColors.textPrimary : AppColors.textSecondary);
     return Tooltip(
       message: tab.label,
+      waitDuration: const Duration(milliseconds: 600),
       child: InkResponse(
         onTap: onTap,
-        radius: 26,
-        child: SizedBox(
-          height: 54,
-          width: 54,
-          child: vertical
-              ? Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [indicator, const SizedBox(width: 8), icon, const SizedBox(width: 11)],
-                )
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [icon, const SizedBox(height: 5), indicator],
-                ),
-        ),
+        radius: 30,
+        highlightShape: BoxShape.rectangle,
+        borderRadius: BorderRadius.circular(16),
+        child: SizedBox(height: vertical ? 64 : 58, width: vertical ? 80 : null, child: body),
       ),
     );
   }
 }
 
-/// Desktop navigation: a vertical glass rail floating at the left edge.
+/// Tablet / desktop navigation: a vertical glass rail with labelled icons.
 class FloatingRail extends StatelessWidget {
   const FloatingRail({super.key});
+
+  static const width = 88.0;
 
   static const _items = [
     AppTab.now,
     AppTab.map,
+    AppTab.analytics,
     AppTab.myPlaces,
     AppTab.chat,
     AppTab.ai,
@@ -184,30 +213,38 @@ class FloatingRail extends StatelessWidget {
     final theme = context.watch<ThemeController>();
     return Glass(
       radius: 30,
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Padding(
-            padding: EdgeInsets.only(top: 4, bottom: 10),
-            child: BrandMark(size: 38),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+      child: SizedBox(
+        width: width - 8,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 2, bottom: 10),
+                child: BrandMark(size: 40),
+              ),
+              for (final t in _items)
+                _NavIcon(
+                  tab: t,
+                  active: nav.tab == t,
+                  vertical: true,
+                  onTap: () => nav.select(t),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 18),
+                child: Divider(height: 1, color: AppColors.glassBorder),
+              ),
+              IconButton(
+                tooltip: theme.dark ? 'Світла тема' : 'Темна тема',
+                onPressed: theme.toggle,
+                icon: Icon(
+                    theme.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                    size: 20),
+              ),
+            ],
           ),
-          for (final t in _items)
-            _NavIcon(
-              tab: t,
-              active: nav.tab == t,
-              vertical: true,
-              onTap: () => nav.select(t),
-            ),
-          const SizedBox(height: 6),
-          IconButton(
-            tooltip: theme.dark ? 'Світла тема' : 'Темна тема',
-            onPressed: theme.toggle,
-            icon: Icon(
-                theme.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-                size: 20),
-          ),
-        ],
+        ),
       ),
     );
   }

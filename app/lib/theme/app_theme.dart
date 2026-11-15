@@ -66,7 +66,8 @@ class AppTheme {
       visualDensity: VisualDensity.standard,
     );
     final shape = RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.md));
+        borderRadius: BorderRadius.circular(14));
+    const btnSize = Size(64, 50);
 
     return base.copyWith(
       textTheme: base.textTheme.apply(
@@ -84,7 +85,8 @@ class AppTheme {
           backgroundColor: AppColors.primary,
           foregroundColor: AppColors.onPrimary,
           elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          minimumSize: btnSize,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           shape: shape,
           textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
         ),
@@ -93,7 +95,8 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.primary,
           foregroundColor: AppColors.onPrimary,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          minimumSize: btnSize,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           shape: shape,
           textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
         ),
@@ -101,8 +104,10 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.textPrimary,
+          backgroundColor: AppColors.surface2,
           side: BorderSide(color: AppColors.border),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          minimumSize: btnSize,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           shape: shape,
           textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
         ),
@@ -110,6 +115,7 @@ class AppTheme {
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: AppColors.primaryDark,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           shape: shape,
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
         ),
@@ -127,10 +133,15 @@ class AppTheme {
       ),
       sliderTheme: SliderThemeData(
         activeTrackColor: AppColors.primary,
-        inactiveTrackColor: AppColors.surface2,
-        thumbColor: AppColors.primary,
-        overlayColor: AppColors.primary.withValues(alpha: 0.12),
-        trackHeight: 4,
+        inactiveTrackColor: AppColors.textMuted.withValues(alpha: 0.18),
+        thumbColor: Colors.white,
+        overlayColor: AppColors.primary.withValues(alpha: 0.16),
+        trackHeight: 6,
+        // Divisions used to draw a row of dots along the track — clutter.
+        tickMarkShape: SliderTickMarkShape.noTickMark,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 11, elevation: 3, pressedElevation: 5),
+        valueIndicatorColor: AppColors.primary,
+        showValueIndicator: ShowValueIndicator.onDrag,
       ),
       checkboxTheme: CheckboxThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),

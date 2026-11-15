@@ -52,10 +52,11 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SectionHeader(
+          SectionHeader(
             title: 'Чат',
             subtitle: 'Діліться новинами з людьми поруч',
-            icon: Icons.forum_outlined,
+            icon: Icons.forum_rounded,
+            iconColor: AppColors.accent,
           ),
           const SizedBox(height: 16),
           Expanded(
@@ -67,8 +68,34 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               child: messages.isEmpty
                   ? Center(
-                      child: Text('Поки що повідомлень немає',
-                          style: TextStyle(color: AppColors.textSecondary)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppColors.primary.withValues(alpha: 0.12),
+                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                              ),
+                              child: Icon(Icons.forum_rounded, size: 32, color: AppColors.primary),
+                            ),
+                            const SizedBox(height: 16),
+                            Text('Поки що тихо',
+                                style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.textPrimary)),
+                            const SizedBox(height: 6),
+                            Text('Напиши першим — що чути й видно у твоєму районі.\nБез паніки та без позицій ЗСУ 🇺🇦',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(height: 1.4, color: AppColors.textSecondary)),
+                          ],
+                        ),
+                      ),
                     )
                   : ListView.builder(
                       controller: _scroll,
@@ -202,7 +229,7 @@ class _Composer extends StatelessWidget {
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => onSend(),
             decoration: const InputDecoration(
-              hintText: 'Type a message…',
+              hintText: 'Написати повідомлення…',
             ),
           ),
         ),

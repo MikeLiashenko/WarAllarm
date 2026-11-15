@@ -29,10 +29,11 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SectionHeader(
+          SectionHeader(
             title: 'API · Дані',
             subtitle: 'Живі дані у JSON — цілі, тривоги, стан. Без ключа.',
             icon: Icons.data_object_rounded,
+            iconColor: AppColors.warn,
           ),
           const SizedBox(height: 16),
 

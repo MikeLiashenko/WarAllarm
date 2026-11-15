@@ -102,10 +102,11 @@ class _AiScreenState extends State<AiScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SectionHeader(
+          SectionHeader(
             title: 'ШІ · аналіз загроз',
             subtitle: 'Розумний висновок, ризик, прогноз курсу та патерни',
             icon: Icons.auto_awesome_rounded,
+            iconColor: AppColors.night,
           ),
           const SizedBox(height: 18),
 

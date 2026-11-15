@@ -15,6 +15,7 @@ import '../widgets/boom_prompt.dart';
 import '../widgets/floating_nav.dart';
 import '../widgets/responsive.dart';
 import 'ai_screen.dart';
+import 'analytics_screen.dart';
 import 'api_keys_screen.dart';
 import 'chat_screen.dart';
 import 'map_screen.dart';
@@ -93,6 +94,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     final screens = <Widget>[
       NowScreen(),
       MapScreen(),
+      AnalyticsScreen(),
       MyPlacesScreen(),
       ChatScreen(),
       AiScreen(),
@@ -103,8 +105,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // The floating nav covers part of the screen: hand that to the screens as
     // extra safe-area padding, so PageBody/SafeArea keep content clear of it.
     final navPad = phone
-        ? mq.padding.copyWith(bottom: mq.padding.bottom + 78)
-        : mq.padding.copyWith(left: mq.padding.left + 96);
+        ? mq.padding.copyWith(bottom: mq.padding.bottom + 84)
+        : mq.padding.copyWith(left: mq.padding.left + FloatingRail.width + 22);
 
     final content = MediaQuery(
       data: mq.copyWith(padding: navPad, viewPadding: navPad),

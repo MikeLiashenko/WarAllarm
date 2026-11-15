@@ -27,10 +27,11 @@ class SettingsScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SectionHeader(
+          SectionHeader(
             title: 'Налаштування',
             subtitle: 'Тривога, сповіщення, вигляд',
             icon: Icons.tune_rounded,
+            iconColor: AppColors.textSecondary,
           ),
           const SizedBox(height: 18),
 
@@ -478,7 +479,8 @@ class _TestSirenButton extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.w700)),
           style: OutlinedButton.styleFrom(
             foregroundColor: AppColors.threatDark,
-            side: BorderSide(color: AppColors.threatSoft),
+            backgroundColor: AppColors.threat.withValues(alpha: AppColors.isDark ? 0.12 : 0.08),
+            side: BorderSide(color: AppColors.threat.withValues(alpha: 0.55)),
             padding: const EdgeInsets.symmetric(vertical: 14),
           ),
         ),

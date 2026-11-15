@@ -13,7 +13,7 @@ class GlassContainer extends StatelessWidget {
     required this.child,
     this.padding = const EdgeInsets.all(18),
     this.margin,
-    this.borderRadius = AppRadii.lg,
+    this.borderRadius = AppRadii.xl - 2,
     this.blur = 0,
     this.color,
     this.borderColor,
@@ -36,6 +36,19 @@ class GlassContainer extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: color ?? AppColors.surface,
+        // A faint top-lit sheen so panels read as raised cards, not flat boxes.
+        gradient: color == null
+            ? LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color.alphaBlend(
+                      Colors.white.withValues(alpha: AppColors.isDark ? 0.035 : 0.0),
+                      AppColors.surface),
+                  AppColors.surface,
+                ],
+              )
+            : null,
         borderRadius: radius,
         border: Border.all(color: borderColor ?? AppColors.border),
         boxShadow: AppColors.isDark

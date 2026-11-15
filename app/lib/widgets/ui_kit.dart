@@ -313,8 +313,9 @@ class IconTile extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: AppColors.isDark ? 0.14 : 0.11),
-        borderRadius: BorderRadius.circular(AppRadii.md - 2),
+        color: color.withValues(alpha: AppColors.isDark ? 0.15 : 0.11),
+        borderRadius: BorderRadius.circular(size * 0.3),
+        border: Border.all(color: color.withValues(alpha: AppColors.isDark ? 0.22 : 0.16)),
       ),
       child: Icon(icon, color: color, size: size * 0.5),
     );
@@ -337,10 +338,10 @@ class Segmented<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppRadii.md - 2),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
       child: Row(
@@ -353,22 +354,23 @@ class Segmented<T> extends StatelessWidget {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
                 decoration: BoxDecoration(
-                  color: it.$1 == value ? AppColors.surface : Colors.transparent,
-                  borderRadius: BorderRadius.circular(7),
-                  border: Border.all(
-                      color: it.$1 == value
-                          ? AppColors.border
-                          : Colors.transparent),
+                  gradient: it.$1 == value
+                      ? LinearGradient(colors: [AppColors.primary, Color.lerp(AppColors.primary, AppColors.accent, 0.45)!])
+                      : null,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: it.$1 == value
+                      ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 3))]
+                      : null,
                 ),
                 child: Text(it.$2,
                     style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
                         color: it.$1 == value
-                            ? AppColors.textPrimary
-                            : AppColors.textMuted)),
+                            ? Colors.white
+                            : AppColors.textSecondary)),
               ),
             ),
         ],

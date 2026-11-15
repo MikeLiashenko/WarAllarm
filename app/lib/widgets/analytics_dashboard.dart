@@ -1,232 +1,81 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../controllers/nav_controller.dart';
 import '../domain/analytics.dart';
 import '../models/analytics_row.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import 'charts.dart';
 import 'glass_container.dart';
-import 'ui_kit.dart';
 
-/// Analytics dashboard ported from the Reader's `map.html` — KPIs + charts by
-/// day, hour and threat type, computed from the alarm journal (`rows`).
-class AnalyticsDashboard extends StatefulWidget {
-  const AnalyticsDashboard({
-    super.key,
-    required this.rows,
-    required this.targetsNow,
-  });
+/// Compact «last 7 days» analytics card for the home screen; the full
+/// dashboard lives on its own tab (AnalyticsScreen).
+class AnalyticsDashboard extends StatelessWidget {
+  const AnalyticsDashboard({super.key, required this.rows, required this.targetsNow});
 
   final List<AnalyticsRow> rows;
   final int targetsNow;
 
   @override
-  State<AnalyticsDashboard> createState() => _AnalyticsDashboardState();
-}
-
-class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
-  String _period = '30';
-  static const _periods = [('7', '7 днів'), ('30', '30 днів'), ('90', '90 днів'), ('all', 'Усе')];
-
-  @override
   Widget build(BuildContext context) {
-    final rows = rowsIn(widget.rows, _period);
-    final alarms = rows.where((r) => !r.isImpact).toList();
-    final kpi = computeKpis(rows, _period);
+    final s = AnalyticsSummary.compute(rows, '7');
+    final d = AnalyticsSummary.delta(s.alarms, s.prevAlarms);
+    void open() => context.read<NavController>().select(AppTab.analytics);
+
+    Widget stat(String v, String l, Color c) => Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(v, style: AppText.number(24, color: c)),
+              const SizedBox(height: 3),
+              Text(l, style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+            ],
+          ),
+        );
 
     return GlassContainer(
-      padding: const EdgeInsets.all(20),
+      onTap: open,
+      padding: const EdgeInsets.all(18),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Text('Аналітика тривог',
-                  style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
-                      color: AppColors.textPrimary)),
-              const Spacer(),
-              _periodTabs(),
+              Icon(Icons.insights_rounded, size: 20, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Аналітика · 7 днів',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
+                        color: AppColors.textPrimary)),
+              ),
+              TextButton.icon(
+                onPressed: open,
+                iconAlignment: IconAlignment.end,
+                icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                label: const Text('Відкрити'),
+              ),
             ],
           ),
-          const SizedBox(height: 16),
-          _kpiRow(kpi),
-          const SizedBox(height: 20),
-          _barChart(
-            'Тривоги по днях',
-            'пік ${byDay(alarms, _period).map((e) => e.$2).fold(0, (a, b) => a > b ? a : b)}/день',
-            byDay(alarms, _period).map((e) => e.$2).toList(),
-            AppColors.primary,
-            firstLabel: byDay(alarms, _period).first.$1.substring(5),
-            lastLabel: byDay(alarms, _period).last.$1.substring(5),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              stat('${s.alarms}', d == null ? 'тривог' : 'тривог · ${d > 0 ? '+' : ''}$d%', AppColors.warn),
+              stat('${s.impacts}', 'прильотів', AppColors.threat),
+              stat('${(s.nightShare * 100).round()}%', 'вночі', AppColors.night),
+              stat('$targetsNow', 'цілей зараз', AppColors.primary),
+            ],
           ),
-          const SizedBox(height: 18),
-          _barChart(
-            'За годиною доби',
-            'коли найчастіше тривоги',
-            byHour(alarms),
-            AppColors.warn,
-            firstLabel: '00',
-            midLabel: '12',
-            lastLabel: '23',
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 56,
+            child: Sparkline(s.daily.map((e) => e.$2).toList(), color: AppColors.warn, height: 56),
           ),
-          const SizedBox(height: 18),
-          _typeBars(alarms),
         ],
       ),
-    );
-  }
-
-  Widget _periodTabs() => Segmented<String>(
-        value: _period,
-        items: _periods,
-        onChanged: (p) => setState(() => _period = p),
-      );
-
-  Widget _kpiRow(AnalyticsKpis k) {
-    final tiles = [
-      ('${k.alarms}', 'Тривог', AppColors.threat),
-      ('${k.impacts}', 'Прильотів', AppColors.threat),
-      ('${widget.targetsNow}', 'Цілей зараз', AppColors.primary),
-      ('${k.daysWithAlarms}', 'Днів з тривогами', AppColors.textPrimary),
-      (k.avgPerDay.toStringAsFixed(1), 'Сер. за день', AppColors.warn),
-    ];
-    return LayoutBuilder(builder: (context, c) {
-      final cols = c.maxWidth >= 640 ? 5 : (c.maxWidth >= 380 ? 3 : 2);
-      final w = (c.maxWidth - (cols - 1) * 10) / cols;
-      return Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: [
-          for (final t in tiles)
-            Container(
-              width: w,
-              padding: const EdgeInsets.fromLTRB(14, 12, 12, 14),
-              decoration: BoxDecoration(
-                color: AppColors.surface2,
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Metric(value: t.$1, label: t.$2, color: t.$3, size: 24),
-            ),
-        ],
-      );
-    });
-  }
-
-  Widget _barChart(String title, String sub, List<int> values, Color color,
-      {String? firstLabel, String? midLabel, String? lastLabel}) {
-    final max = values.fold(1, (a, b) => a > b ? a : b);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title,
-            style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary)),
-        Text(sub,
-            style: TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 90,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              for (final v in values)
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 0.8),
-                    child: Container(
-                      height: (v / max * 90).clamp(2, 90).toDouble(),
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: v == 0 ? 0.15 : 0.9),
-                        borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(2)),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 5),
-        Row(
-          children: [
-            Text(firstLabel ?? '',
-                style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
-            const Spacer(),
-            if (midLabel != null)
-              Text(midLabel,
-                  style:
-                      TextStyle(fontSize: 10, color: AppColors.textMuted)),
-            const Spacer(),
-            Text(lastLabel ?? '',
-                style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _typeBars(List<AnalyticsRow> alarms) {
-    final data = byField(alarms, true);
-    final max = data.isEmpty ? 1 : data.first.$2;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('За типами загроз',
-            style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary)),
-        const SizedBox(height: 12),
-        if (data.isEmpty)
-          Text('немає даних за період',
-              style: TextStyle(fontSize: 12.5, color: AppColors.textMuted))
-        else
-          for (final e in data)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 92,
-                    child: Text(kKindMeta[e.$1]?.name ?? e.$1,
-                        style: TextStyle(
-                            fontSize: 12.5, color: AppColors.textSecondary),
-                        overflow: TextOverflow.ellipsis),
-                  ),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: Container(
-                        height: 16,
-                        color: AppColors.divider,
-                        alignment: Alignment.centerLeft,
-                        child: FractionallySizedBox(
-                          widthFactor: (e.$2 / max).clamp(0.02, 1),
-                          child: Container(
-                            color: kKindMeta[e.$1]?.color ?? AppColors.primary,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 30,
-                    child: Text('${e.$2}',
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary)),
-                  ),
-                ],
-              ),
-            ),
-      ],
     );
   }
 }

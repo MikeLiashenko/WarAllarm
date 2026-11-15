@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/alerts_controller.dart';
+import '../controllers/map_data_controller.dart';
 import '../controllers/places_controller.dart';
+import '../controllers/settings_controller.dart';
+import '../domain/motion.dart';
+import '../domain/probability.dart';
+import '../models/monitored_place.dart';
 import '../data/places_gazetteer.dart';
 import '../data/ukraine_geo.dart';
 import '../models/saved_place.dart';
@@ -42,7 +48,9 @@ class MyPlacesScreen extends StatelessWidget {
           SectionHeader(
             title: 'Мої місця',
             subtitle: 'Міста й райони, за якими стежить тривога',
-            trailing: ElevatedButton.icon(
+            icon: Icons.place_rounded,
+            iconColor: AppColors.safe,
+            trailing: FilledButton.icon(
               onPressed: () => _showAddDialog(context, controller),
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Додати'),
@@ -84,7 +92,7 @@ class MyPlacesScreen extends StatelessWidget {
                     crossAxisCount: columns,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    mainAxisExtent: 84,
+                    mainAxisExtent: 124,
                   ),
                   itemBuilder: (context, i) =>
                       _PlaceCard(place: places[i], controller: controller),
@@ -233,66 +241,133 @@ class _PlaceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final data = context.watch<MapDataController>();
+    final alerts = context.watch<AlertsController>();
+    final settings = context.watch<SettingsController>();
+    final mp = MonitoredPlace(id: place.id, icon: '', name: place.name, lat: place.lat, lon: place.lng);
+    final level = officialLevelFor(mp, alerts.oblastWhole, alerts.raions);
+    final dists = data.isDemo
+        ? <double>[]
+        : (data.targets.map((t) => kmBetween(place.lat, place.lng, t.lat, t.lon)).toList()..sort());
+    final near = dists.where((d) => d <= settings.alarmRadiusKm * 2).length;
+    final nearest = dists.isEmpty ? null : dists.first;
+
+    final (tone, status) = level == 'red'
+        ? (AppColors.threat, 'Повітряна тривога')
+        : level == 'yellow'
+            ? (AppColors.warn, 'Тривога в частині області')
+            : near > 0
+                ? (AppColors.warn, 'Цілі поруч: $near')
+                : (AppColors.safe, 'Спокійно');
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(color: AppColors.border),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.alphaBlend(tone.withValues(alpha: AppColors.isDark ? 0.10 : 0.06), AppColors.surface),
+            AppColors.surface,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(AppRadii.xl - 2),
+        border: Border.all(color: tone.withValues(alpha: level == null && near == 0 ? 0.18 : 0.45)),
       ),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          IconTile(Icons.location_city_rounded,
-              color: place.notify ? AppColors.primary : AppColors.textMuted,
-              size: 42),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  place.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                  ),
+          Row(
+            children: [
+              IconTile(Icons.location_city_rounded, color: place.notify ? tone : AppColors.textMuted, size: 44),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      place.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        LiveDot(color: tone, size: 7, pulse: level != null || near > 0),
+                        Flexible(
+                          child: Text(status,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: tone)),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  place.region.isEmpty
-                      ? '${place.lat.toStringAsFixed(3)}, ${place.lng.toStringAsFixed(3)}'
-                      : place.region,
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textMuted,
-                      fontFeatures: AppText.tabular),
-                  overflow: TextOverflow.ellipsis,
+              ),
+              IconButton(
+                tooltip: place.notify ? 'Сповіщення увімкнено' : 'Сповіщення вимкнено',
+                onPressed: () => controller.toggleNotify(place.id),
+                style: IconButton.styleFrom(
+                  backgroundColor: place.notify
+                      ? AppColors.primary.withValues(alpha: 0.14)
+                      : AppColors.surface2,
                 ),
-              ],
-            ),
+                icon: Icon(
+                  place.notify ? Icons.notifications_active_rounded : Icons.notifications_off_outlined,
+                  color: place.notify ? AppColors.primary : AppColors.textMuted,
+                  size: 21,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Видалити',
+                onPressed: () => controller.remove(place.id),
+                icon: Icon(Icons.delete_outline_rounded, color: AppColors.textMuted, size: 21),
+              ),
+            ],
           ),
-          IconButton(
-            tooltip: place.notify ? 'Сповіщення увімкнено' : 'Сповіщення вимкнено',
-            onPressed: () => controller.toggleNotify(place.id),
-            icon: Icon(
-              place.notify
-                  ? Icons.notifications_active_rounded
-                  : Icons.notifications_off_outlined,
-              color: place.notify ? AppColors.primary : AppColors.textMuted,
-            ),
-          ),
-          IconButton(
-            tooltip: 'Видалити',
-            onPressed: () => controller.remove(place.id),
-            icon: Icon(Icons.delete_outline_rounded,
-                color: AppColors.textMuted),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _chip(Icons.near_me_rounded,
+                  nearest == null ? 'цілей немає' : 'найближча ${nearest.round()} км'),
+              const SizedBox(width: 8),
+              _chip(Icons.public_rounded, place.region.isEmpty ? 'Україна' : place.region),
+            ],
           ),
         ],
       ),
     );
   }
+
+  Widget _chip(IconData icon, String text) => Flexible(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: AppColors.textPrimary.withValues(alpha: AppColors.isDark ? 0.05 : 0.04),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 13, color: AppColors.textMuted),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary, fontFeatures: AppText.tabular)),
+              ),
+            ],
+          ),
+        ),
+      );
 }
