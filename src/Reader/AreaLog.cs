@@ -247,24 +247,39 @@ public static class AreaLog
                 if (now - sp.Start < TimeSpan.FromMinutes(5)) continue; // фід запізнюється
                 bool whole = snap.ByOblastWhole?.ContainsKey(sp.Obl) == true;
                 bool active = sp.Lat is null ? whole || raions.Contains(Napo(sp.Unit)) : snap.ByPolygon.ContainsKey(sp.Obl);
-                if (active) continue;
+                if (active) { Miss.Remove(k); continue; }
+                // Один порожній опит API — ще не відбій (фід буває неповним): лише двічі поспіль.
+                Miss[k] = Miss.GetValueOrDefault(k) + 1;
+                if (Miss[k] < 2) continue;
+                Miss.Remove(k);
                 sp.End = now;
                 Open.Remove(k);
                 Dirty.Add((sp.Obl, Day(sp.Start)));
                 _changed = true;
             }
+            var seenNow = new HashSet<string>();
             foreach (var (raion, lvl) in snap.ByRaion ?? new())
             {
                 if (snap.RaionObl?.TryGetValue(raion, out var obl) != true || obl is null) continue;
                 if (Open.Keys.Any(k => k.StartsWith(obl + "|", StringComparison.OrdinalIgnoreCase) && Napo(k[(obl.Length + 1)..]) == Napo(raion))) continue;
-                var s = new Span { Obl = obl, Unit = raion, Start = now, Level = lvl == "red" ? 2 : 1 };
+                // Тривоги нема в каналі, але є в API — відкриваємо, коли видно двічі поспіль
+                // (пост каналу зазвичай приходить раніше; час початку — перший опит).
+                var key = obl + "|" + raion;
+                seenNow.Add(key);
+                if (!Seen.TryGetValue(key, out var first)) { Seen[key] = now; continue; }
+                var s = new Span { Obl = obl, Unit = raion, Start = first, Level = lvl == "red" ? 2 : 1 };
                 Spans.Add(s);
                 Open[obl + "|" + raion] = s;
-                Dirty.Add((obl, Day(now)));
+                Seen.Remove(key);
+                Dirty.Add((obl, Day(first)));
                 _changed = true;
             }
+            foreach (var k in Seen.Keys.Where(k => !seenNow.Contains(k)).ToList()) Seen.Remove(k);
+            foreach (var k in Miss.Keys.Where(k => !Open.ContainsKey(k)).ToList()) Miss.Remove(k);
         }
     }
+    static readonly Dictionary<string, int> Miss = new();        // відкрита тривога, якої нема в API: скільки опитів поспіль
+    static readonly Dictionary<string, DateTime> Seen = new();   // район є в API, а в нас — ні: коли вперше побачили
 
     // ── Диск ────────────────────────────────────────────────────────────────
     static long Ms(DateTime t) => new DateTimeOffset(t).ToUnixTimeMilliseconds();

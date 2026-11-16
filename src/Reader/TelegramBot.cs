@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -37,19 +38,19 @@ public sealed class TelegramBot
 
     readonly string _api;
     readonly BotFeatures _f;
-    readonly Dictionary<long, Place?> _users = new();      // chat → місто (null = ще не задано)
-    readonly Dictionary<long, int> _radius = new();        // 📏 радіус зони тривоги, км (нема — типовий, як у застосунку)
+    readonly ConcurrentDictionary<long, Place?> _users = new();      // chat → місто (null = ще не задано)
+    readonly ConcurrentDictionary<long, int> _radius = new();        // 📏 радіус зони тривоги, км (нема — типовий, як у застосунку)
     public const int RadiusDefault = 25, RadiusMin = 5, RadiusMax = 100;
     static readonly int[] RadiusChoices = { 5, 10, 15, 20, 25, 30, 40, 50, 70, 100 };
     int RadiusOf(long chat) => _radius.TryGetValue(chat, out var r) ? r : RadiusDefault;
-    readonly Dictionary<long, bool> _lastAlarm = new();    // для фронта тривоги
-    readonly Dictionary<long, DateTime> _calmSince = new(); // відбій — лише після ≥60 с тиші (без «тривога-відбій-тривога»)
+    readonly ConcurrentDictionary<long, bool> _lastAlarm = new();    // для фронта тривоги
+    readonly ConcurrentDictionary<long, DateTime> _calmSince = new(); // відбій — лише після ≥60 с тиші (без «тривога-відбій-тривога»)
     // 🛰 Стеження: chat → (id цілі, останній опис, стадія, повідомлення, яке редагуємо).
     // Ключі кнопок — короткі (callback_data ≤ 64 байти, а id цілі кирилицею довший).
-    readonly Dictionary<long, (string id, string last, string stage, long msg)> _tracking = new();
-    readonly Dictionary<string, string> _trackKeys = new();
+    readonly ConcurrentDictionary<long, (string id, string last, string stage, long msg)> _tracking = new();
+    readonly ConcurrentDictionary<string, string> _trackKeys = new();
     // 📍 Кілька збігів адреси — чекають на вибір кнопкою «geo:N» (у callback_data не влазить назва).
-    readonly Dictionary<long, List<Geocode.Hit>> _geoPending = new();
+    readonly ConcurrentDictionary<long, List<Geocode.Hit>> _geoPending = new();
     long _offset;
 
     public TelegramBot(string token, BotFeatures features)
@@ -872,9 +873,10 @@ public sealed class TelegramBot
         catch { }
     }
 
+    readonly object _saveLock = new();
     void SaveSubs()
     {
-        try
+        lock (_saveLock) try
         {
             var sb = new StringBuilder("{");
             bool first = true;
@@ -892,4 +894,10 @@ public sealed class TelegramBot
         }
         catch { }
     }
+}
+
+// Бот обробляє команди й фонові тривоги паралельно — словники користувачів спільні.
+static class ConcurrentDictExt
+{
+    public static bool Remove<TK, TV>(this ConcurrentDictionary<TK, TV> d, TK key) where TK : notnull => d.TryRemove(key, out _);
 }

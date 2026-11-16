@@ -34,11 +34,37 @@ class AreaLogController extends ChangeNotifier {
     }
   }
 
+  static String _day(DateTime t) =>
+      '${t.year.toString().padLeft(4, '0')}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
+
   Future<void> _load(String obl) async {
     _loading.add(obl);
     try {
-      final v = await _rtdb.getOnce('areaLog/${Uri.encodeComponent(obl)}');
-      _nodes[obl] = v is Map ? v : const {};
+      final path = 'areaLog/${Uri.encodeComponent(obl)}';
+      final have = _nodes[obl];
+      if (have == null || have.isEmpty) {
+        // Перший раз — уся історія області (≤60 днів).
+        final v = await _rtdb.getOnce(path);
+        _nodes[obl] = v is Map ? Map<dynamic, dynamic>.of(v) : <dynamic, dynamic>{};
+      } else {
+        // Далі — лише останні 3 дні (тривога триває ≤30 год і пишеться в день початку).
+        final now = DateTime.now();
+        final upd = Map<dynamic, dynamic>.of(have);
+        for (var i = 0; i < 3; i++) {
+          final d = _day(now.subtract(Duration(days: i)));
+          final v = await _rtdb.getOnce('$path/$d');
+          if (v is Map) {
+            upd[d] = v;
+          } else {
+            upd.remove(d);
+          }
+        }
+        // Старше 61 дня сервер видаляє — і ми теж.
+        final cut = _day(now.subtract(const Duration(days: 61)));
+        upd.removeWhere((k, _) => k.toString().compareTo(cut) < 0);
+        _nodes[obl] = upd;
+      }
+      _version++;
       _fetched[obl] = DateTime.now();
       _failed = false;
     } catch (_) {
@@ -56,14 +82,25 @@ class AreaLogController extends ChangeNotifier {
         return obl != null && (_nodes[obl]?.isNotEmpty ?? false);
       });
 
-  /// Записи аналітики всіх [places] (zone = назва місця).
+  int _version = 0;
+  String? _memoKey;
+  List<AnalyticsRow> _memo = const [];
+
+  /// Записи аналітики всіх [places] (zone = назва місця). Кеш — до нових даних
+  /// чи іншого списку місць (екран перебудовується щосекунди).
   List<AnalyticsRow> rowsFor(List<MonitoredPlace> places) {
+    final now = DateTime.now();
+    final key = '$_version|${now.hour}:${now.minute}|'
+        '${places.map((p) => '${p.name}@${p.lat},${p.lon}').join(';')}';
+    if (key == _memoKey) return _memo;
     final rows = <AnalyticsRow>[];
     for (final p in places) {
       final obl = OblastLookup.instance.nameAt(p.lat, p.lon);
       if (obl == null) continue;
       rows.addAll(placeRows(p, _nodes[obl]));
     }
+    _memoKey = key;
+    _memo = rows;
     return rows;
   }
 }

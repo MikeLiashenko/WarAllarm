@@ -2662,11 +2662,18 @@ async Task OnUpdate(Update update)
     catch { /* неизвестный peer — пропустим */ }
     bool isUaPrivate = chId != 0 && privateUaIds.Contains(chId); // приватна Розвідка неба тощо
     var src = uname is { Length: > 0 } ? "@" + uname : title ?? "?";
-    var time = m.date.ToString("HH:mm:ss");
+    var time = m.date.ToLocalTime().ToString("HH:mm:ss"); // m.date — UTC, а лог — київський
     var oneLine = m.message.Replace("\n", " ").Trim();
     if (chId != 0) Journal.Post(uname ?? title ?? chId.ToString(), m.id, m.date.ToLocalTime(), m.message); // 📒 кожен пост — у журнал
     // 📈 Тривоги по районах і громадах — історія для аналітики будь-якого місця.
     if (string.Equals(uname, AreaLog.Channel, StringComparison.OrdinalIgnoreCase)) AreaLog.Ingest(m.message, m.date.ToLocalTime());
+    // Після перезапуску Telegram досилає пропущене: старий пост — у журнал/історію (вище),
+    // але не як жива ціль, тривога чи балістика «зараз» (усе нижче рахує час як DateTime.Now).
+    if (DateTime.UtcNow - m.date > TimeSpan.FromMinutes(10))
+    {
+        Ui.Line(ConsoleColor.DarkGray, $"·  [{m.date.ToLocalTime():HH:mm:ss}] {src} — старий пост (досилка після паузи), пропускаю");
+        return;
+    }
 
     // Канал лише з каталогу джерел (не з наших спец-парсерів) — хабу ПОТРІБНІ повтори
     // з різних каналів: саме так він підтверджує ціль. Дедуп для нього не робимо.
