@@ -15,7 +15,7 @@ using System.Text.RegularExpressions;
 public sealed record BotFeatures(
     Func<double, double, string> StatusAt,
     Func<double, double, string> RiskAt,
-    Func<double, double, (bool alarm, string text)> AlarmAt, // text — простий текст («Шахед ~12 км»)
+    Func<double, double, double, (bool alarm, string text)> AlarmAt, // (lat, lon, радіус км); text — простий текст («Шахед ~12 км»)
     Func<double, double, string, Task<byte[]?>> MapPng,      // карта з містом користувача
     Func<Task<string>> Ai,
     Func<string> Stats,
@@ -37,6 +37,10 @@ public sealed class TelegramBot
     readonly string _api;
     readonly BotFeatures _f;
     readonly Dictionary<long, Place?> _users = new();      // chat → місто (null = ще не задано)
+    readonly Dictionary<long, int> _radius = new();        // 📏 радіус зони тривоги, км (нема — типовий, як у застосунку)
+    public const int RadiusDefault = 25, RadiusMin = 5, RadiusMax = 100;
+    static readonly int[] RadiusChoices = { 5, 10, 15, 20, 25, 30, 40, 50, 70, 100 };
+    int RadiusOf(long chat) => _radius.TryGetValue(chat, out var r) ? r : RadiusDefault;
     readonly Dictionary<long, bool> _lastAlarm = new();    // для фронта тривоги
     readonly Dictionary<long, DateTime> _calmSince = new(); // відбій — лише після ≥60 с тиші (без «тривога-відбій-тривога»)
     // 🛰 Стеження: chat → (id цілі, останній опис, стадія, повідомлення, яке редагуємо).
@@ -90,7 +94,19 @@ public sealed class TelegramBot
         new[] { Btn("🎯 Ризик", "cmd:/risk") },
         new[] { Btn("📈 Аналітика", "cmd:/stats"), Btn("📡 Джерела", "cmd:/sources") },
         new[] { Btn("🤖 ШІ-аналіз", "cmd:/ai"), Btn("📍 Змінити місто", "cmd:/place") },
-        new[] { Btn("❓ Довідка", "cmd:/help") });
+        new[] { Btn("📏 Радіус тривоги", "cmd:/radius"), Btn("❓ Довідка", "cmd:/help") });
+
+    // 📏 Вибір радіусу: поточний позначено ✅.
+    static object RadiusKb(int cur) => Inline(
+        RadiusChoices.Take(5).Select(r => Btn((r == cur ? "✅ " : "") + r + " км", "rad:" + r)).ToArray(),
+        RadiusChoices.Skip(5).Select(r => Btn((r == cur ? "✅ " : "") + r + " км", "rad:" + r)).ToArray());
+
+    static string RadiusText(int r, Place? p) =>
+        $"📏 <b>Радіус тривоги: {r} км</b>\n\n"
+        + $"Щойно ціль залетить ближче ніж <b>{r} км</b> до " + (p is { } pl ? $"<b>{H(pl.Name)}</b>" : "твого міста")
+        + " — надішлю 🔴 тривогу, а коли вилетить і буде тихо — 🟢 відбій.\n"
+        + "Менше — лише коли зовсім поруч; більше — попереджу раніше.\n\n"
+        + "Обери 👇 або напиши, напр., <code>/radius 35</code> (від 5 до 100 км).";
 
     static readonly object CityKb = Inline(
         new[] { Btn("Київ", "city:Київ"), Btn("Харків", "city:Харків"), Btn("Дніпро", "city:Дніпро") },
@@ -254,7 +270,8 @@ public sealed class TelegramBot
             foreach (var (chat, place) in _users.ToArray())
             {
                 if (place is null) continue;
-                var (alarm, text) = _f.AlarmAt(place.Lat, place.Lon);
+                int rad = RadiusOf(chat);
+                var (alarm, text) = _f.AlarmAt(place.Lat, place.Lon, rad);
                 bool last = _lastAlarm.TryGetValue(chat, out var l) && l;
                 if (alarm) _calmSince.Remove(chat);
                 if (alarm && !last)
@@ -262,12 +279,13 @@ public sealed class TelegramBot
                     try { await Send(chat,
                         $"🔴 <b>ТРИВОГА поруч — {H(place.Name)}</b>\n"
                         + (text.Length > 0 ? $"🎯 {H(text)}\n" : "")
+                        + $"📏 Зона тривоги — {rad} км\n"
                         + "\n➤ <b>В укриття!</b> Подалі від вікон, правило двох стін.", AlarmKb); } catch { }
                     _lastAlarm[chat] = true;
                 }
                 else if (!alarm && last)
                 {
-                    // Ціль на межі 25 км «блимає» — відбій лише після хвилини тиші.
+                    // Ціль на межі зони «блимає» — відбій лише після хвилини тиші.
                     if (!_calmSince.TryGetValue(chat, out var since)) { _calmSince[chat] = DateTime.Now; continue; }
                     if (DateTime.Now - since < TimeSpan.FromSeconds(60)) continue;
                     _calmSince.Remove(chat);
@@ -344,7 +362,7 @@ public sealed class TelegramBot
                 return;
 
             case "/stop":
-                _users.Remove(chat); _lastAlarm.Remove(chat); _tracking.Remove(chat); _calmSince.Remove(chat);
+                _users.Remove(chat); _lastAlarm.Remove(chat); _tracking.Remove(chat); _calmSince.Remove(chat); _radius.Remove(chat);
                 SaveSubs();
                 await Send(chat, "🔕 <b>Сповіщення вимкнено.</b>\nПовернутись — /start", new { remove_keyboard = true });
                 return;
@@ -355,9 +373,16 @@ public sealed class TelegramBot
             await Send(chat, "☰ <b>Ще можливості</b>", MoreKb);
             return;
         }
+        if (Match(text, cmd, "/radius", "📏", "радіус", "радиус", "радіус тривоги"))
+        {
+            var arg = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(1).FirstOrDefault()?.Replace("км", "");
+            if (arg != null && int.TryParse(arg, out var want)) { await SetRadius(chat, want, pl); return; }
+            await Send(chat, RadiusText(RadiusOf(chat), pl), RadiusKb(RadiusOf(chat)));
+            return;
+        }
         if (Match(text, cmd, "/help", "❓", "довідка", "допомога"))
         {
-            await Send(chat, HelpText(pl), MainKb);
+            await Send(chat, HelpText(pl, RadiusOf(chat)), MainKb);
             return;
         }
         if (Match(text, cmd, "⬅️", "скасувати"))
@@ -444,14 +469,14 @@ public sealed class TelegramBot
 
         if (cmd.StartsWith('/'))
         {
-            await Send(chat, "🤔 Не знаю такої команди. Ось що я вмію 👇\n\n" + HelpText(pl), MainKb);
+            await Send(chat, "🤔 Не знаю такої команди. Ось що я вмію 👇\n\n" + HelpText(pl, RadiusOf(chat)), MainKb);
             return;
         }
         // Інакше — вважаємо це назвою міста → шукаємо у великому списку.
         await SetPlaceByName(chat, text);
     }
 
-    static string HelpText(Place? place) =>
+    static string HelpText(Place? place, int radius = RadiusDefault) =>
         "❓ <b>Як користуватись WarAlarm</b>\n\n"
         + "<b>Головне</b>\n"
         + "📊 Статус — що летить біля твого міста\n"
@@ -463,8 +488,9 @@ public sealed class TelegramBot
         + "🎯 Ризик · 🔮 Що вночі · 🌙 Підсумок ночі · 📈 Аналітика · 📡 Джерела · 🤖 ШІ-аналіз\n\n"
         + "<b>Налаштування</b>\n"
         + "📍 /place — змінити місто (можна мікрорайон чи адресу)" + (place is { } p ? $" (зараз: {H(p.Name)})" : "") + "\n"
+        + "📏 /radius — радіус тривоги: ціль ближче — 🔴 тривога (5–100 км)\n"
         + "🔕 /stop — вимкнути сповіщення\n\n"
-        + "🔔 Сповіщення приходять самі: 🔴 тривога поруч → 🟢 відбій.\n"
+        + $"🔔 Сповіщення приходять самі: ціль ближче {radius} км → 🔴 тривога, потім 🟢 відбій.\n"
         + "<i>Бот — допоміжний. Завжди зважай на офіційну тривогу.</i>";
 
     string StatusText(Place p) => $"📊 <b>{H(p.Name)}</b> · {DateTime.Now:HH:mm}\n\n" + _f.StatusAt(p.Lat, p.Lon).TrimEnd();
@@ -529,6 +555,17 @@ public sealed class TelegramBot
         await SetPlace(chat, new Place(km <= 15 ? best.name : $"біля {best.name}", lat, lon));
     }
 
+    async Task SetRadius(long chat, int km, Place? p, long? editMsg = null)
+    {
+        km = Math.Clamp(km, RadiusMin, RadiusMax);
+        if (km == RadiusDefault) _radius.Remove(chat); else _radius[chat] = km;
+        if (!_users.ContainsKey(chat)) _users[chat] = null;
+        SaveSubs();
+        var txt = RadiusText(km, p) + "\n\n✅ Збережено.";
+        if (editMsg is { } m && await Edit(chat, m, txt, RadiusKb(km))) return;
+        await Send(chat, txt, RadiusKb(km));
+    }
+
     async Task SetPlace(long chat, Place p)
     {
         _users[chat] = p;
@@ -537,7 +574,7 @@ public sealed class TelegramBot
         SaveSubs();
         await Send(chat,
             $"✅ <b>Готово! Твоє місто — {H(p.Name)}</b>\n"
-            + "🔔 Напишу, щойно загроза буде поруч, і дам відбій, коли мине.\n"
+            + $"🔔 Напишу, щойно ціль залетить у зону <b>{RadiusOf(chat)} км</b>, і дам відбій, коли мине (📏 /radius — змінити).\n"
             + "Змінити місто — просто напиши іншу назву чи адресу.", MainKb);
         await SendStatus(chat, p);
     }
@@ -575,7 +612,7 @@ public sealed class TelegramBot
             ("status", "📊 Що летить біля мого міста"), ("targets", "🛰 Найближчі цілі"),
             ("map", "🗺 Карта тривог"), ("alerts", "🚨 Офіційні тривоги"), ("shelter", "🏠 Укриття поруч"),
             ("risk", "🎯 Ризик по типах"), ("tonight", "🔮 Чого чекати цієї ночі"), ("night", "🌙 Підсумок ночі"), ("stats", "📈 Аналітика"),
-            ("sources", "📡 Джерела"), ("ai", "🤖 ШІ-аналіз"), ("place", "📍 Змінити місто"),
+            ("sources", "📡 Джерела"), ("ai", "🤖 ШІ-аналіз"), ("place", "📍 Змінити місто"), ("radius", "📏 Радіус тривоги"),
             ("help", "❓ Довідка"), ("stop", "🔕 Вимкнути сповіщення"),
         };
         await Call("setMyCommands", new { commands = cmds.Select(x => new { command = x.c, description = x.d }) });
@@ -691,6 +728,12 @@ public sealed class TelegramBot
             await Handle(chat, data[4..]);
             return;
         }
+        if (data.StartsWith("rad:") && int.TryParse(data[4..], out var rkm))
+        {
+            await AnswerCallback(cbId, $"📏 {Math.Clamp(rkm, RadiusMin, RadiusMax)} км");
+            await SetRadius(chat, rkm, p, msg);
+            return;
+        }
         if (data.StartsWith("city:"))
         {
             await AnswerCallback(cbId, "");
@@ -804,6 +847,8 @@ public sealed class TelegramBot
             {
                 if (!long.TryParse(p.Name, out var id)) continue;
                 var v = p.Value;
+                if (v.ValueKind == JsonValueKind.Object && v.TryGetProperty("r", out var rr) && rr.TryGetInt32(out var rv))
+                    _radius[id] = Math.Clamp(rv, RadiusMin, RadiusMax);
                 if (v.ValueKind == JsonValueKind.Object && v.TryGetProperty("name", out var nm))
                     _users[id] = new Place(nm.GetString() ?? "", v.GetProperty("lat").GetDouble(), v.GetProperty("lon").GetDouble());
                 else
@@ -824,8 +869,9 @@ public sealed class TelegramBot
                 if (!first) sb.Append(',');
                 first = false;
                 sb.Append('"').Append(id).Append("\":");
-                if (p is null) sb.Append("null");
-                else sb.Append($"{{\"name\":{JsonSerializer.Serialize(p.Name)},\"lat\":{p.Lat.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"lon\":{p.Lon.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}");
+                var r = _radius.TryGetValue(id, out var rk) ? rk : 0;
+                if (p is null) sb.Append(r > 0 ? $"{{\"r\":{r}}}" : "null");
+                else sb.Append($"{{\"name\":{JsonSerializer.Serialize(p.Name)},\"lat\":{p.Lat.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"lon\":{p.Lon.ToString(System.Globalization.CultureInfo.InvariantCulture)}" + (r > 0 ? $",\"r\":{r}" : "") + "}");
             }
             sb.Append('}');
             File.WriteAllText(SubsFile, sb.ToString());

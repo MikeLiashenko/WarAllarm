@@ -2021,8 +2021,9 @@ string RiskAt(double lat, double lon)
     return sb.ToString();
 }
 
-// Чи тривога поруч із ТОЧКОЮ (для персональних сповіщень у боті).
-(bool alarm, string text) AlarmAt(double lat, double lon)
+// Чи тривога поруч із ТОЧКОЮ (для персональних сповіщень у боті). Правило як у застосунку
+// (alarm_controller.dart): ціль у зоні [radiusKm] навколо точки або ризик ≥ 55 % → тривога.
+(bool alarm, string text) AlarmAt(double lat, double lon, double radiusKm)
 {
     var pt = (lat, lon);
     var list = tracker.Active.Where(t => t.Pos is not null && !t.Approx).ToList(); // приблизні (центр області) — не тривога
@@ -2034,7 +2035,7 @@ string RiskAt(double lat, double lon)
         if (d < nearest) { nearest = d; top = t; }
     }
     var a = RiskModel.For(pt, list.Select(t => (t, t.Amount)).ToList());
-    bool alarm = nearest <= 25 || a.Percent >= 55;
+    bool alarm = nearest <= radiusKm || a.Percent >= 55;
     string text = top != null ? $"{ThreatTracker.Label(top)} ~{nearest:0} км" : "";
     return (alarm, text);
 }
