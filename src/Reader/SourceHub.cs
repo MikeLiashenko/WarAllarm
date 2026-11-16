@@ -559,7 +559,31 @@ public sealed class SourceHub
     static readonly Regex Summary = new(
         @"\d+\s+(?:\p{L}+\s+){0,2}(?:безпілотник|бпла|дрон|шахед|ракет|ціл)\p{L}*\s+(?:було\s+)?(?:знищен|збит|знешкоджен|уражен|подавлен)|просуван\p{L}*\s+(?:зсу|військ)|тривають\s+бої",
         RegexOptions.IgnoreCase);
-    static readonly Regex Impact = new(@"удар по|приліт|прилет|влучанн|загибл|загинул|поранен|за попередньою інформацією|—\s*терехов", RegexOptions.IgnoreCase);
+    // Цитата посадовця, заяви, продовження «попередження на 48 годин», подяки побратимам — новина,
+    // а не ціль (11.14: «ракета FREYJA готова, — Зеленський» → «шахед над Борщагівкою»).
+    static readonly Regex Quote = new(
+        @"[—–]\s*(?:зеленськ|зеленск|сирськ|сырск|умєров|умеров|шмигал|свириденк|буданов|ігнат|игнат|синєгубов|синегубов|федоров|кличк|ткаченк|терехов|лисак|прокопенк)\w*|заяв\w*\s+президент|слів\s+президент|слов\s+президент|продовжено\s+(?:ще\s+)?на\s+\d+\s+(?:годин|доб|дн)|побратим|артилерист",
+        RegexOptions.IgnoreCase);
+    // Рядок про ціль, якої вже/ще нема: «Ракет на Кривий Ріг не спостерігається», «без ракет на зараз»,
+    // «Була ціль на Запоріжжя», «Фіксувалась ціль на Житомирщину, наразі немає», «Зникла над Кушугумом»,
+    // «Відпрацювало РСЗВ по Розумівці» — не жива ціль на карті.
+    static readonly Regex NotLive = new(
+        @"(?<!\p{L})(?:не\s+(?:спостеріга|фіксу|наблюда|фиксиру|видно)\w*|без\s+(?:ракет|цілей|целей|фіксації)|наразі\s+(?:нема|немає)|зник\w*|пропал\w*|пропав)(?!\p{L})"
+        + @"|^\W*(?:бул[аио]|был[аио]?|фіксувал\w*|фиксировал\w*|відпрацювал\w*|відпрацював|отработал\w*)(?!\p{L})",
+        RegexOptions.IgnoreCase);
+    // Частина фрази саме про це місце: «1 на Дніпро, інший не фіксується» — Дніпро живий;
+    // «Ця зникла, а біля Софіївки з'явилась» — Софіївка жива; «Ракет на Кривий Ріг не спостерігається» — ні.
+    static readonly Regex Clause = new(@"[,;.!]|\s(?:але|а|ще|інш\w*|друг\w*|трет\w*|потім)\s", RegexOptions.IgnoreCase);
+    static bool NotLiveAbout(string raw, string? city)
+    {
+        if (!NotLive.IsMatch(raw)) return false;
+        if (city is not { Length: >= 3 }) return true;
+        var stem = city[..Math.Min(5, city.Length)];
+        foreach (var part in Clause.Split(raw))
+            if (part.Contains(stem, StringComparison.OrdinalIgnoreCase)) return NotLive.IsMatch(part.Trim());
+        return false;
+    }
+    static readonly Regex Impact = new(@"удар(?:и|ів|ом|ами)? по|приліт|прилет|влучанн|загибл|загинул|поранен|за попередньою інформацією|—\s*терехов", RegexOptions.IgnoreCase);
     static readonly Regex Clear = new(
         @"^(?:✅|⚪️|❎|🟢)?\s*(?:відбій|отбой)|(?:область|київ|харків|місто|небо)\s*[—:-]?\s*чисто|наразі чисто|локаційно чисто|^\W*\p{L}+(?:щина|ччина)\s*[—:-]\s*чисто|над \w+ наразі чисто|^чисто\b|^[А-ЯІЇЄҐ][\w'ʼ’-]*\s+чисто\W*$",
         RegexOptions.IgnoreCase);
@@ -709,7 +733,7 @@ public sealed class SourceHub
             // «⚡️Прилет Новобаварском районе», «є загиблі. — Терехов» — постфактум навіть коротко: ціль
             // уже не летить, а «Терехов» ставав селом Терни.
             if (text.TrimStart().StartsWith("🗞") || Impact.IsMatch(clean) && clean.Length < 200
-                || AfterNews.IsMatch(clean) && clean.Length > 70 || Summary.IsMatch(clean))
+                || AfterNews.IsMatch(clean) && clean.Length > 70 || Summary.IsMatch(clean) || Quote.IsMatch(clean))
             { st.News++; return new(HubVerdict.News, [], "новина (не жива загроза)"); }
 
             // «Запоріжжя/район – без локаційних загроз» — повідомлення, що цілі нема.
@@ -757,14 +781,16 @@ public sealed class SourceHub
             if (Cruise.IsMatch(clean)) _cruiseAt = at;
             bool recentBall = at - _ballAt < TimeSpan.FromMinutes(4) && at - _cruiseAt > TimeSpan.FromMinutes(10);
             var events = ThreatParser.Parse(clean, dflt)
-                .Where(e => e.Kind is not (ThreatKind.AllClear or ThreatKind.Aviation))
+                .Where(e => e.Kind is not (ThreatKind.AllClear or ThreatKind.Aviation) && !NotLiveAbout(e.Raw, e.City))
                 .Select(e =>
                 {
                     // «Балістика на Харків», «Швидкісна на Харків!» — ціль-балістика (не крилата/«ціль»).
-                    if (ballisticText && e.Kind is ThreatKind.Missile or ThreatKind.Target or ThreatKind.Unknown)
+                    // Але не бандероль/крилата чи РСЗВ, названі в самому рядку.
+                    bool notBall = Cruise.IsMatch(e.Raw) || (e.Extra ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase);
+                    if (ballisticText && !notBall && e.Kind is ThreatKind.Missile or ThreatKind.Target or ThreatKind.Unknown)
                         e = e with { Kind = ThreatKind.Ballistic };
                     // «Ракета курсом на Харків» за хвилину після «загрози балістики з Бєлгорода» — балістика.
-                    if (recentBall && e.Kind == ThreatKind.Missile && !Cruise.IsMatch(e.Raw))
+                    if (recentBall && e.Kind == ThreatKind.Missile && !notBall)
                         e = e with { Kind = ThreatKind.Ballistic };
                     if (e.Kind != ThreatKind.Ballistic) return e;
                     // «Загроза балістики з Бєлгорода» — Бєлгород не ціль, а район пуску.
@@ -972,7 +998,9 @@ public sealed class SourceHub
     // Прибрати підписи/емодзі-рамки, лишити суть.
     public static string Clean(string text)
     {
-        var lines = text.Replace("\r", "").Replace("🛵", " шахед ").Split('\n') // 🛵 — «мопед», тобто шахед
+        var lines = text.Replace("\r", "").Replace("🛵", " шахед ")
+            .Replace("🚀→", "ракета → ") // @radar_top_ua: «🚀→Кривий Ріг» — ракета (дрони в нього ✈️)
+            .Split('\n') // 🛵 — «мопед», тобто шахед
             .Select(l => l.Trim())
             .Where(l => l.Length > 0 && !SigLine.IsMatch(l) && !Regex.IsMatch(l, @"^[\p{So}\p{Cs}\p{P}\s‍ㅤ]+$"))
             .Select(l => Regex.Replace(l, @"^[\p{So}\p{Cs}️‍⚠‼️❗️🔴🟡🟠🟥🟧\s]+", "").Trim())

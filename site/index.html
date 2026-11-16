@@ -666,7 +666,7 @@ function draw(){
 function starSpec(t){
   switch(t.cat){
     case 'balist': return [4,5,200,80];
-    case 'missile': case 'banderol': return [3,4,100,30];
+    case 'missile': case 'banderol': return /^РСЗВ/.test(t.label||'') ? [3,4,40,15] : [3,4,100,30]; // РСЗВ б'є на 20–40 км
     case 'kab': return [3,4,60,25];
     case 'avia': return [2,3,80,30];
     case 'fpv': return [2,3,20,8];

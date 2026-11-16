@@ -568,12 +568,29 @@ public sealed class ThreatTracker
     // інакше «Мерефа, Зміїв» в одному пості злиплись би), і реально могла долетіти:
     // відстань ≤ швидкість × час × 1.5 + 35 км (точки — центри міст, пости запізнюються). Якщо курс уже відомий — не розвертаємо
     // ціль назад (> 110°). Обираємо найближчу.
+    Threat? OtherRocket(ThreatEvent ev, (double lat, double lon) pos, DateTime now)
+    {
+        var other = ev.Kind == ThreatKind.Missile ? ThreatKind.Ballistic : ThreatKind.Missile;
+        bool rszv = (ev.Extra ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase);
+        return _active.Values
+            .Where(c => c.Kind == other && c.Zone == "UA" && !c.Launch && !c.Down && c.Pos is not null
+                        && rszv == (c.Ammo ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase)
+                        && now - c.LastUpdate <= TimeSpan.FromMinutes(4) && ThreatGeo.Km(c.Pos!.Value, pos) <= 12)
+            .OrderBy(c => ThreatGeo.Km(c.Pos!.Value, pos)).FirstOrDefault();
+    }
+
     Threat? Predecessor(ThreatEvent ev, (double lat, double lon) pos, DateTime now)
     {
         var kind = ev.Kind;
-        if (kind is not (ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target)) return null;
+        if (kind is not (ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target or ThreatKind.Ballistic)) return null;
         // «2 новые шаболды», «+2 шахеди» — канал прямо каже, що це інші цілі.
         if (Slang.NewTarget(ev.Raw)) return null;
+        // Один канал пише «ракета на Запоріжжя», інший — «балістика на Запоріжжя»: це та сама ракета,
+        // а не дві мітки різних типів над містом. Лишаємо тип, який назвали першим (і частіше).
+        if (kind is ThreatKind.Missile or ThreatKind.Ballistic && OtherRocket(ev, pos, now) is { } other) return other;
+        if (kind == ThreatKind.Ballistic) return null;
+        // РСЗВ — окремі залпи по різних селах, а не одна ракета, що летить далі.
+        if ((ev.Extra ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase)) return null;
         if (kind == ThreatKind.Missile) return MissileGroup(ev, pos, now);
         bool jet = IsJet(ev.Extra), plain = Slang.PlainDrone(ev.Raw);
         bool toBigCity = BigCities.Any(b => ThreatGeo.Km(b, pos) <= 5) && ThreatParser.HeadingTo(ev.Raw, ev.City);
@@ -593,11 +610,13 @@ public sealed class ThreatTracker
             if (plain && IsJet(c.Ammo)) continue;
             if (ev.Count > Math.Max(1, c.Count)) continue;
             double km = ThreatGeo.Km(cp, pos);
-            if (km < 3) continue; // те саме місце — це не рух
             double fromMark = ThreatGeo.Km(c.DrawPos(now) ?? cp, pos);
             // Той самий дрон, хоч канали назвали його по-різному й майже одночасно:
             // «Вишгород» і «Трою/Вишгород»; «Троя» і «Бровари» поруч; «на Київ» для цілі з Українки.
             bool samePost = age == TimeSpan.Zero;
+            // Те саме місце під іншою назвою («Салтівка» / «Північна Салтівка», «Придніпровськ» /
+            // «Придніпровськ (Дніпро)») — це не друга ціль. Лише перелік місць у ТОМУ Ж пості — різні.
+            if (km < 3 && (samePost || age > TimeSpan.FromMinutes(6))) continue;
             bool sameDrone = (!samePost && km <= 40 && Mentions(ev.Raw, c.LastPlace))
                              || (!samePost && km <= 15 && ev.Count <= 1)
                              || (toBigCity && Math.Min(km, fromMark) <= 50);
@@ -966,6 +985,8 @@ public sealed class ThreatTracker
             _                    => "Ціль",
         };
         if (t.Ammo is { } b0 && b0.Contains("бандерол", StringComparison.OrdinalIgnoreCase)) return "Бандероль";
+        // РСЗВ — реактивна артилерія біля фронту: «РСЗВ «Град»», а не «Ракета (…)» чи «Балістика».
+        if (t.Ammo is { } r0 && r0.StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase)) return r0;
         // Реактивний шахед — окремий засіб (500 км/год), а не «Шахед (реакт. шахед)».
         if (t.Kind == ThreatKind.Drone && (t.Ammo ?? "").Contains("реакт", StringComparison.OrdinalIgnoreCase)) return "Реактивний шахед";
         return t.Ammo is { Length: > 0 } a ? $"{name} ({a})" : name;

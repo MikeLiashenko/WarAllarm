@@ -28,6 +28,8 @@ public static class DangerStars
         return kind switch
         {
             ThreatKind.Ballistic => new(4, 5, 200, 80),
+            // РСЗВ б'є на 20–40 км від фронту: небезпечно лише поруч.
+            ThreatKind.Missile when (ammo ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase) => new(3, 4, 40, 15),
             ThreatKind.Missile => new(3, 4, 100, 30),
             ThreatKind.Kab => new(3, 4, 60, 25),
             ThreatKind.Aviation => new(2, 3, 80, 30),

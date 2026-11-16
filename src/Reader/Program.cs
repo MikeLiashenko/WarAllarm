@@ -428,6 +428,14 @@ if (args.Length >= 1 && args[0].Equals("journal", StringComparison.OrdinalIgnore
     return;
 }
 
+// ── 🔎 Аудит карти по журналу:   dotnet run -- audit journal/2026-11-15.jsonl [HH:mm HH:mm] [-v]
+if (args.Length >= 2 && args[0].Equals("audit", StringComparison.OrdinalIgnoreCase))
+{
+    var times = args.Skip(2).Where(a => a.Contains(':')).Select(TimeSpan.Parse).ToList();
+    Audit.Run(args[1], times.Count > 0 ? times[0] : null, times.Count > 1 ? times[1] : null, args.Contains("-v"));
+    return;
+}
+
 // ── 🔁 Прогін журналу через теперішній хаб:   dotnet run -- replay [РРРР-ММ-ДД|файл] [вихід.txt]
 if (args.Length >= 1 && args[0].Equals("replay", StringComparison.OrdinalIgnoreCase))
 {
