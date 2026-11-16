@@ -86,6 +86,27 @@ public static class MapImage
     /// Підпис картки: українською або (харківський канал) російською.
     static string L(string uk, string ru) => Ru ? ru : uk;
 
+    /// Найпросторіше місце для підпису [tw] px усередині [path]: далі від краю й від міст.
+    static SKPoint? Roomiest(SKPath path, IReadOnlyList<SKPoint> avoid, float tw)
+    {
+        var b = path.Bounds; var edge = path.Points;
+        SKPoint? best = null; float bestScore = 0;
+        for (int iy = 1; iy < 24; iy++)
+            for (int ix = 1; ix < 24; ix++)
+            {
+                var q = new SKPoint(b.Left + b.Width * ix / 24, b.Top + b.Height * iy / 24);
+                // підпис цілком усередині області
+                if (!path.Contains(q.X - tw / 2, q.Y) || !path.Contains(q.X + tw / 2, q.Y) || !path.Contains(q.X, q.Y - 12) || !path.Contains(q.X, q.Y + 12)) continue;
+                float dEdge = float.MaxValue;
+                foreach (var e in edge) { float dx = Math.Max(0, Math.Abs(e.X - q.X) - tw / 2), dy = e.Y - q.Y; dEdge = Math.Min(dEdge, dx * dx + dy * dy); }
+                float dTown = float.MaxValue;
+                foreach (var t in avoid) { float dx = Math.Max(0, Math.Abs(t.X - q.X) - tw / 2), dy = (t.Y - q.Y) * 1.6f; dTown = Math.Min(dTown, dx * dx + dy * dy); }
+                float score = Math.Min((float)Math.Sqrt(dEdge), (float)Math.Sqrt(dTown) * 1.3f);
+                if (score > bestScore) { bestScore = score; best = q; }
+            }
+        return best;
+    }
+
     static byte[] RenderCore(
         (double lat, double lon) home,
         IReadOnlyList<Threat> threats,
@@ -107,7 +128,8 @@ public static class MapImage
         double aspect = (LonSpan / LatSpan) * Math.Cos(midLat * Math.PI / 180);
         int pw = W - 2 * pad;
         int ph = (int)(pw / aspect);
-        int H = ph + padTop + pad;
+        int foot = focus is { Count: > 0 } ? 150 : 0;   // карта зони: місце під легенду, щоб не закривала область
+        int H = ph + padTop + pad + foot;
         float pxPerKm = (float)(ph / LatSpan / 111.0);
 
         using var bmp = new SKBitmap(W, H);
@@ -152,20 +174,53 @@ public static class MapImage
             obPaths.Add((name, path, wlv));
             landPath.AddPath(path);
         }
-        using (var glowLand = new SKPaint { Color = Primary.WithAlpha(0x1A), IsAntialias = true, MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 18) })
-            canvas.DrawPath(landPath, glowLand);
-        using (var land = new SKPaint
+        // Карта зони (міські канали): ЛИШЕ свої області — без сусідів, навіть краєчка. Острів суші
+        // з тінню й світінням на темному тлі з ледь помітною сіткою; усе географічне — всередині нього.
+        SKPath? zone = null;
+        if (focus is { Count: > 0 })
         {
-            IsAntialias = true,
-            Shader = SKShader.CreateLinearGradient(new SKPoint(0, padTop), new SKPoint(0, padTop + ph),
-                new[] { Lerp(MapLand, SKColors.White, 0.05f), MapLand }, null, SKShaderTileMode.Clamp),
-        })
-            canvas.DrawPath(landPath, land);
+            foreach (var (name, path, _) in obPaths)
+                if (focus.Contains(name)) { var u = zone is null ? new SKPath(path) : zone.Op(path, SKPathOp.Union); zone?.Dispose(); zone = u; }
+        }
+        if (zone is not null)
+        {
+            using (var dots = new SKPaint { Color = Primary.WithAlpha(0x16), IsAntialias = true })
+                for (float gy = padTop + 6; gy < H; gy += 26)
+                    for (float gx = 8 + ((int)((gy - padTop) / 26) % 2) * 13; gx < W; gx += 26) canvas.DrawCircle(gx, gy, 1.1f, dots);
+            using (var shadow = new SKPaint { Color = SKColors.Black.WithAlpha(0xB0), IsAntialias = true, MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 16) })
+            {
+                canvas.Save(); canvas.Translate(0, 10); canvas.DrawPath(zone, shadow); canvas.Restore();
+            }
+            using (var glowWide = new SKPaint { Color = Primary.WithAlpha(0x38), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 14, MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 18) })
+                canvas.DrawPath(zone, glowWide);
+            var zb = zone.Bounds;
+            using (var land = new SKPaint
+            {
+                IsAntialias = true,
+                Shader = SKShader.CreateRadialGradient(new SKPoint(zb.MidX, zb.MidY - zb.Height * 0.15f), Math.Max(zb.Width, zb.Height) * 0.75f,
+                    new[] { Lerp(MapLand, SKColors.White, 0.09f), Lerp(MapLand, SKColors.Black, 0.12f) }, null, SKShaderTileMode.Clamp),
+            })
+                canvas.DrawPath(zone, land);
+            canvas.Save();
+            canvas.ClipPath(zone, SKClipOperation.Intersect, true);
+        }
+        else
+        {
+            using (var glowLand = new SKPaint { Color = Primary.WithAlpha(0x1A), IsAntialias = true, MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 18) })
+                canvas.DrawPath(landPath, glowLand);
+            using (var land = new SKPaint
+            {
+                IsAntialias = true,
+                Shader = SKShader.CreateLinearGradient(new SKPoint(0, padTop), new SKPoint(0, padTop + ph),
+                    new[] { Lerp(MapLand, SKColors.White, 0.05f), MapLand }, null, SKShaderTileMode.Clamp),
+            })
+                canvas.DrawPath(landPath, land);
+        }
 
         // Гарячі зони під скупченнями цілей (червоне світіння, як у застосунку).
         using (var hot = new SKPaint { Color = new SKColor(0xFF, 0x3B, 0x30, 0x24), IsAntialias = true, MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 20) })
             foreach (var t in threats)
-                if (t.DrawPos(DateTime.Now) is { } hpos && !t.Launch)
+                if (t.DrawPos(DateTime.Now) is { } hpos && !t.Launch && (focus is null || _inZone is null || _inZone(t)))
                     canvas.DrawCircle(P(hpos.lon, hpos.lat), 22 + 5f * Math.Min(t.Amount, 8), hot);
 
         foreach (var (_, path, wlv) in obPaths)
@@ -200,10 +255,37 @@ public static class MapImage
             using var edge = new SKPaint { Color = (wlv == "red" ? AlarmRed : AlarmYellow).WithAlpha(0xE6), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.4f, StrokeJoin = SKStrokeJoin.Round };
             canvas.DrawPath(path, edge);
         }
-        if (focus is { Count: > 0 })
-            using (var dim = new SKPaint { Color = Bg.WithAlpha(0x70), IsAntialias = true })
+        if (zone is not null)
+        {
+            // Межі між областями зони — світліші; зовнішній край — яскрава лінія, як у застосунку.
+            using (var inner = new SKPaint { Color = SKColors.White.WithAlpha(0x55), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.6f, StrokeJoin = SKStrokeJoin.Round })
                 foreach (var (name, path, _) in obPaths)
-                    if (!focus.Contains(name)) canvas.DrawPath(path, dim);
+                    if (focus!.Contains(name)) canvas.DrawPath(path, inner);
+            // Назви областей зони (кілька областей) — великими, ледь помітно, під містами й цілями.
+            if (focus!.Count(n => n != "Kiev City") > 1)
+                using (var on = new SKPaint { Typeface = UiBold, Color = SKColors.White.WithAlpha(0x2A), IsAntialias = true, TextSize = 26 })
+                {
+                    var townPts = Cities.Select(c => (c.lon, c.lat)).Concat((towns ?? Array.Empty<(string name, double lon, double lat)>()).Select(t => (t.lon, t.lat)))
+                        .Select(c => P(c.lon, c.lat)).ToList();
+                    foreach (var (name, path, _) in obPaths)
+                    {
+                        if (!focus.Contains(name) || name == "Kiev City") continue;
+                        var txt = Tr(OblastGeo.Short(name)).ToUpperInvariant();
+                        float tw = on.MeasureText(txt);
+                        var at = Roomiest(path, townPts, tw);
+                        if (at is { } a) canvas.DrawText(txt, a.X - tw / 2, a.Y + 9, on);
+                    }
+                }
+            canvas.Restore();
+            using (var edge = new SKPaint
+            {
+                IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2.4f, StrokeJoin = SKStrokeJoin.Round,
+                Shader = SKShader.CreateLinearGradient(new SKPoint(0, zone.Bounds.Top), new SKPoint(0, zone.Bounds.Bottom),
+                    new[] { new SKColor(0x6F, 0xA8, 0xFF), new SKColor(0x4C, 0x93, 0xFF), new SKColor(0xFF, 0xD5, 0x00).WithAlpha(0xC0) }, new[] { 0f, 0.7f, 1f }, SKShaderTileMode.Clamp),
+            })
+                canvas.DrawPath(zone, edge);
+            zone.Dispose();
+        }
         foreach (var (_, path, _) in obPaths) path.Dispose();
 
         // ── Кола 50 / 100 км навколо дому: одразу видно, наскільки ціль близько ──
@@ -229,17 +311,20 @@ public static class MapImage
         // Невідома «ціль» — БпЛА: поодинці (до 3) — реактивний, у рої — звичайний шахед.
         string Cat(Threat t) => ThreatTracker.JetGuess(t, threats) is { } jet ? (jet ? "shahed_jet" : "shahed") : CatOf(t);
         bool IsFlight(Threat t) => !t.Launch && t.Kind is ThreatKind.Ballistic or ThreatKind.Kab && t.From is not null && t.To is not null;
-        var flights = threats.Where(t => t.Pos is not null && IsFlight(t)).ToList();
-        var launchOnly = threats.Where(t => t.Launch && t.From is not null).ToList();
+        bool Show(Threat t) => focus is null || _inZone is null || _inZone(t);
+        bool ShowAt((double lat, double lon) q) => focus is null || (OblastGeo.PolyName(q.lat, q.lon) is { } en && focus.Contains(en));
+        var flights = threats.Where(t => t.Pos is not null && IsFlight(t) && Show(t)).ToList();
+        var launchOnly = threats.Where(t => t.Launch && t.From is not null && (focus is null || ShowAt(t.From.Value))).ToList();
         var drawn = new List<(Threat t, int n)>();
         foreach (var t in threats)
         {
+            if (!Show(t)) continue;
             if (t.Pos is not { } tp || IsFlight(t) || t.Launch) continue;
             int i = drawn.FindIndex(d => Cat(d.t) == Cat(t) && ThreatGeo.Km(d.t.Pos!.Value, tp) < 16);
             if (i >= 0) drawn[i] = (drawn[i].t, drawn[i].n + t.Amount); else drawn.Add((t, t.Amount));
         }
-        var zones = AviationFeed.MapZones();
-        var groups = LaunchGroups.Active;
+        var zones = AviationFeed.MapZones().Where(z => ShowAt((z.lat, z.lon))).ToList();
+        var groups = LaunchGroups.Active.Where(g => ShowAt(g.PosAt(now))).ToList();
         float Km2Px(double km) => (float)(km * pxPerKm);
         // Де мітка зараз: «на Харків» — ще на шляху до міста, а не над ним.
         SKPoint DP(Threat t) { var q = t.DrawPos(now)!.Value; return P(q.lon, q.lat); }
@@ -386,6 +471,7 @@ public static class MapImage
         var allCities = Cities.Select(c => (c.name, c.lon, c.lat, small: false))
             .Concat((towns ?? Array.Empty<(string name, double lon, double lat)>())
                 .Where(t => !Cities.Any(c => c.name == t.name)).Select(t => (t.name, t.lon, t.lat, small: true)))
+            .Where(c => focus is null || (OblastGeo.PolyName(c.lat, c.lon) is { } cen && focus.Contains(cen)))
             .ToList();
         using var townText = new SKPaint { Typeface = Ui, Color = TextPrimary.WithAlpha(0xD8), IsAntialias = true, TextSize = 13 };
         using var townHalo = new SKPaint { Typeface = Ui, Color = MapLand, IsAntialias = true, TextSize = 13, Style = SKPaintStyle.Stroke, StrokeWidth = 3.5f, StrokeJoin = SKStrokeJoin.Round };

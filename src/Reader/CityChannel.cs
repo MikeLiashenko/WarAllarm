@@ -322,7 +322,7 @@ public sealed class CityChannel
     IReadOnlyList<(string name, double lon, double lat)>? _towns;
 
     /// Рамка карти зони.
-    public MapImage.View MapView => _view ??= MapImage.ViewOf(Info.Oblasts);
+    public MapImage.View MapView => _view ??= MapImage.ViewOf(Info.Oblasts, marginDeg: 0.12, minAspect: 0.9, maxAspect: 1.4);
     MapImage.View? _view;
     /// Заголовок карти зони.
     public string MapTitle => Info.Key == "kyiv" ? "WarAlarm · Київ і область" : T("WarAlarm · Харківщина", "WarAlarm · Харьковщина");
