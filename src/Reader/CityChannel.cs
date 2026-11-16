@@ -110,18 +110,94 @@ public sealed class CityChannel
     string Dur(TimeSpan d) => d.TotalMinutes < 60 ? $"{Math.Max(1, (int)d.TotalMinutes)} {T("хв", "мин")}"
         : $"{(int)d.TotalHours} {T("год", "ч")} {d.Minutes} {T("хв", "мин")}";
 
-    // ── 2. Загроза балістики — одразу (решта — у зведенні раз на 8 хв) ──────────
-    DateTime _ballAt = DateTime.MinValue;
+    // ── 2. Короткі пости одразу (з локальних моніторів міста): «🛵 Шахед на Люботин» ─────
+    // Ціль біля міста (≤40 км), «💥 Гучно», «🎯 Мінус», «🛡 Працює ППО», загроза балістики.
+    // Решта області — у зведенні з картою раз на 8 хв.
+    readonly Dictionary<string, DateTime> _recent = new();
+    DateTime _ppoAt = DateTime.MinValue, _ballAt = DateTime.MinValue;
 
-    /// Подія локального монітора → пост одразу (або null). Лише «загроза балістики»:
-    /// до удару хвилина-дві, 8 хв чекати не можна. Шахеди, КАБи, «мінус», ППО — у зведенні.
-    public (string text, bool silent)? EventPost(KhEvent e, string ballisticText, DateTime now)
+    /// Подія локального монітора → короткий пост (або null).
+    /// [u] — результат tracker.Ingest (для загроз), [hadCityThreat] — чи були цілі біля міста ДО події
+    /// (нова загроза місту → зі звуком, решта — тихо).
+    public (string text, bool silent)? EventPost(KhEvent e, TrackUpdate? u, bool hadCityThreat, string ballisticText, DateTime now)
     {
-        if (e.Signal == KhSignal.News || e.Kind != ThreatKind.Ballistic || !Slang.BallisticThreat(e.Raw)) return null;
-        if (now - _ballAt <= TimeSpan.FromMinutes(5)) return null;
-        _ballAt = now;
-        return ($"{H(Ru ? BallisticRu : ballisticText)}\n\n{Foot}", false);
+        string? line = null;
+        bool loud = false;
+        if (e.Signal == KhSignal.News) { }
+        else if (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw))
+        {
+            if (now - _ballAt > TimeSpan.FromMinutes(5)) { line = Ru ? BallisticRu : ballisticText; loud = true; _ballAt = now; }
+        }
+        else if (Slang.ShotCount(e.Raw) is { } n)
+        {   // «мінус» без цілей біля міста — не про нас (або запізнілий перепост)
+            if (hadCityThreat) line = $"🎯 {T("Мінус", "Минус")}" + (n > 1 ? $" {n}" : "");
+        }
+        else if (e.Signal == KhSignal.Threat && u is { Threat: { Recon: false, Pos: { } p } t } && ThreatGeo.Km(p, Center) <= 40
+                 // без власного місця («Над вами!», «ховайтеся») — лише щойно вибух / над районом, інакше це шум
+                 && (e.Places.Count > 0 || (u.Value.StageChanged && t.Stage is TrackStage.Impact or TrackStage.Overhead)))
+        {
+            line = ThreatLine(e, t, u.Value.StageChanged, Ru);
+            loud = !hadCityThreat;
+        }
+
+        if (Ppo(e.Raw) && now - _ppoAt > TimeSpan.FromMinutes(3))
+        {
+            _ppoAt = now;
+            var ppoLine = T("🛡 Працює ППО", "🛡 Работает ПВО");
+            line = line is null ? ppoLine : line + "\n" + ppoLine;
+        }
+        if (line is null) return null;
+
+        // Той самий рядок (перепост іншим каналом) ≤3 хв — не дублюємо.
+        if (_recent.TryGetValue(line, out var was) && now - was < TimeSpan.FromMinutes(3)) return null;
+        _recent[line] = now;
+        if (_recent.Count > 200)
+            foreach (var k in _recent.Where(kv => now - kv.Value > TimeSpan.FromMinutes(10)).Select(kv => kv.Key).ToList()) _recent.Remove(k);
+
+        return ($"{H(line)}\n\n{Foot}", !loud);
     }
+
+    // [fresh] — стадія змінилась саме цією подією (інакше «💥» від минулого вибуху липне до нових постів).
+    static string ThreatLine(KhEvent e, Threat t, bool fresh, bool ru)
+    {
+        var places = e.Places.Count > 0 ? string.Join(", ", e.Places) : t.LastPlace;
+        if (ru) places = RuPlace(places);
+        var icon = e.Kind switch
+        {
+            ThreatKind.Drone => "🛵",
+            ThreatKind.Missile => "🚀",
+            ThreatKind.Ballistic => "☄️",
+            ThreatKind.Kab => "💣",
+            ThreatKind.Aviation => "✈️",
+            ThreatKind.Fpv => "🪖",
+            _ => "🎯",
+        };
+        if (e.Extra is { } ex && (ex.Contains("fpv", StringComparison.OrdinalIgnoreCase) || ex.Contains("фпв", StringComparison.OrdinalIgnoreCase))) icon = "🪖";
+        var label = e.Extra is { Length: > 0 } x ? char.ToUpper(x[0]) + x[1..] : e.Kind switch
+        {
+            ThreatKind.Drone => "Шахед",
+            ThreatKind.Missile => "Ракета",
+            ThreatKind.Ballistic => ru ? "Баллистика" : "Балістика",
+            ThreatKind.Kab => "КАБ",
+            ThreatKind.Aviation => ru ? "Авиация" : "Авіація",
+            ThreatKind.Fpv => ru ? "FPV" : "ФПВ",
+            _ => ru ? "Цель" : "Ціль",
+        };
+        if (ru) label = RuWord(label);
+        var stage = fresh ? t.Stage : TrackStage.Approaching;
+        var boom = ru ? "💥 Громко" : "💥 Гучно";
+        if (stage == TrackStage.Impact) return places.Length > 0 ? $"{boom} — {places}" : boom;
+        var what = $"{icon} {label}";
+        if (places.Length == 0) return what;
+        return stage switch
+        {
+            TrackStage.Overhead => $"⚠️ {what} над {places}",
+            TrackStage.Imminent => ru ? $"❗ {what} на подлёте — {places}" : $"❗ {what} на підльоті — {places}",
+            _ => $"{what} на {places}",
+        };
+    }
+
+    static bool Ppo(string s) => System.Text.RegularExpressions.Regex.IsMatch(s.ToLowerInvariant(), @"\bппо\b|протиповітрян|зенітн");
 
     // ── 3. Зведення раз на 8 хв: карта зони + «Шахед на Люботин» ────────────────
     public static readonly TimeSpan Every = TimeSpan.FromMinutes(8);
@@ -165,8 +241,8 @@ public sealed class CityChannel
     public string DigestCore(IReadOnlyList<Threat> inScope, IReadOnlyList<Threat> all, int max = 12)
     {
         var rows = inScope
-            .GroupBy(t => (label: Label(MapImage.Category(t, all)), place: Place(t)))
-            .Select(g => (g.Key.label, g.Key.place, n: g.Sum(t => Math.Max(1, t.Amount)),
+            .GroupBy(t => (cat: MapImage.Category(t, all), place: Place(t)))
+            .Select(g => (label: $"{Icon(g.Key.cat)} {Label(g.Key.cat)}", g.Key.place, n: g.Sum(t => Math.Max(1, t.Amount)),
                           km: g.Min(t => ThreatGeo.Km(t.Pos!.Value, Center))))
             .OrderBy(r => r.km).ToList();
         var sb = new StringBuilder();
@@ -198,6 +274,17 @@ public sealed class CityChannel
     /// Підпис останнього зведення, коли наліт скінчився.
     public string ClosedText(string lastText, DateTime now) =>
         lastText + T($"\n✅ <b>Цілей більше не видно</b> · {now:HH:mm}", $"\n✅ <b>Целей больше не видно</b> · {now:HH:mm}");
+
+    static string Icon(string cat) => cat switch
+    {
+        "shahed" or "shahed_jet" => "🛵",
+        "missile" or "banderol" => "🚀",
+        "balist" => "☄️",
+        "kab" => "💣",
+        "fpv" => "🪖",
+        "avia" => "✈️",
+        _ => "🎯",
+    };
 
     string Label(string cat) => cat switch
     {
@@ -260,6 +347,14 @@ public sealed class CityChannel
         ["Павлове Поле"] = "Павлово Поле", ["Шишківка"] = "Шишковка", ["Журавлівка"] = "Журавлевка",
         ["Велика Данилівка"] = "Большая Даниловка", ["Мала Данилівка"] = "Малая Даниловка",
         ["Приколотне"] = "Приколотное", ["Барвінкове"] = "Барвенково", ["Близнюки"] = "Близнецы",
+        ["Печеніги"] = "Печенеги", ["Краснопавлівка"] = "Краснопавловка", ["Зміїв"] = "Змиев", ["Красноград"] = "Красноград",
+        ["Первомайський"] = "Первомайский", ["Великий Бурлук"] = "Великий Бурлук", ["Шевченкове"] = "Шевченково",
+        ["Суми"] = "Сумы", ["Полтава"] = "Полтава", ["Дніпро"] = "Днепр", ["Запоріжжя"] = "Запорожье", ["Луганськ"] = "Луганск",
+        ["Донецьк"] = "Донецк", ["Краматорськ"] = "Краматорск", ["Слов'янськ"] = "Славянск", ["Сєвєродонецьк"] = "Северодонецк",
+        ["Курськ"] = "Курск", ["Вороніж"] = "Воронеж", ["Кропивницький"] = "Кропивницкий", ["Чернігів"] = "Чернигов",
+        ["Миргород"] = "Миргород", ["Гадяч"] = "Гадяч", ["Карлівка"] = "Карловка", ["Лебедин"] = "Лебедин", ["Охтирка"] = "Ахтырка",
+        ["Нова Водолага"] = "Новая Водолага", ["Сахновщина"] = "Сахновщина", ["Оскіл"] = "Оскол", ["Борова"] = "Боровая",
+        ["Коломак"] = "Коломак", ["Кегичівка"] = "Кегичевка", ["Старий Мерчик"] = "Старый Мерчик", ["Бабаї"] = "Бабаи",
         ["Балістика"] = "Баллистика", ["Молнія"] = "Молния", ["Бандероль"] = "Бандероль",
         ["Реакт. шахед"] = "Реакт. шахед", ["Розвідник"] = "Разведчик", ["Шахед"] = "Шахед",
     };

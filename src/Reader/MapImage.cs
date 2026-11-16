@@ -64,15 +64,27 @@ public static class MapImage
         View? view = null,
         IReadOnlyCollection<string>? focus = null,
         IReadOnlyList<(string name, double lon, double lat)>? towns = null,
-        bool jpeg = false)
+        bool jpeg = false,
+        Func<string, string>? tr = null,
+        Func<Threat, bool>? inZone = null)
     {
         // [logo] — інший логотип з assets/ (міські канали); null — звичайний logo.png.
         // [view] — рамка (null — уся Україна); [focus] — області (англ.), решту притлумлюємо;
         // [towns] — дрібніші підписи міст для крупної рамки; [jpeg] — менший файл (канали).
+        // [tr] — переклад підписів (харківський канал — російською), [inZone] — ціль у зоні каналу:
+        // з [focus] легенда рахує лише цілі й тривоги зони, а не всієї України.
         _logoOverride = logo is null ? null : Logo(logo);
+        _tr = tr; _inZone = inZone;
         try { return RenderCore(home, threats, title, subtitle, oblastLevels, showHome, raionLevels, oblastWhole, tone, view ?? Ukraine, focus, towns, jpeg); }
-        finally { _logoOverride = null; }
+        finally { _logoOverride = null; _tr = null; _inZone = null; }
     }
+
+    [ThreadStatic] static Func<string, string>? _tr;
+    [ThreadStatic] static Func<Threat, bool>? _inZone;
+    static bool Ru => _tr is not null;
+    static string Tr(string s) => _tr is null ? s : _tr(s);
+    /// Підпис картки: українською або (харківський канал) російською.
+    static string L(string uk, string ru) => Ru ? ru : uk;
 
     static byte[] RenderCore(
         (double lat, double lon) home,
@@ -122,7 +134,8 @@ public static class MapImage
         foreach (var (name, rings) in oblasts)
         {
             var level = oblastLevels != null && oblastLevels.TryGetValue(name, out var lv) ? lv : "";
-            if (level == "red") reds++; else if (level == "yellow") yellows++;
+            bool counts = focus is null || (focus.Contains(name) && name != "Kiev City"); // зона каналу — лише її області
+            if (counts) { if (level == "red") reds++; else if (level == "yellow") yellows++; }
             // Заливаємо ЦІЛУ область лише коли тривога на всю область (oblastWhole).
             // Якщо oblastWhole не передано — стара поведінка (заливка за level).
             var wlv = oblastWhole != null
@@ -259,7 +272,7 @@ public static class MapImage
             using (var fill = new SKPaint { IsAntialias = true, Shader = SKShader.CreateRadialGradient(ctr, r, new[] { zc.WithAlpha(0x2E), zc.WithAlpha(0x0A) }, null, SKShaderTileMode.Clamp) })
                 canvas.DrawCircle(ctr, r, fill);
             using (var ring = Dashed(zc.WithAlpha(0xCC), 1.6f)) canvas.DrawCircle(ctr, r, ring);
-            labels.Add((z.kab ? "загроза КАБ" : "авіація", new SKPoint(ctr.X, ctr.Y - r - 6), zc, 14, 'c')); // над колом: нижче — міста
+            labels.Add((z.kab ? L("загроза КАБ", "угроза КАБ") : L("авіація", "авиация"), new SKPoint(ctr.X, ctr.Y - r - 6), zc, 14, 'c')); // над колом: нижче — міста
         }
 
         // «Лише пуск» (ціль невідома): коло, куди могла долетіти.
@@ -275,7 +288,7 @@ public static class MapImage
                 using (var fill = new SKPaint { Color = c.WithAlpha(0x10), IsAntialias = true }) canvas.DrawCircle(at, r, fill);
                 using (var ring = Dashed(c.WithAlpha(0xB3), 1.6f)) canvas.DrawCircle(at, r, ring);
             }
-            labels.Add(($"пуск: {t.FromName}", new SKPoint(at.X, at.Y + 30), c, 14, 'c'));
+            labels.Add(($"пуск: {Tr(t.FromName ?? "")}", new SKPoint(at.X, at.Y + 30), c, 14, 'c'));
         }
 
         // Політ балістики / КАБ: увесь шлях пунктиром, пройдене — суцільно, приціл на цілі.
@@ -296,8 +309,8 @@ public static class MapImage
                 canvas.DrawLine(b.X, b.Y - 7, b.X, b.Y + 7, aim);
             }
             if (t.FromName is { Length: > 0 } fn && !t.FromGuess)
-                labels.Add(($"пуск: {fn}", new SKPoint(a.X + 14, a.Y + 5), c, 13, 'l'));
-            if (!landed) labels.Add((left < 1 ? "<1 хв" : $"{left:0} хв", new SKPoint(at.X - 18, at.Y + 5), c, 15, 'r'));
+                labels.Add(($"пуск: {Tr(fn)}", new SKPoint(a.X + 14, a.Y + 5), c, 13, 'l'));
+            if (!landed) labels.Add((left < 1 ? L("<1 хв", "<1 мин") : $"{left:0} {L("хв", "мин")}", new SKPoint(at.X - 18, at.Y + 5), c, 15, 'r'));
         }
 
         // 🚀 Групи пуску (прогноз): куди летять типовим маршрутом.
@@ -335,7 +348,7 @@ public static class MapImage
             var at = P(t.Pos!.Value.lon, t.Pos!.Value.lat);
             float r = Math.Max(Km2Px(t.Kind == ThreatKind.Fpv ? 3 : 8), 22);
             using (var ring = Dashed(c.WithAlpha(0xB3), 1.6f)) canvas.DrawCircle(at, r, ring);
-            labels.Add(("кружляє", new SKPoint(at.X, at.Y + r + 15), c, 13, 'c'));
+            labels.Add((L("кружляє", "кружит"), new SKPoint(at.X, at.Y + r + 15), c, 13, 'c'));
         }
 
         // Курс (лише справжній — ціль бачили в русі): пунктир на ~10 хв польоту, ≤55 км.
@@ -407,7 +420,7 @@ public static class MapImage
             canvas.SaveLayer(fadeLayer);
             DrawFig(canvas, at, ThreatGeo.Bearing(p, next), cat, CatColor(cat), Ppu);
             canvas.Restore();
-            labels.Add(("прогноз", new SKPoint(at.X, at.Y + 30), CatColor(cat), 13, 'c'));
+            labels.Add((L("прогноз", "прогноз"), new SKPoint(at.X, at.Y + 30), CatColor(cat), 13, 'c'));
         }
         foreach (var (t, _) in drawn)
         {
@@ -419,7 +432,7 @@ public static class MapImage
             DrawFig(canvas, pt, t.Heading ?? 0, cat, CatColor(cat), Ppu,
                 glow: near ? new SKColor(0xFF, 0x45, 0x3A) : null, glowStrength: near ? 0.9f : 0.55f);
             if (faded) canvas.Restore();
-            if (t.Down) labels.Add((t.AltNote is { Length: > 0 } an ? an : "падає", new SKPoint(pt.X, pt.Y + 32), new SKColor(0xFF, 0x6B, 0x5E), 13, 'c'));
+            if (t.Down) labels.Add((t.AltNote is { Length: > 0 } an ? Tr(an) : L("падає", "падает"), new SKPoint(pt.X, pt.Y + 32), new SKColor(0xFF, 0x6B, 0x5E), 13, 'c'));
         }
 
         // ×N: ціль або група пуску з кількома бортами.
@@ -435,8 +448,9 @@ public static class MapImage
             return targetPts.Any(big.Contains) || pills.Any(r.IntersectsWith);
         }
         var placed = new List<SKRect>(); // підписи міст не налазять один на одного (крупна рамка — густо)
-        foreach (var (nm, lon, lat, small) in allCities)
+        foreach (var (nm0, lon, lat, small) in allCities)
         {
+            var nm = Tr(nm0);
             var cp = P(lon, lat);
             if (cp.X < 0 || cp.X > W || cp.Y < padTop || cp.Y > H) continue; // поза рамкою
             var (tp, hp2) = small ? (townText, townHalo) : (cityText, cityHalo);
@@ -516,10 +530,12 @@ public static class MapImage
 
         // ── Картка-легенда в лівому нижньому куті (Молдова/Румунія — там порожньо) ──
         // Лише ті типи, що зараз є на карті (з польотами, пусками, групами й авіацією), з кількістю.
-        var kinds = drawn.Select(d => (cat: Cat(d.t), n: d.n))
-            .Concat(flights.Concat(launchOnly).Select(t => (cat: Cat(t), n: t.Amount)))
-            .Concat(groups.Select(g => (cat: g.Reactive ? "shahed_jet" : "shahed", n: g.Left)))
-            .Concat(zones.Select(z => (cat: "avia", n: 1)))
+        bool Z(Threat t) => _inZone is null || _inZone(t);
+        bool ZP((double lat, double lon) p) => focus is null || (OblastGeo.PolyName(p.lat, p.lon) is { } en && focus.Contains(en));
+        var kinds = drawn.Where(d => Z(d.t)).Select(d => (cat: Cat(d.t), n: d.n))
+            .Concat(flights.Concat(launchOnly).Where(Z).Select(t => (cat: Cat(t), n: t.Amount)))
+            .Concat(groups.Where(g => ZP(g.PosAt(now))).Select(g => (cat: g.Reactive ? "shahed_jet" : "shahed", n: g.Left)))
+            .Concat(zones.Where(z => ZP((z.lat, z.lon))).Select(z => (cat: "avia", n: 1)))
             .GroupBy(k => k.cat).Select(g => (cat: g.Key, n: g.Sum(k => k.n)))
             .OrderByDescending(k => k.n).ToList();
         int total = kinds.Where(k => k.cat != "avia").Sum(k => k.n);
@@ -547,11 +563,11 @@ public static class MapImage
         })
             canvas.DrawLine(card.Left + 14, card.Top + 1.5f, card.Left + 110, card.Top + 1.5f, acc);
         float x = card.Left + 14, y = card.Top + 26;
-        if (total > 0) canvas.DrawText($"На карті цілей: {total}", x, y, cardTitle);
+        if (total > 0) canvas.DrawText(focus is null ? $"На карті цілей: {total}" : $"{L("У зоні цілей", "В зоне целей")}: {total}", x, y, cardTitle);
         else
         {
             using var calm = new SKPaint { Typeface = UiBold, Color = new SKColor(0x2F, 0xD1, 0x7C), IsAntialias = true, TextSize = 17 };
-            canvas.DrawText("Цілей на карті немає", x, y, calm);
+            canvas.DrawText(focus is null ? "Цілей на карті немає" : L("У зоні цілей немає", "В зоне целей нет"), x, y, calm);
         }
         y += 14;
         for (int i = 0; i < kinds.Count; i++)
@@ -570,8 +586,8 @@ public static class MapImage
         y += kindRows * 30 + 22;
         using (var sw = new SKPaint { Color = AlarmRed.WithAlpha(0xD0), IsAntialias = true }) canvas.DrawRoundRect(new SKRect(x, y - 12, x + 15, y + 2), 4, 4, sw);
         using (var sw = new SKPaint { Color = AlarmYellow.WithAlpha(0xD0), IsAntialias = true }) canvas.DrawRoundRect(new SKRect(x + 140, y - 12, x + 155, y + 2), 4, 4, sw);
-        canvas.DrawText($"тривога {reds}", x + 21, y, cardText);
-        canvas.DrawText($"жовтий рівень {yellows}", x + 161, y, cardText);
+        canvas.DrawText($"{L("тривога", "тревога")} {reds}", x + 21, y, cardText);
+        canvas.DrawText($"{L("жовтий рівень", "жёлтый уровень")} {yellows}", x + 161, y, cardText);
         if (showHome)
         {
             y += 24;
@@ -1096,7 +1112,12 @@ public static class MapImage
         };
     }
 
-    static string KindLabel(string cat) => cat switch
+    static string KindLabel(string cat) => Ru ? cat switch
+    {
+        "balist" => "баллистика", "missile" => "ракеты", "banderol" => "бандероли", "kab" => "КАБ",
+        "avia" => "авиация / КАБ-зона", "fpv" => "FPV", "shahed" => "шахеды", "shahed_jet" => "реакт. шахеды",
+        _ => "цели",
+    } : cat switch
     {
         "balist" => "балістика", "missile" => "ракети", "banderol" => "бандеролі", "kab" => "КАБ",
         "avia" => "авіація / КАБ-зона", "fpv" => "ФПВ", "shahed" => "шахеди", "shahed_jet" => "реакт. шахеди",

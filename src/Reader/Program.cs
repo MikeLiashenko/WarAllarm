@@ -1994,7 +1994,8 @@ async Task<byte[]?> BuildCityMap(CityChannel cc)
     var subtitle = alarm + (cc.Ru ? $" · в зоне целей: ~{air}" : $" · у зоні цілей: ~{air}");
     return MapImage.Render((HomeLat, HomeLon), live, cc.MapTitle, subtitle, snap.ByPolygon,
         showHome: false, raionLevels: snap.ByRaion, oblastWhole: snap.ByOblastWhole, logo: cc.LogoFile,
-        view: cc.MapView, focus: cc.Info.Oblasts, towns: cc.TownPoints(), jpeg: true);
+        view: cc.MapView, focus: cc.Info.Oblasts, towns: cc.TownPoints(), jpeg: true,
+        tr: cc.Ru ? CityChannel.RuPlace : null, inZone: cc.InScope);
 }
 
 // Детальна ймовірність по ТОЧЦІ (бот, HTML): відсоток + типи + головні чинники.
@@ -3006,9 +3007,10 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
     // 🏙 Міський канал цієї зони (Київ/Харків): короткий пост про подію. Зі звуком — лише
     // нова загроза місту (до події біля міста цілей не було) або загроза балістики.
     var city = CityOf(zone);
+    bool hadCity = city is not null && tracker.Active.Any(t => NearBigCity(t) == zone);
     async Task CityPost(TrackUpdate? u)
     {
-        if (city?.EventPost(e, BallisticThreatText, DateTime.Now) is { } p) await city.Post(p.text, null, p.silent);
+        if (city?.EventPost(e, u, hadCity, BallisticThreatText, DateTime.Now) is { } p) await city.Post(p.text, null, p.silent);
     }
     if (e.Signal == KhSignal.News)
     {
@@ -3483,12 +3485,14 @@ async Task RunCitySim(CityChannel.City info, string path)
         else
         {
             var e = info.Key == "kyiv" ? KyivMonitor.Analyze(body) : KharkivMonitor.Analyze(body, MyDistrict);
+            bool hadCity = tracker.Active.Any(t => NearBigCity(t) == zone);
+            TrackUpdate? th = null;
             // Той самий порядок гілок, що в HandleKh.
             if (e.Signal == KhSignal.News || (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw)) || e.Signal == KhSignal.AlarmOn) { }
             else if (Slang.ShotCount(e.Raw) is { } shotN) tracker.MarkShotZone(zone, shotN, now);
-            else if (e.Signal == KhSignal.Threat) tracker.Ingest(e, zone, now);
+            else if (e.Signal == KhSignal.Threat) th = tracker.Ingest(e, zone, now);
             else tracker.Sweep(zone);
-            if (cc.EventPost(e, BallisticThreatText, now) is { } p) { posts++; await cc.Post(p.text, null, p.silent); }
+            if (cc.EventPost(e, th, hadCity, BallisticThreatText, now) is { } p) { posts++; await cc.Post(p.text, null, p.silent); }
         }
         await Digest(now);
     }
