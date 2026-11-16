@@ -18,7 +18,7 @@ public sealed record BotFeatures(
     Func<double, double, double, (bool alarm, string text)> AlarmAt, // (lat, lon, радіус км); text — простий текст («Шахед ~12 км»)
     Func<double, double, string, Task<byte[]?>> MapPng,      // карта з містом користувача
     Func<Task<string>> Ai,
-    Func<string> Stats,
+    Func<double, double, string, string> Stats, // 📈 аналітика тривог у місці користувача
     Func<double, double, Task<string>> Alerts,              // офіційні тривоги: твоя область + країна
     Func<Task<(byte[] png, string caption)>>? Night = null, // 🌙 підсумок ночі
     Func<string>? Sources = null, // 📡 які канали що дали (SourceHub)
@@ -440,7 +440,12 @@ public sealed class TelegramBot
             await Send(chat, _tracking.Remove(chat) ? "⏹ Стеження вимкнено." : "Ти ні за чим не стежиш. Обери ціль у 🛰 Цілі.");
             return;
         }
-        if (Match(text, cmd, "/stats", "📈", "аналітика")) { await Send(chat, _f.Stats()); return; }
+        if (Match(text, cmd, "/stats", "📈", "аналітика"))
+        {
+            if (!hasCity) { await Send(chat, "📍 <b>Спершу обери своє місто</b> — напиши назву або натисни 👇", CityKb); return; }
+            await Send(chat, _f.Stats(pl!.Lat, pl.Lon, pl.Name));
+            return;
+        }
         if (_f.Sources is { } srcs && Match(text, cmd, "/sources", "📡", "джерела")) { await Send(chat, srcs()); return; }
         if (Match(text, cmd, "/ai", "🤖", "ші", "ии"))
         {

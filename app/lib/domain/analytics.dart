@@ -15,6 +15,8 @@ const Map<String, ({String name, Color color})> kKindMeta = {
   'Fpv': (name: 'FPV-дрон', color: Color(0xFF2DD4BF)),
   'Target': (name: 'Ціль', color: Color(0xFF8792A6)),
   'Unknown': (name: 'Інше', color: Color(0xFF8792A6)),
+  'Official': (name: 'Повітряна тривога', color: Color(0xFF6E8BFF)),
+  'Shelling': (name: 'Обстріл', color: Color(0xFFE0A15A)),
 };
 
 const Map<String, IconData> kKindIcon = {
@@ -26,6 +28,8 @@ const Map<String, IconData> kKindIcon = {
   'Fpv': Icons.toys_rounded,
   'Target': Icons.gps_fixed_rounded,
   'Unknown': Icons.help_outline_rounded,
+  'Official': Icons.campaign_rounded,
+  'Shelling': Icons.whatshot_rounded,
 };
 
 /// Journal zone → display name ('UA' = country-wide alerts).
@@ -100,6 +104,7 @@ class AnalyticsSummary {
     required this.longestQuiet,
     required this.nightAlarms,
     required this.recent,
+    required this.alarmMinutes,
   });
 
   final int days;
@@ -120,6 +125,7 @@ class AnalyticsSummary {
   final int longestStreak, currentStreak, longestQuiet;
   final int nightAlarms; // 22:00–05:59
   final List<AnalyticsRow> recent; // newest first
+  final int alarmMinutes; // скільки хвилин під тривогою (якщо відомо)
 
   double get avgPerDay => alarms / (days <= 0 ? 1 : days);
   int get quietDays => (days - daysWithAlarms).clamp(0, days);
@@ -280,6 +286,7 @@ class AnalyticsSummary {
       longestQuiet: quiet,
       nightAlarms: night,
       recent: recent.take(40).toList(),
+      alarmMinutes: al.fold(0, (a, r) => a + r.minutes),
     );
   }
 }

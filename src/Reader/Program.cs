@@ -524,6 +524,21 @@ if (args.Length >= 2 && args[0].Equals("ballreplay", StringComparison.OrdinalIgn
     return;
 }
 
+// ── 📈 Історія тривог по районах з журналу (оффлайн):  dotnet run -- arealog [journal] [lat lon]
+// Відновлює її, як на сервері при першому запуску, і показує аналітику точки (типово Харків).
+if (args.Length >= 1 && args[0].Equals("arealog", StringComparison.OrdinalIgnoreCase))
+{
+    var dir = args.Length >= 2 ? args[1] : "journal";
+    int posts = AreaLog.Backfill(dir);
+    double la = args.Length >= 4 ? double.Parse(args[2], CultureInfo.InvariantCulture) : 49.9935;
+    double lo = args.Length >= 4 ? double.Parse(args[3], CultureInfo.InvariantCulture) : 36.2304;
+    Console.WriteLine($"Постів @{AreaLog.Channel}: {posts}\n");
+    Console.WriteLine(Regex.Replace(PlaceStats(la, lo, $"{la:0.###}, {lo:0.###}"), "<[^>]+>", ""));
+    foreach (var (s, e, l) in AreaLog.AlarmsAt(la, lo, DateTime.Now.AddDays(-3)))
+        Console.WriteLine($"  {s:dd.MM HH:mm} – {e:HH:mm}  {(l == 2 ? "🔴" : "🟡")}  {(e - s).TotalMinutes:0} хв");
+    return;
+}
+
 // ── Тест сленгу (оффлайн): що розуміємо з живих постів.   dotnet run -- slang
 if (args.Length >= 1 && args[0].Equals("slang", StringComparison.OrdinalIgnoreCase))
 {
@@ -986,6 +1001,9 @@ else
 
 // ── Telegram-бот: підписка /start, /status, авто-сповіщення підписникам ───────
 var botToken = SecretOpt("telegram_bot_token");
+// 📈 Історія тривог по районах (аналітика «моїх місць» у застосунку й боті).
+AreaLog.Start(() => MapWriter.Publisher);
+
 if (!string.IsNullOrWhiteSpace(botToken))
 {
     var features = new BotFeatures(
@@ -995,7 +1013,7 @@ if (!string.IsNullOrWhiteSpace(botToken))
         PpoCleared: (la, lo) => BallisticAlert.PpoCleared(la, lo, DateTime.Now),
         MapPng: (lat, lon, name) => name.Length == 0 ? BuildBotMapPng(channel: true) : BuildBotMapPng(at: (lat, lon), name: name),
         Ai: BuildBotAi,
-        Stats: BuildBotStats,
+        Stats: PlaceStats,
         Alerts: BuildBotAlertsAt,
         Night: async () => { var (from, to) = NightSummary.Window(DateTime.Now); var r = await BuildNight(from, to); return (r.png, r.html); },
         Sources: BuildSourcesText,
@@ -1498,6 +1516,7 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             }
             prevActive = nowActive;
             ActiveAlarmOblasts.Clear(); ActiveAlarmOblasts.UnionWith(nowActive);
+            AreaLog.Sync(snap, DateTime.Now); // 📈 історія тривог по районах: звірка з офіційним фідом
             activeSeeded = true;
             // 1) API: покласти тривоги у state → публікується у Firebase (state/alerts).
             MapWriter.AlertsJson = BuildAlertsJson(snap);
@@ -2200,37 +2219,51 @@ string TargetText(Threat t, double lat, double lon, bool html = false)
     return string.Join("\n", lines);
 }
 
-// Аналітика з журналу alarms.csv (бот, HTML): сьогодні / тиждень / усього / пік / за типами.
-string BuildBotStats()
+// 📈 Аналітика тривог у МІСЦІ користувача (бот, HTML) — з історії по районах і громадах
+// (AreaLog): сьогодні / тиждень / 30 днів, години під тривогою, найнебезпечніша година, ніч,
+// що загрожувало поруч. Ті самі дані, що вкладка «Аналітика» в застосунку.
+string PlaceStats(double lat, double lon, string name)
 {
-    if (!File.Exists("alarms.csv")) return "📈 Ще немає даних — журнал зʼявиться після перших тривог.";
-    var rows = File.ReadAllLines("alarms.csv").Select(l => l.Split(',')).Where(c => c.Length >= 5).ToList();
-    if (rows.Count == 0) return "📈 Журнал поки порожній — тихо 🟢";
-    var today = DateTime.Now.ToString("yyyy-MM-dd");
-    var weekAgo = DateTime.Now.AddDays(-6).ToString("yyyy-MM-dd");
-    bool IsAlarm(string[] c) => c[4] is "alarm" or "urgent";
-    int todayA = rows.Count(c => IsAlarm(c) && c[0] == today);
-    int week = rows.Count(c => IsAlarm(c) && string.CompareOrdinal(c[0], weekAgo) >= 0);
-    int total = rows.Count(IsAlarm);
-    int impacts = rows.Count(c => c[4] == "impact");
+    var now = DateTime.Now;
+    var list = AreaLog.AlarmsAt(lat, lon, now.AddDays(-30));
+    var sb = new StringBuilder($"📈 <b>Аналітика тривог</b> · {H(name)}\n\n");
+    if (list.Count == 0)
+        return sb.Append(AreaLog.HasData
+            ? "🟢 За останні 30 днів тривог тут не було."
+            : "📈 Ще збираю історію тривог — зазирни трохи згодом.").ToString();
+    int Count(DateTime from) => list.Count(x => x.start >= from);
+    double Hours(DateTime from) => list.Where(x => x.end > from).Sum(x => (x.end - (x.start > from ? x.start : from)).TotalHours);
+    var today = now.Date;
+    sb.AppendLine($"📅 Сьогодні: <b>{Count(today)}</b> · за 7 днів: <b>{Count(today.AddDays(-6))}</b> · за 30 днів: <b>{list.Count}</b>");
+    sb.AppendLine($"⏱ Під тривогою: сьогодні {Hours(today):0.#} год · за 7 днів {Hours(today.AddDays(-6)):0.#} год");
     var hours = new int[24];
-    foreach (var c in rows.Where(IsAlarm))
-        if (c[1].Length >= 2 && int.TryParse(c[1].AsSpan(0, 2), out var h)) hours[h % 24]++;
-    int peak = 0; for (int i = 1; i < 24; i++) if (hours[i] > hours[peak]) peak = i;
-    var sb = new StringBuilder();
-    sb.AppendLine($"📈 <b>Аналітика тривог</b> · {H(MyCity)}");
-    sb.AppendLine();
-    sb.AppendLine($"📅 Сьогодні: <b>{todayA}</b> · за тиждень: <b>{week}</b>");
-    sb.AppendLine($"🗂 Усього: {total} · прильотів: {impacts}");
-    if (total > 0) sb.AppendLine($"⏰ Найнебезпечніша година: <b>{peak:00}:00</b>");
-    var byType = rows.Where(IsAlarm).GroupBy(c => c[3]).OrderByDescending(g => g.Count()).Take(4).ToList();
-    if (byType.Count > 0)
+    foreach (var x in list) hours[x.start.Hour]++;
+    int peak = Array.IndexOf(hours, hours.Max());
+    int night = list.Count(x => x.start.Hour >= 22 || x.start.Hour < 6);
+    sb.AppendLine($"⏰ Найчастіше починається о <b>{peak:00}:00</b> · вночі (22–06) — {night * 100 / list.Count}%");
+    var avg = TimeSpan.FromMinutes(list.Average(x => (x.end - x.start).TotalMinutes));
+    sb.AppendLine($"⌛ Середня тривога — {(avg.TotalHours >= 1 ? $"{(int)avg.TotalHours} год {avg.Minutes} хв" : $"{avg.Minutes} хв")}");
+    var last = list[^1];
+    sb.AppendLine(last.end >= now.AddMinutes(-1)
+        ? $"🔴 Зараз тривога — з {last.start:HH:mm}"
+        : $"🕓 Остання: {last.start:dd.MM HH:mm}–{last.end:HH:mm}");
+    var notes = AreaLog.NotesAt(lat, lon, now.AddDays(-30));
+    var byKind = notes.Where(n => n.Kind != "impact").GroupBy(n => n.Kind).OrderByDescending(g => g.Count()).ToList();
+    if (byKind.Count > 0)
     {
-        sb.AppendLine("\n<b>За типами</b>");
-        foreach (var g in byType) sb.AppendLine($"• {H(g.Key)} — {g.Count()}");
+        sb.AppendLine("\n<b>Загрози поруч (25 км) за 30 днів</b>");
+        foreach (var g in byKind.Take(5)) sb.AppendLine($"• {AreaKind(g.Key)} — {g.Count()}");
     }
+    int booms = notes.Count(n => n.Kind == "impact");
+    if (booms > 0) sb.AppendLine($"💥 Повідомлень про вибухи поруч: {booms}");
     return sb.ToString();
 }
+
+static string AreaKind(string k) => k switch
+{
+    "Drone" => "🛸 БпЛА", "Kab" => "💣 КАБ", "Ballistic" => "☄ Балістика / швидкісні цілі", "Missile" => "🚀 Ракети",
+    "Shelling" => "⚠️ Обстріл", _ => "❔ Інше",
+};
 
 // Офіційні тривоги для бота (HTML): область користувача + країна (free feed vadimklimenko).
 async Task<string> BuildBotAlertsAt(double lat, double lon)
@@ -2632,6 +2665,8 @@ async Task OnUpdate(Update update)
     var time = m.date.ToString("HH:mm:ss");
     var oneLine = m.message.Replace("\n", " ").Trim();
     if (chId != 0) Journal.Post(uname ?? title ?? chId.ToString(), m.id, m.date.ToLocalTime(), m.message); // 📒 кожен пост — у журнал
+    // 📈 Тривоги по районах і громадах — історія для аналітики будь-якого місця.
+    if (string.Equals(uname, AreaLog.Channel, StringComparison.OrdinalIgnoreCase)) AreaLog.Ingest(m.message, m.date.ToLocalTime());
 
     // Канал лише з каталогу джерел (не з наших спец-парсерів) — хабу ПОТРІБНІ повтори
     // з різних каналів: саме так він підтверджує ціль. Дедуп для нього не робимо.

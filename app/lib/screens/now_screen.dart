@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/alarm_controller.dart';
+import '../controllers/area_log_controller.dart';
 import '../controllers/alerts_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/nav_controller.dart';
@@ -299,7 +300,15 @@ class _NowScreenState extends State<NowScreen> {
             },
           ),
           gap,
-          AnalyticsDashboard(rows: data.rows, targetsNow: data.targets.length),
+          // 📈 Аналітика вибраних місць (їхні райони), без історії — журнал монітора.
+          Builder(builder: (context) {
+            final area = context.watch<AreaLogController>()..ensure(s.scope);
+            final mine = area.hasDataFor(s.scope);
+            return AnalyticsDashboard(
+              rows: mine ? area.rowsFor(s.scope) : data.rows,
+              targetsNow: data.targets.length,
+            );
+          }),
           const SizedBox(height: 8),
         ],
       ),

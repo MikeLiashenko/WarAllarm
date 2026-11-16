@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/area_log_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../domain/analytics.dart';
 import '../models/analytics_row.dart';
@@ -26,15 +27,34 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   String _period = '30';
   final Set<String> _kinds = {};
   String? _zone;
+  bool _mine = false; // аналітика «моїх місць» (а не журнал монітора)
+  List<String> _placeNames = const [];
+
+  static int _daysCovered(List<AnalyticsRow> rows) {
+    final d = {for (final r in rows) r.date}..remove('');
+    if (d.isEmpty) return 0;
+    final first = DateTime.tryParse((d.toList()..sort()).first);
+    return first == null ? d.length : DateTime.now().difference(first).inDays + 1;
+  }
 
   static const _periods = [('1', 'Доба'), ('7', '7 дн'), ('30', '30 дн'), ('90', '90 дн'), ('all', 'Усе')];
 
   @override
   Widget build(BuildContext context) {
     final data = context.watch<MapDataController>();
-    final all = data.rows;
+    final area = context.watch<AreaLogController>();
+    // 📈 Мої місця: офіційні тривоги в їхніх районах і громадах (історія Reader areaLog).
+    // Без місць або поки історії немає — журнал монітора (Харків/Київ), як раніше.
+    final places = data.places;
+    area.ensure(places);
+    final mine = places.isNotEmpty && area.hasDataFor(places);
+    final all = mine ? area.rowsFor(places) : data.rows;
+    final placeNames = [for (final p in places) p.name];
+    if (_zone != null && mine && !placeNames.contains(_zone)) _zone = null; // місце видалили
     final s = AnalyticsSummary.compute(all, _period, kinds: _kinds, zone: _zone);
     final base = AnalyticsSummary.compute(all, _period); // for filter chip counts
+    _mine = mine;
+    _placeNames = placeNames;
 
     return PageBody(
       child: LayoutBuilder(builder: (context, c) {
@@ -45,8 +65,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           children: [
             SectionHeader(
               title: 'Аналітика',
-              subtitle: '${all.length} подій у журналі'
-                  '${data.isDemo ? ' · демо-дані' : ''} · тривоги, прильоти, патерни',
+              subtitle: mine
+                  ? 'Офіційні тривоги у ваших місцях · ${all.length} подій за ${_daysCovered(all)} дн'
+                  : places.isNotEmpty && area.loading
+                      ? 'Завантажую історію тривог для ваших місць…'
+                      : '${all.length} подій у журналі'
+                          '${data.isDemo ? ' · демо-дані' : ''} · тривоги, прильоти, патерни',
               icon: Icons.insights_rounded,
               iconColor: AppColors.primary,
               trailing: mid ? _periodPicker() : null,
@@ -125,7 +149,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       );
 
   Widget _filters(AnalyticsSummary base) {
-    final zones = base.zones.map((z) => z.$1).where((z) => z != '—').toList();
+    final zones = _mine ? _placeNames : base.zones.map((z) => z.$1).where((z) => z != '—').toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -160,8 +184,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             child: Row(
               children: [
                 FilterPill(
-                  label: 'Уся Україна',
-                  icon: Icons.public_rounded,
+                  label: _mine ? 'Усі мої місця' : 'Уся Україна',
+                  icon: _mine ? Icons.place_rounded : Icons.public_rounded,
                   selected: _zone == null,
                   onTap: () => setState(() => _zone = null),
                 ),
@@ -255,6 +279,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         unit: 'дн',
         note: 'рекорд за період ${s.longestStreak} дн',
       ),
+      if (s.alarmMinutes > 0)
+        KpiTile(
+          icon: Icons.hourglass_bottom_rounded,
+          color: AppColors.highlight,
+          label: 'Під тривогою',
+          value: s.alarmMinutes >= 600
+              ? '${(s.alarmMinutes / 60).round()}'
+              : (s.alarmMinutes / 60).toStringAsFixed(1),
+          unit: 'год',
+          note: s.alarms == 0
+              ? 'тривог не було'
+              : 'у середньому ${(s.alarmMinutes / s.alarms).round()} хв на тривогу',
+        )
+      else
       KpiTile(
         icon: Icons.radar_rounded,
         color: AppColors.highlight,

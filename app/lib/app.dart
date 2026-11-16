@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'controllers/area_log_controller.dart';
 import 'controllers/accuracy_controller.dart';
 import 'controllers/ai_controller.dart';
 import 'controllers/alarm_controller.dart';
@@ -53,6 +54,10 @@ class WarAlarmApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<MapDataController>(
           create: (_) => MapDataController(rtdb, store)..start(),
+        ),
+        // 📈 Історія тривог по районах для аналітики «моїх місць» (areaLog).
+        ChangeNotifierProvider<AreaLogController>(
+          create: (ctx) => AreaLogController(ctx.read<RtdbService>()),
         ),
         // Official per-oblast air-raid status (red/yellow), no token needed.
         ChangeNotifierProvider<AlertsController>(

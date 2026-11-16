@@ -58,7 +58,8 @@ public static class OfficialAlerts
         Dictionary<string, string>? ByOblastWhole = null,
         List<string>? RedWholeUa = null,
         HashSet<string>? PartUa = null,
-        bool Ok = false)
+        bool Ok = false,
+        Dictionary<string, string>? RaionObl = null) // «X район» → англ. назва області
     {
         /// Тривога саме в цій точці: на всю область — її рівень, інакше — рівень району.
         public string? LevelAt(double lat, double lon)
@@ -94,7 +95,8 @@ public static class OfficialAlerts
         var byOblastWhole = new Dictionary<string, string>(); // «n» → red/yellow ЛИШЕ коли тривога на всю область
         var redWholeUa = new List<string>();
         var partUa = new HashSet<string>();
-        Snapshot Snap() => new(byPoly, redUa, yellowUa, byRaion, byOblastWhole, redWholeUa, partUa);
+        var raionObl = new Dictionary<string, string>();
+        Snapshot Snap() => new(byPoly, redUa, yellowUa, byRaion, byOblastWhole, redWholeUa, partUa, RaionObl: raionObl);
         Snapshot Failed() => _lastGood is { } g && DateTime.Now - _lastGoodAt < TimeSpan.FromMinutes(10) ? g with { Ok = false } : Snap();
         try
         {
@@ -119,6 +121,7 @@ public static class OfficialAlerts
                         if (!don) continue;
                         var dlvl = Level(d.Value);
                         byRaion[d.Name] = dlvl; // ключ — назва району як у фіді
+                        raionObl[d.Name] = en;
                         if (level != "red") level = dlvl; // найвищий рівень: червоний перебиває жовтий
                     }
 

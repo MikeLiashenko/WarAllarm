@@ -8,12 +8,20 @@ class AnalyticsRow {
   final String kind;
   final String tag; // alarm | urgent | impact
 
+  /// Тривалість тривоги, хв (історія по районах; 0 — невідомо).
+  final int minutes;
+
+  /// Рівень офіційної тривоги: 2 червона, 1 жовта, 0 — невідомо.
+  final int level;
+
   const AnalyticsRow({
     required this.date,
     required this.hour,
     required this.zone,
     required this.kind,
     required this.tag,
+    this.minutes = 0,
+    this.level = 0,
   });
 
   bool get isImpact => tag == 'impact';

@@ -36,20 +36,23 @@ The Reader writes with this secret, which bypasses the rules below.
 > show it. (A full service-account token also works, but the secret is simplest
 > for a single server.)
 
-### 2. Let the app read only the `state` node
+### 2. Let the app read only the `state` and `areaLog` nodes
 Firebase console → **Realtime Database** → **Rules** → set and **Publish**:
 ```json
 {
   "rules": {
     ".read": false,
     ".write": false,
-    "state": { ".read": true, ".write": false }
+    "state": { ".read": true, ".write": false },
+    "areaLog": { ".read": true, ".write": false }
   }
 }
 ```
-This exposes **only** the live-state node for public (guest) read, matching the
-MVP's no-auth design. Everything else stays locked. The Reader still writes via
-the secret.
+This exposes **only** the live-state node and the alarm history by raion
+(`areaLog/<oblast>/<day>`, written by `AreaLog.cs`, read once by the app's
+analytics for the user's places) for public (guest) read, matching the MVP's
+no-auth design. Everything else stays locked. The Reader still writes via the
+secret.
 
 ## Run it
 1. Start the Reader: `cd src/Reader && dotnet run`
