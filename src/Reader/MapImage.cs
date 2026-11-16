@@ -10,6 +10,28 @@ public static class MapImage
     // Ті самі межі, що у Flutter-карті.
     const double Lon0 = 22.14, LonSpan = 18.09, Lat1 = 52.38, LatSpan = 7.99;
 
+    /// Рамка карти: західна довгота, ширина (°), північна широта, висота (°).
+    /// Міські канали малюють свої області крупно, решта — уся Україна.
+    public readonly record struct View(double Lon0, double LonSpan, double Lat1, double LatSpan);
+    public static readonly View Ukraine = new(Lon0, LonSpan, Lat1, LatSpan);
+
+    /// Рамка навколо областей (англ. назви полігонів) з полем [marginDeg]; співвідношення
+    /// сторін тягнемо до [minAspect]..[maxAspect] (ширина/висота), щоб картинка не була «смугою».
+    public static View ViewOf(IEnumerable<string> oblastsEn, double marginDeg = 0.2, double minAspect = 1.0, double maxAspect = 1.5)
+    {
+        var (minLat, maxLat, minLon, maxLon) = OblastGeo.BoxOf(oblastsEn);
+        minLat -= marginDeg; maxLat += marginDeg; minLon -= marginDeg; maxLon += marginDeg;
+        double k = Math.Cos((minLat + maxLat) / 2 * Math.PI / 180);
+        double w = maxLon - minLon, h = maxLat - minLat, aspect = w * k / h;
+        if (aspect < minAspect) { double nw = minAspect * h / k; minLon -= (nw - w) / 2; w = nw; }
+        else if (aspect > maxAspect) { double nh = w * k / maxAspect; minLat -= (nh - h) / 2; h = nh; }
+        return new View(minLon, w, minLat + h, h);
+    }
+
+    /// Категорія цілі — та сама, що на карті (невідома «ціль» → шахед / реактивний за роєм).
+    public static string Category(Threat t, IReadOnlyList<Threat> all) =>
+        ThreatTracker.JetGuess(t, all) is { } jet ? (jet ? "shahed_jet" : "shahed") : CatOf(t);
+
     // Великі міста з підписами (як у застосунку): назва, lon, lat.
     static readonly (string name, double lon, double lat)[] Cities =
     {
@@ -38,11 +60,17 @@ public static class MapImage
         Dictionary<string, string>? raionLevels = null,
         Dictionary<string, string>? oblastWhole = null,
         string tone = "",
-        string? logo = null)
+        string? logo = null,
+        View? view = null,
+        IReadOnlyCollection<string>? focus = null,
+        IReadOnlyList<(string name, double lon, double lat)>? towns = null,
+        bool jpeg = false)
     {
         // [logo] — інший логотип з assets/ (міські канали); null — звичайний logo.png.
+        // [view] — рамка (null — уся Україна); [focus] — області (англ.), решту притлумлюємо;
+        // [towns] — дрібніші підписи міст для крупної рамки; [jpeg] — менший файл (канали).
         _logoOverride = logo is null ? null : Logo(logo);
-        try { return RenderCore(home, threats, title, subtitle, oblastLevels, showHome, raionLevels, oblastWhole, tone); }
+        try { return RenderCore(home, threats, title, subtitle, oblastLevels, showHome, raionLevels, oblastWhole, tone, view ?? Ukraine, focus, towns, jpeg); }
         finally { _logoOverride = null; }
     }
 
@@ -55,9 +83,14 @@ public static class MapImage
         bool showHome,
         Dictionary<string, string>? raionLevels,
         Dictionary<string, string>? oblastWhole,
-        string tone)
+        string tone,
+        View view,
+        IReadOnlyCollection<string>? focus,
+        IReadOnlyList<(string name, double lon, double lat)>? towns,
+        bool jpeg)
     {
         const int W = 1000, padTop = 80, pad = 16;
+        var (Lon0, LonSpan, Lat1, LatSpan) = view;
         double midLat = (Lat1 + (Lat1 - LatSpan)) / 2;
         double aspect = (LonSpan / LatSpan) * Math.Cos(midLat * Math.PI / 180);
         int pw = W - 2 * pad;
@@ -69,6 +102,9 @@ public static class MapImage
         using var canvas = new SKCanvas(bmp);
         var bg = Bg;
         canvas.Clear(bg);
+        // Усе географічне — лише в полі карти (крупна рамка: сусідні області не лізуть на заголовок).
+        canvas.Save();
+        canvas.ClipRect(new SKRect(0, padTop - 4, W, H));
 
         SKPoint P(double lon, double lat) => new(
             (float)(pad + (lon - Lon0) / LonSpan * pw),
@@ -151,6 +187,10 @@ public static class MapImage
             using var edge = new SKPaint { Color = (wlv == "red" ? AlarmRed : AlarmYellow).WithAlpha(0xE6), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.4f, StrokeJoin = SKStrokeJoin.Round };
             canvas.DrawPath(path, edge);
         }
+        if (focus is { Count: > 0 })
+            using (var dim = new SKPaint { Color = Bg.WithAlpha(0x70), IsAntialias = true })
+                foreach (var (name, path, _) in obPaths)
+                    if (!focus.Contains(name)) canvas.DrawPath(path, dim);
         foreach (var (_, path, _) in obPaths) path.Dispose();
 
         // ── Кола 50 / 100 км навколо дому: одразу видно, наскільки ціль близько ──
@@ -329,7 +369,18 @@ public static class MapImage
         using var cityDotRim = new SKPaint { Color = MapLand, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.2f };
         using var cityText = new SKPaint { Typeface = Ui, Color = TextPrimary, IsAntialias = true, TextSize = 15 };
         using var cityHalo = new SKPaint { Typeface = Ui, Color = MapLand, IsAntialias = true, TextSize = 15, Style = SKPaintStyle.Stroke, StrokeWidth = 4, StrokeJoin = SKStrokeJoin.Round };
-        foreach (var (_, lon, lat) in Cities) { canvas.DrawCircle(P(lon, lat), 2.8f, cityDot); canvas.DrawCircle(P(lon, lat), 2.8f, cityDotRim); }
+        // Крупна рамка: ще й міста області (дрібніше); великі міста з тим самим ім'ям не двоїмо.
+        var allCities = Cities.Select(c => (c.name, c.lon, c.lat, small: false))
+            .Concat((towns ?? Array.Empty<(string name, double lon, double lat)>())
+                .Where(t => !Cities.Any(c => c.name == t.name)).Select(t => (t.name, t.lon, t.lat, small: true)))
+            .ToList();
+        using var townText = new SKPaint { Typeface = Ui, Color = TextPrimary.WithAlpha(0xD8), IsAntialias = true, TextSize = 13 };
+        using var townHalo = new SKPaint { Typeface = Ui, Color = MapLand, IsAntialias = true, TextSize = 13, Style = SKPaintStyle.Stroke, StrokeWidth = 3.5f, StrokeJoin = SKStrokeJoin.Round };
+        foreach (var (_, lon, lat, small) in allCities)
+        {
+            float r = small ? 2.2f : 2.8f;
+            canvas.DrawCircle(P(lon, lat), r, cityDot); canvas.DrawCircle(P(lon, lat), r, cityDotRim);
+        }
 
         const float Ppu = 2.3f; // розмір силуету: шахед ≈ 40 px на картинці 1000 px
         using var fadeLayer = new SKPaint { Color = SKColors.White.WithAlpha(0x80) };
@@ -383,19 +434,25 @@ public static class MapImage
             var big = r; big.Inflate(14, 14);
             return targetPts.Any(big.Contains) || pills.Any(r.IntersectsWith);
         }
-        foreach (var (nm, lon, lat) in Cities)
+        var placed = new List<SKRect>(); // підписи міст не налазять один на одного (крупна рамка — густо)
+        foreach (var (nm, lon, lat, small) in allCities)
         {
             var cp = P(lon, lat);
-            float tw = cityText.MeasureText(nm);
-            var right = new SKRect(cp.X + 5, cp.Y - 17, cp.X + 5 + tw, cp.Y);
-            var left = new SKRect(cp.X - 5 - tw, cp.Y - 17, cp.X - 5, cp.Y);
-            var below = new SKRect(cp.X - tw / 2, cp.Y + 4, cp.X + tw / 2, cp.Y + 20);
-            var below2 = new SKRect(cp.X - tw / 2, cp.Y + 14, cp.X + tw / 2, cp.Y + 30); // ціль прямо на місті
+            if (cp.X < 0 || cp.X > W || cp.Y < padTop || cp.Y > H) continue; // поза рамкою
+            var (tp, hp2) = small ? (townText, townHalo) : (cityText, cityHalo);
+            float tw = tp.MeasureText(nm), th = small ? 15 : 17;
+            var right = new SKRect(cp.X + 5, cp.Y - th, cp.X + 5 + tw, cp.Y);
+            var left = new SKRect(cp.X - 5 - tw, cp.Y - th, cp.X - 5, cp.Y);
+            var below = new SKRect(cp.X - tw / 2, cp.Y + 4, cp.X + tw / 2, cp.Y + 4 + th);
+            var below2 = new SKRect(cp.X - tw / 2, cp.Y + 14, cp.X + tw / 2, cp.Y + 14 + th); // ціль прямо на місті
             // Біля краю картинки (Луганськ) — не справа, бо обріжеться до «Луганс».
             var fits = new[] { right, left, below, below2 }.Where(r => r.Left >= 2 && r.Right <= W - 2).ToArray();
-            var at = fits.FirstOrDefault(r => !HitsTarget(r), fits.Length > 0 ? fits[0] : left);
-            canvas.DrawText(nm, at.Left, at.Bottom - 4, cityHalo); // темна обводка для читабельності
-            canvas.DrawText(nm, at.Left, at.Bottom - 4, cityText);
+            bool Free(SKRect r) => !HitsTarget(r) && !placed.Any(r.IntersectsWith);
+            if (small && !fits.Any(Free)) continue; // дрібне місто без місця — пропускаємо
+            var at = fits.FirstOrDefault(Free, fits.Length > 0 ? fits[0] : left);
+            placed.Add(at);
+            canvas.DrawText(nm, at.Left, at.Bottom - 4, hp2); // темна обводка для читабельності
+            canvas.DrawText(nm, at.Left, at.Bottom - 4, tp);
         }
 
         // Підписи цілей («пуск: Бєлгород», «2 хв», «прогноз», «загроза КАБ») — поверх усього.
@@ -433,6 +490,8 @@ public static class MapImage
             canvas.DrawCircle(hp, 12, ring2);
             canvas.DrawCircle(hp, 5.5f, homePaint);
         }
+
+        canvas.Restore(); // кінець поля карти
 
         // ── Заголовок: назва, підзаголовок кольором РИЗИКУ (не кількості тривог) ──
         var subColor = tone switch
@@ -523,7 +582,7 @@ public static class MapImage
         DrawBrand(canvas, W - pad - 4, H - pad - 2, 16);
 
         using var img = SKImage.FromBitmap(bmp);
-        using var data = img.Encode(SKEncodedImageFormat.Png, 90);
+        using var data = jpeg ? img.Encode(SKEncodedImageFormat.Jpeg, 84) : img.Encode(SKEncodedImageFormat.Png, 90);
         return data.ToArray();
     }
 

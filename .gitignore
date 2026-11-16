@@ -38,3 +38,4 @@ src/Reader/sources_check_error.txt
 
 # --- build_all.bat output ---
 release/
+src/Reader/citysim_*.jpg

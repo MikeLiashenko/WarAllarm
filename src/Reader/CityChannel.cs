@@ -4,27 +4,41 @@ using System.Text.Json;
 
 // ── WarAlarm · міські канали (Київ @kyiv_waralarm, Харків @Kh_WarAlarm) ──────
 // Поруч з основним всеукраїнським каналом. Кожен міський канал — свій ChannelPoster
-// (свій LastId і захист від дублів) і пише ЛИШЕ про своє місто:
+// (свій LastId і захист від дублів) і пише про СВОЮ ЗОНУ — місто й області навколо:
+//   Харків — Харківщина; Київ — Київщина, Черкащина, Чернігівщина, Полтавщина.
 //   • офіційна тривога / відбій по точці центру міста (відбій — після двох опитувань поспіль);
-//   • жива дошка цілей біля міста (Program.cs → RunLiveBoard з фільтром міста);
-//   • короткі пости з локальних моніторів (KyivMonitor/KharkivMonitor): «🛵 Шахед → Троєщина»;
+//   • зведення раз на 8 хв, поки в зоні є цілі: карта зони + коротко «Шахед на Люботин»
+//     (Program.cs → RunCityDigest); кінець нальоту — тихе редагування останнього зведення;
+//   • загроза балістики — одразу (секунди вирішують), не частіше разу на 5 хв;
 //   • світло (єСвітло) — лише Київ.
 // Ключі в secrets.local.txt: telegram_channel_kyiv=@kyiv_waralarm, telegram_channel_kharkiv=@Kh_WarAlarm;
 // токен — telegram_channel_<key>_bot_token або спільний telegram_channel_bot_token.
 public sealed class CityChannel
 {
-    /// [Name] — зона моніторів (укр.), [Ru] — канал російською, [Title] — назва в постах.
-    public readonly record struct City(string Key, string Name, double Lat, double Lon, bool Ru = false, string? TitleRu = null)
+    /// [Name] — зона моніторів (укр.), [Ru] — канал російською, [Title] — назва в постах,
+    /// [Oblasts] — області зони (англ. назви полігонів, як ключі OfficialAlerts.ByPolygon),
+    /// [Towns] — міста області для підписів на карті зони.
+    public readonly record struct City(string Key, string Name, double Lat, double Lon, string[] Oblasts, string[] Towns,
+        bool Ru = false, string? TitleRu = null)
     {
         public string Title => Ru ? TitleRu ?? Name : Name;
     }
 
-    /// Підтримувані міста: ключ у командах/секретах, назва (= зона моніторів), центр.
+    /// Підтримувані міста: ключ у командах/секретах, назва (= зона моніторів), центр, зона.
     /// Харківський канал — російською (як місцеві монітори).
     public static readonly City[] Known =
     {
-        new("kyiv", "Київ", 50.4501, 30.5234),
-        new("kharkiv", "Харків", 49.9935, 36.2304, Ru: true, TitleRu: "Харьков"),
+        new("kyiv", "Київ", 50.4501, 30.5234,
+            new[] { "Kiev", "Kiev City", "Cherkasy", "Chernihiv", "Poltava" },
+            new[] { "Бровари", "Бориспіль", "Біла Церква", "Фастів", "Ірпінь", "Вишгород", "Обухів", "Яготин",
+                    "Ніжин", "Прилуки", "Бахмач", "Новгород-Сіверський", "Умань", "Сміла", "Золотоноша", "Звенигородка",
+                    "Кременчук", "Миргород", "Лубни", "Горішні Плавні", "Карлівка", "Гадяч" }),
+        new("kharkiv", "Харків", 49.9935, 36.2304,
+            new[] { "Kharkiv" },
+            new[] { "Люботин", "Чугуїв", "Ізюм", "Куп'янськ", "Лозова", "Балаклія", "Богодухів", "Вовчанськ",
+                    "Золочів", "Красноград", "Дергачі", "Мерефа", "Валки", "Барвінкове", "Зміїв", "Первомайський",
+                    "Великий Бурлук", "Шевченкове" },
+            Ru: true, TitleRu: "Харьков"),
     };
 
     public static City? Find(string s) =>
@@ -96,90 +110,135 @@ public sealed class CityChannel
     string Dur(TimeSpan d) => d.TotalMinutes < 60 ? $"{Math.Max(1, (int)d.TotalMinutes)} {T("хв", "мин")}"
         : $"{(int)d.TotalHours} {T("год", "ч")} {d.Minutes} {T("хв", "мин")}";
 
-    // ── 3. Пости з локальних моніторів ───────────────────────────────────────
-    readonly Dictionary<string, DateTime> _recent = new();
-    DateTime _ppoAt = DateTime.MinValue, _ballAt = DateTime.MinValue;
+    // ── 2. Загроза балістики — одразу (решта — у зведенні раз на 8 хв) ──────────
+    DateTime _ballAt = DateTime.MinValue;
 
-    /// Подія локального монітора → короткий пост (або null).
-    /// [u] — результат tracker.Ingest (для загроз), [hadCityThreat] — чи були цілі біля міста ДО події
-    /// (новa загроза місту → зі звуком, решта — тихо).
-    public (string text, bool silent)? EventPost(KhEvent e, TrackUpdate? u, bool hadCityThreat, string ballisticText, DateTime now)
+    /// Подія локального монітора → пост одразу (або null). Лише «загроза балістики»:
+    /// до удару хвилина-дві, 8 хв чекати не можна. Шахеди, КАБи, «мінус», ППО — у зведенні.
+    public (string text, bool silent)? EventPost(KhEvent e, string ballisticText, DateTime now)
     {
-        string? line = null;
-        bool loud = false;
-        if (e.Signal == KhSignal.News) { }
-        else if (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw))
-        {
-            if (now - _ballAt > TimeSpan.FromMinutes(5)) { line = Ru ? BallisticRu : ballisticText; loud = true; _ballAt = now; }
-        }
-        else if (Slang.ShotCount(e.Raw) is { } n)
-        {   // «мінус» без цілей біля міста — не про нас (або запізнілий перепост)
-            if (hadCityThreat) line = $"🎯 {T("Мінус", "Минус")}" + (n > 1 ? $" {n}" : "");
-        }
-        else if (e.Signal == KhSignal.Threat && u is { Threat: { Recon: false, Pos: { } p } t } && ThreatGeo.Km(p, Center) <= 40
-                 // без власного місця («Над вами!», «ховайтеся») — лише щойно вибух / над районом, інакше це шум
-                 && (e.Places.Count > 0 || (u.Value.StageChanged && t.Stage is TrackStage.Impact or TrackStage.Overhead)))
-        {
-            line = ThreatLine(e, t, u.Value.StageChanged, Ru);
-            loud = !hadCityThreat;
-        }
-
-        if (Ppo(e.Raw) && now - _ppoAt > TimeSpan.FromMinutes(3))
-        {
-            _ppoAt = now;
-            var ppoLine = T("🛡 Працює ППО", "🛡 Работает ПВО");
-            line = line is null ? ppoLine : line + "\n" + ppoLine;
-        }
-        if (line is null) return null;
-
-        // Той самий рядок (перепост іншим каналом) ≤3 хв — не дублюємо.
-        if (_recent.TryGetValue(line, out var was) && now - was < TimeSpan.FromMinutes(3)) return null;
-        _recent[line] = now;
-        if (_recent.Count > 200)
-            foreach (var k in _recent.Where(kv => now - kv.Value > TimeSpan.FromMinutes(10)).Select(kv => kv.Key).ToList()) _recent.Remove(k);
-
-        return ($"{H(line)}\n\n{Foot}", !loud);
+        if (e.Signal == KhSignal.News || e.Kind != ThreatKind.Ballistic || !Slang.BallisticThreat(e.Raw)) return null;
+        if (now - _ballAt <= TimeSpan.FromMinutes(5)) return null;
+        _ballAt = now;
+        return ($"{H(Ru ? BallisticRu : ballisticText)}\n\n{Foot}", false);
     }
 
-    // [fresh] — стадія змінилась саме цією подією (інакше «💥» від минулого вибуху липне до нових постів).
-    static string ThreatLine(KhEvent e, Threat t, bool fresh, bool ru)
+    // ── 3. Зведення раз на 8 хв: карта зони + «Шахед на Люботин» ────────────────
+    public static readonly TimeSpan Every = TimeSpan.FromMinutes(8);
+    public enum DigestAction { None, Post, Close }
+    DateTime _digestAt = DateTime.MinValue, _activeAt = DateTime.MinValue;
+    string _digestCore = "";
+    bool _open;                 // зведення про наліт уже йдуть (наступні — без звуку)
+    /// Id останнього зведення (закриваємо його редагуванням підпису).
+    public long? DigestId { get; set; }
+    /// Звук лише на першому зведенні нальоту.
+    public bool DigestLoud => !_open;
+
+    /// Ціль у зоні каналу (точка всередині однієї з областей зони).
+    public bool InScope(Threat t) => t.Pos is { } p && !t.Down
+        && OblastGeo.PolyName(p.lat, p.lon) is { } en && Info.Oblasts.Contains(en);
+
+    /// Крок розкладу: [core] — рядки цілей у зоні ("" — нікого). Post — не частіше ніж раз на 8 хв
+    /// і лише коли картина змінилась; Close — 3 хв тиші після нальоту (редагування, без поста).
+    public DigestAction DigestStep(string core, DateTime now)
     {
-        var places = e.Places.Count > 0 ? string.Join(", ", e.Places) : t.LastPlace;
-        if (ru) places = RuPlace(places);
-        var icon = e.Kind switch
+        if (core.Length == 0)
         {
-            ThreatKind.Drone => "🛵",
-            ThreatKind.Missile => "🚀",
-            ThreatKind.Ballistic => "☄",
-            ThreatKind.Kab => "💣",
-            ThreatKind.Aviation => "✈",
-            ThreatKind.Fpv => "🪖",
-            _ => "🎯",
-        };
-        if (e.Extra is { } ex && (ex.Contains("fpv", StringComparison.OrdinalIgnoreCase) || ex.Contains("фпв", StringComparison.OrdinalIgnoreCase))) icon = "🪖";
-        var label = e.Extra is { Length: > 0 } x ? char.ToUpper(x[0]) + x[1..] : e.Kind switch
-        {
-            ThreatKind.Drone => "Шахед",
-            ThreatKind.Missile => "Ракета",
-            ThreatKind.Ballistic => ru ? "Баллистика" : "Балістика",
-            ThreatKind.Kab => "КАБ",
-            ThreatKind.Aviation => ru ? "Авиация" : "Авіація",
-            ThreatKind.Fpv => ru ? "FPV" : "ФПВ",
-            _ => ru ? "Цель" : "Ціль",
-        };
-        if (ru) label = RuWord(label);
-        var stage = fresh ? t.Stage : TrackStage.Approaching;
-        var boom = ru ? "💥 Громко" : "💥 Гучно";
-        if (stage == TrackStage.Impact) return places.Length > 0 ? $"{boom} — {places}" : boom;
-        var what = $"{icon} {label}";
-        if (places.Length == 0) return what;
-        return stage switch
-        {
-            TrackStage.Overhead => $"⚠️ {what} над {places}",
-            TrackStage.Imminent => ru ? $"❗ {what} на подлёте — {places}" : $"❗ {what} на підльоті — {places}",
-            _ => $"{what} → {places}",
-        };
+            if (!_open || now - _activeAt < TimeSpan.FromMinutes(3)) return DigestAction.None;
+            _open = false; _digestCore = "";
+            return DigestAction.Close;
+        }
+        _activeAt = now;
+        if (now - _digestAt < Every || core == _digestCore) return DigestAction.None;
+        return DigestAction.Post;
     }
+
+    /// Після відправки зведення (після DigestStep → Post).
+    public void DigestSent(string core, long? id, DateTime now)
+    {
+        _digestAt = now; _digestCore = core; _open = true;
+        DigestId = id;
+    }
+
+    /// Рядки зведення: «Шахед на Люботин», «Шахед ×3 на Чугуїв» — найближчі до міста першими.
+    /// [all] — усі цілі (щоб невідому «ціль» назвати так само, як на карті).
+    public string DigestCore(IReadOnlyList<Threat> inScope, IReadOnlyList<Threat> all, int max = 12)
+    {
+        var rows = inScope
+            .GroupBy(t => (label: Label(MapImage.Category(t, all)), place: Place(t)))
+            .Select(g => (g.Key.label, g.Key.place, n: g.Sum(t => Math.Max(1, t.Amount)),
+                          km: g.Min(t => ThreatGeo.Km(t.Pos!.Value, Center))))
+            .OrderBy(r => r.km).ToList();
+        var sb = new StringBuilder();
+        foreach (var r in rows.Take(max))
+            sb.Append(H(r.label)).Append(r.n > 1 ? $" ×{r.n}" : "").Append(T(" на ", " на ")).AppendLine(H(r.place));
+        if (rows.Count > max) sb.AppendLine(T($"…і ще {rows.Count - max}", $"…и ещё {rows.Count - max}"));
+        return sb.ToString();
+    }
+
+    /// Повний підпис зведення: рядки + області зони під тривогою + час.
+    /// [whole] — тривога на всю область, [any] — тривога хоч у частині районів (ByPolygon).
+    public string DigestText(string core, IReadOnlyDictionary<string, string>? whole, IReadOnlyDictionary<string, string>? any, DateTime now)
+    {
+        var sb = new StringBuilder(core);
+        var red = new List<string>();
+        foreach (var en in Info.Oblasts.Where(en => en != "Kiev City"))
+        {
+            bool w = whole is not null && whole.TryGetValue(en, out var wl) && wl == "red";
+            bool a = any is not null && any.TryGetValue(en, out var al) && al == "red";
+            if (!w && !a) continue;
+            var n = Ru ? RuWord(OblastGeo.Short(en)) : OblastGeo.Short(en);
+            red.Add(w ? n : n + T(" (частково)", " (частично)"));
+        }
+        if (red.Count > 0) sb.AppendLine().Append(T("🔴 Тривога: ", "🔴 Тревога: ")).AppendLine(H(string.Join(", ", red)));
+        sb.AppendLine().Append($"<i>🕒 {now:HH:mm} · 🤖 WarAlarm {Title}</i>");
+        return sb.ToString();
+    }
+
+    /// Підпис останнього зведення, коли наліт скінчився.
+    public string ClosedText(string lastText, DateTime now) =>
+        lastText + T($"\n✅ <b>Цілей більше не видно</b> · {now:HH:mm}", $"\n✅ <b>Целей больше не видно</b> · {now:HH:mm}");
+
+    string Label(string cat) => cat switch
+    {
+        "shahed" => "Шахед",
+        "shahed_jet" => T("Реактивний шахед", "Реактивный шахед"),
+        "missile" => "Ракета",
+        "banderol" => "Бандероль",
+        "balist" => T("Балістика", "Баллистика"),
+        "kab" => "КАБ",
+        "fpv" => T("ФПВ", "FPV"),
+        "avia" => T("Авіація", "Авиация"),
+        _ => T("Ціль", "Цель"),
+    };
+
+    /// Куди: місце цілі; обласна згадка («Харківщина (обл.)») → «Харківщину».
+    string Place(Threat t)
+    {
+        var p = t.LastPlace.Trim();
+        if (p.EndsWith("(обл.)")) p = p[..^"(обл.)".Length].Trim();
+        if (p.Length == 0 && t.Pos is { } pos) p = OblastGeo.Region(pos.lat, pos.lon);
+        if (Ru) p = RuPlace(p);
+        return p.EndsWith("щина") ? p[..^1] + "у" : p;
+    }
+
+    /// Місто [Towns] → координати з довідника (перше з такою назвою в зоні).
+    public IReadOnlyList<(string name, double lon, double lat)> TownPoints() => _towns ??= Info.Towns
+        .Select(n => TownExtra.TryGetValue(n, out var x) ? (name: n, x.lat, x.lon) : Cities.All.FirstOrDefault(c => c.name == n
+            && OblastGeo.PolyName(c.lat, c.lon) is { } en && Info.Oblasts.Contains(en)))
+        .Where(c => c.name is not null).Select(c => (c.name, c.lon, c.lat)).ToList();
+    /// Міст, яких немає в довіднику Cities (або там лише тезки з інших областей).
+    static readonly Dictionary<string, (double lat, double lon)> TownExtra = new()
+    {
+        ["Куп'янськ"] = (49.7106, 37.6156), ["Красноград"] = (49.3794, 35.4413), ["Первомайський"] = (49.3880, 36.2150),
+    };
+    IReadOnlyList<(string name, double lon, double lat)>? _towns;
+
+    /// Рамка карти зони.
+    public MapImage.View MapView => _view ??= MapImage.ViewOf(Info.Oblasts);
+    MapImage.View? _view;
+    /// Заголовок карти зони.
+    public string MapTitle => Info.Key == "kyiv" ? "WarAlarm · Київ і область" : T("WarAlarm · Харківщина", "WarAlarm · Харьковщина");
 
     // ── Російська для харківського каналу: місця й слова з моніторів (укр.) ──────
     // Спершу словник (райони й місця Харкова та області), далі — грубі правила транслітерації.
@@ -230,7 +289,6 @@ public sealed class CityChannel
         return sb.ToString();
     }
 
-    static bool Ppo(string s) => System.Text.RegularExpressions.Regex.IsMatch(s.ToLowerInvariant(), @"\bппо\b|протиповітрян|зенітн");
 
     static string H(string s) => WebUtility.HtmlEncode(s);
     /// HTML поста → текст для консолі (citysim).
@@ -304,8 +362,8 @@ public sealed class CityChannel
 
         // Опис (≤255 симв.)
         var desc = city.Ru
-            ? $"Воздушные тревоги и угрозы — {city.Title}. Тревога/отбой, цели возле города, данные локальных мониторов. Данные приблизительные — слушай официальную тревогу. 🤖 WarAlarm"
-            : $"Повітряні тривоги та загрози — {city.Title}. Тривога/відбій, цілі біля міста, дані локальних моніторів"
+            ? $"Воздушные тревоги и угрозы — {city.Title} и Харьковщина. Тревога/отбой, каждые 8 мин — карта и цели по области. Данные приблизительные — слушай официальную тревогу. 🤖 WarAlarm"
+            : $"Повітряні тривоги та загрози — {city.Title}, Київщина, Черкащина, Чернігівщина, Полтавщина. Тривога/відбій, щовісім хвилин — карта й цілі"
               + (city.Key == "kyiv" ? ", світло" : "") + ". Дані приблизні — слухай офіційну тривогу. 🤖 WarAlarm";
         var r = await Call("setChatDescription", new { chat_id = channel, description = desc });
         // «description is not modified» — теж ок

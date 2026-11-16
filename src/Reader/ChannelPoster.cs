@@ -65,9 +65,7 @@ public sealed class ChannelPoster
                 { new StringContent(id.ToString()), "message_id" },
                 { new StringContent(media), "media" },
             };
-            var photo = new ByteArrayContent(png);
-            photo.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-            form.Add(photo, "map", "map.png");
+            form.Add(Image(png), "map", ImageName(png));
             var resp = await Http.PostAsync($"{_api}/editMessageMedia", form);
             return resp.IsSuccessStatusCode;
         }
@@ -81,6 +79,16 @@ public sealed class ChannelPoster
         return await MessageId(await Http.PostAsync($"{_api}/sendMessage", content));
     }
 
+    // Карта — PNG або JPEG (міські канали шлють JPEG: утричі менше трафіку).
+    static bool IsJpeg(byte[] img) => img.Length > 2 && img[0] == 0xFF && img[1] == 0xD8;
+    static string ImageName(byte[] img) => IsJpeg(img) ? "map.jpg" : "map.png";
+    static ByteArrayContent Image(byte[] img)
+    {
+        var c = new ByteArrayContent(img);
+        c.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(IsJpeg(img) ? "image/jpeg" : "image/png");
+        return c;
+    }
+
     // Одним постом: карта з підписом (Telegram обмежує підпис ~1024 симв.).
     async Task<long?> SendPhoto(string caption, byte[] png, bool silent)
     {
@@ -91,9 +99,7 @@ public sealed class ChannelPoster
             { new StringContent("HTML"), "parse_mode" },
             { new StringContent(silent ? "true" : "false"), "disable_notification" },
         };
-        var photo = new ByteArrayContent(png);
-        photo.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-        form.Add(photo, "photo", "map.png");
+        form.Add(Image(png), "photo", ImageName(png));
         return await MessageId(await Http.PostAsync($"{_api}/sendPhoto", form));
     }
 

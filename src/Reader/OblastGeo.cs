@@ -102,6 +102,17 @@ public static class OblastGeo
     /// або null поза межами. Для звірки «чи є офіційна тривога в області цілі».
     public static string? PolyName(double lat, double lon) => NameAt(lat, lon);
 
+    /// Коротка укр. назва за англ. назвою полігона («Kharkiv» → «Харківщина»).
+    public static string Short(string en) => ShortUa.TryGetValue(en, out var s) ? s : en;
+
+    /// Рамка (мін/макс широта й довгота) кількох областей за англ. назвами полігонів.
+    public static (double minLat, double maxLat, double minLon, double maxLon) BoxOf(IEnumerable<string> en)
+    {
+        var set = new HashSet<string>(en);
+        var bs = Polys.Select((p, i) => (p.en, b: Boxes[i])).Where(x => set.Contains(x.en)).Select(x => x.b).ToList();
+        return (bs.Min(b => b.minLat), bs.Max(b => b.maxLat), bs.Min(b => b.minLon), bs.Max(b => b.maxLon));
+    }
+
     /// Точка в межах України (полігони спрощені: біля кордону/узбережжя похибка ~10–15 км).
     public static bool InUkraine(double lat, double lon) => NameAt(lat, lon) != null;
 
