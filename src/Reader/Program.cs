@@ -1944,6 +1944,7 @@ string StatusAt(double lat, double lon)
     var sb = new StringBuilder();
     var near = list.Select(t => (t, km: ThreatGeo.Km(t.Pos!.Value, pt)))
                    .OrderBy(x => x.km).Take(6).ToList();
+    sb.AppendLine(DangerStars.Line(StarsAt(lat, lon))).AppendLine(); // ⭐ наскільки небезпечно надворі
     if (near.Count == 0 || near[0].km > 70)
     {
         sb.AppendLine("🟢 <b>Тихо</b> — поруч (70 км) цілей немає");
@@ -1964,6 +1965,15 @@ string StatusAt(double lat, double lon)
             + $" (востаннє {av.Last:HH:mm}, каналів: {av.Srcs.Count}). КАБ летить 40–70 км — тримайся укриття.");
     if (AlarmEtaText(lat, lon) is { } eta) sb.AppendLine("\n" + H(eta));
     return sb.ToString();
+}
+
+// ⭐ Небезпека надворі в точці (0–5 зірок): ті самі правила, що в застосунку (danger_stars.dart).
+DangerStars.Result StarsAt(double lat, double lon)
+{
+    var obl = OblastGeo.PolyName(lat, lon);
+    return DangerStars.For((lat, lon), tracker.Active, AviationFeed.At(lat, lon),
+        officialAlarm: obl is not null && ActiveAlarmOblasts.Contains(obl),
+        ballistic: BallisticAlert.At(lat, lon, DateTime.Now));
 }
 
 static string RiskDot(int percent) => percent >= 50 ? "🔴" : percent >= 25 ? "🟠" : percent >= 10 ? "🟡" : "🟢";

@@ -16,6 +16,9 @@
   #hud{position:fixed;left:16px;top:12px;pointer-events:none;text-shadow:0 1px 3px #0A0D12,0 0 8px #0A0D12}
   #hud b{font-size:22px;font-weight:800;letter-spacing:-.3px}
   #sub{font-size:14px;font-weight:700;margin-top:2px}
+  #stars{font-size:13px;font-weight:700;margin-top:4px;line-height:1.35}
+  #stars .st{font-size:19px;letter-spacing:1px}
+  #stars .adv{font-weight:600;color:#C9D1DB;max-width:300px}
   #upd{position:fixed;right:16px;top:14px;font-size:12px;color:var(--mut)}
   #err{position:fixed;right:16px;bottom:12px;font-size:12px;color:#FF9A93}
   canvas{touch-action:none;cursor:grab} canvas.drag{cursor:grabbing}
@@ -92,7 +95,7 @@
 </head>
 <body>
 <div id="wrap"><canvas id="cv"></canvas></div>
-<div id="hud"><b>WarAlarm · Карта тривог</b><div id="sub">завантаження…</div></div>
+<div id="hud"><b>WarAlarm · Карта тривог</b><div id="sub">завантаження…</div><div id="stars" hidden></div></div>
 <div id="upd"></div>
 <div id="err"></div>
 <div id="legend">
@@ -650,6 +653,80 @@ function draw(){
   const sub = document.getElementById('sub');
   sub.textContent = `Тривога: ${red} обл · жовтий рівень: ${yel} · цілей: ${total}`;
   sub.style.color = red > 0 ? '#FF453A' : yel > 0 ? '#F4C550' : '#2FD17C';
+  if(home) showStars(dangerStars(home, threats, Array.isArray(s.aviation) ? s.aviation : [],
+    s.ballThreat && Array.isArray(s.ballThreat.active) ? s.ballThreat.active : []));
+}
+
+// ── ⭐ Небезпека надворі у «моєму місті» (0–5 зірок) ──────────────────────────────
+// Ті самі правила, що в боті (DangerStars.cs) і застосунку (danger_stars.dart): тип цілі ×
+// відстань — шахед 1/2, реактивний 2/3, ФПВ 2/3, КАБ 3/4, ракета 3/4, балістика 4/5
+// («далеко/поруч»); курс на місто — «поруч»; пролетіла −1; вибух поруч +1; 5+ бортів +1;
+// авіація над областю 2 (з КАБ — 3); загроза балістики в області — щонайменше 4;
+// офіційна тривога — щонайменше 1.
+function starSpec(t){
+  switch(t.cat){
+    case 'balist': return [4,5,200,80];
+    case 'missile': case 'banderol': return [3,4,100,30];
+    case 'kab': return [3,4,60,25];
+    case 'avia': return [2,3,80,30];
+    case 'fpv': return [2,3,20,8];
+  }
+  return (t.kmh||0) >= 350 ? [2,3,60,20] : [1,2,40,12];
+}
+function dangerStars(pl, threats, aviation, ball){
+  let best = 0, inReach = 0, reason = '';
+  for(const t of threats){
+    if(t.approx || t.down || t.forecast || t.areaKm > 0) continue;
+    const [far, nearS, reach, nearKm] = starSpec(t), km = kmBetween(t.lat, t.lon, pl.lat, pl.lon);
+    if(km > reach) continue;
+    let near = km <= nearKm, away = t.stage === 'Passed';
+    if(!near && t.heading != null && km <= nearKm*2.5){
+      const la = pl.lat*RAD, dN = (t.lat-pl.lat)*111, dE = (t.lon-pl.lon)*111*Math.cos(la), th = t.heading*RAD;
+      const rE = -dE, rN = -dN, proj = rE*Math.sin(th) + rN*Math.cos(th);
+      const min = proj <= 0 ? Math.hypot(rE, rN) : Math.sqrt(Math.max(0, rE*rE + rN*rN - proj*proj));
+      if(proj > 0 && min <= 8) near = true; else if(proj <= 0 && t.hdgReal) away = true;
+    }
+    let st = near ? nearS : far;
+    if(t.stage === 'Impact' && km <= nearKm) st++;
+    if(away) st--;
+    st = Math.max(0, Math.min(5, st));
+    if(st <= 0) continue;
+    inReach += t.n || 1;
+    if(st > best){ best = st; reason = `${t.label}${(t.n||1) > 1 ? ' ×'+t.n : ''} · ${Math.round(km)} км`; }
+  }
+  if(best > 0 && inReach >= 5){ best = Math.min(5, best+1); reason += ` · у повітрі поруч ${inReach}`; }
+  const obl = oblastAt(pl.lat, pl.lon);
+  for(const z of aviation){
+    if(!obl || z.obl !== obl) continue;
+    const st = z.kab ? 3 : 2;
+    if(st > best){ best = st; reason = z.kab ? 'Загроза КАБ над областю' : 'Тактична авіація над областю'; }
+  }
+  const b = obl && (ball || []).find(x => x && x.o === obl);
+  if(b && best < 4){ best = 4; reason = 'Загроза балістики' + (b.from ? ' · район пуску: ' + b.from : ''); }
+  if(best < 1 && obl && alarmState && alarmState.levels.size && inAlarmObl(obl, pl.lat, pl.lon)){ best = 1; reason = 'Повітряна тривога, цілей поруч не видно'; }
+  return { stars: best, reason };
+}
+const STAR_TXT = [
+  ['Спокійно', 'Загроз поруч немає — можна гуляти.'],
+  ['Низька', 'Можна виходити, але не затримуйся й тримай звук увімкненим.'],
+  ['Помірна', 'Скороти час надворі й знай, де найближче укриття.'],
+  ['Висока', 'Надворі небезпечно: залишайся в приміщенні, правило двох стін.'],
+  ['Дуже висока', 'Не виходь надвір — іди в укриття.'],
+  ['Критична', 'Негайно в укриття! Подалі від вікон.'],
+];
+let starsShown = '';
+function showStars(d){
+  const key = d.stars + '|' + d.reason;
+  if(key === starsShown) return;
+  starsShown = key;
+  const el = document.getElementById('stars'), [lvl, adv] = STAR_TXT[d.stars];
+  const col = d.stars >= 4 ? '#FF453A' : d.stars >= 2 ? '#F4C550' : '#2FD17C';
+  const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  el.innerHTML = `<span style="color:#C9D1DB">Надворі${home.name ? ' · '+esc(home.name) : ''}:</span> `
+    + `<span class="st" style="color:${col}">${'★'.repeat(d.stars)}<span style="opacity:.35">${'☆'.repeat(5-d.stars)}</span></span> `
+    + `<span style="color:${col}">${d.stars}/5 · ${lvl.toLowerCase()}</span>`
+    + `<div class="adv">${esc(adv)}${d.reason ? '<br><span style="opacity:.75">'+esc(d.reason)+'</span>' : ''}</div>`;
+  el.hidden = false;
 }
 
 // Легенда: живі типи на карті з кількістю. Натиск на тип — на карті лише він (решта

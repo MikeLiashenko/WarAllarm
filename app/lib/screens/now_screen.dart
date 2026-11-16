@@ -10,6 +10,7 @@ import '../controllers/target_focus_controller.dart';
 import '../data/oblast_lookup.dart';
 import '../data/ukraine_geo.dart';
 import '../domain/alarm_forecast.dart';
+import '../domain/danger_stars.dart';
 import '../domain/probability.dart';
 import '../domain/situation.dart';
 import '../models/map_target.dart';
@@ -17,6 +18,7 @@ import '../models/monitored_place.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/analytics_dashboard.dart';
+import '../widgets/danger_stars_card.dart';
 import '../widgets/floating_nav.dart';
 import '../widgets/glass.dart';
 import '../widgets/place_selector.dart';
@@ -454,7 +456,19 @@ class _Hero extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           PlaceHeader(s: s, big: true),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+          // ⭐ Наскільки небезпечно надворі (0–5 зірок) — як у боті (📊 Статус).
+          DangerStarsCard(
+            d: dangerStarsFor(
+              s.place,
+              s.data.alarmTargets,
+              aviation: s.data.aviation,
+              officialLevel: s.prob?.officialLevel,
+              ballisticFrom: s.data.ballisticAt(s.place.lat, s.place.lon),
+            ),
+            stale: s.stale || (!s.data.live && !s.data.isDemo),
+          ),
+          const SizedBox(height: 14),
           const PlaceSelector(),
           const SizedBox(height: 14),
           _Metrics(s: s),
@@ -785,9 +799,25 @@ class _PlaceRow extends StatelessWidget {
             ),
             if (prob != null && !stale) ...[
               const SizedBox(width: 10),
-              Text(
-                '${prob!.percent}%',
-                style: AppText.number(18, color: accent),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${prob!.percent}%',
+                    style: AppText.number(18, color: accent),
+                  ),
+                  const SizedBox(height: 2),
+                  StarsRow(
+                    stars: dangerStarsFor(
+                      place,
+                      data.alarmTargets,
+                      aviation: data.aviation,
+                      officialLevel: prob!.officialLevel,
+                      ballisticFrom: data.ballisticAt(place.lat, place.lon),
+                    ).stars,
+                    size: 13,
+                  ),
+                ],
               ),
             ] else if (!stale) ...[
               const SizedBox(width: 10),
