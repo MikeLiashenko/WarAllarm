@@ -48,12 +48,15 @@ class ThreatProbability {
 double _perTarget(MapTarget t, MonitoredPlace pl) {
   final d = kmTo(t, pl);
   final stage = kRank[t.stage] ?? 0;
+  // Стадія — щодо міста, над яким ціль, а не щодо цього місця (балістика — завжди
+  // «на підльоті»): важить лише поруч, інакше шахед за 233 км давав тривогу.
+  final close = d <= (t.cat == 'balist' ? 40 : 15);
   double base;
-  if (stage >= 5) {
+  if (stage >= 5 && close) {
     base = 0.98; // Impact
-  } else if (stage >= 4) {
+  } else if (stage >= 4 && close) {
     base = 0.9; // Overhead
-  } else if (stage >= 3) {
+  } else if (stage >= 3 && close) {
     base = 0.75; // Imminent
   } else if (t.stage == 'Passed') {
     base = 0.05;
@@ -77,9 +80,10 @@ double _perTarget(MapTarget t, MonitoredPlace pl) {
   // Trajectory: is its course actually pointing at this place?
   if (t.heading != null) {
     final ca = closest(t, pl);
-    if (ca.approaching && ca.minKm <= 12) {
+    // Курс «прямо сюди» — лише для близьких (≤80 км): за 200+ км він ще зміниться.
+    if (ca.approaching && ca.minKm <= 12 && d <= 80) {
       base = base * 1.6 + 0.08;
-    } else if (ca.approaching && ca.minKm <= 30) {
+    } else if (ca.approaching && ca.minKm <= 30 && d <= 80) {
       base = base * 1.25;
     } else if (!ca.approaching) {
       base *= 0.5; // moving away

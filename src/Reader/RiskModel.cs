@@ -51,10 +51,14 @@ public static class RiskModel
         if (t.Pos is not { } pos) return 0;
         double d = ThreatGeo.Km(pos, p);
         int stage = Rank(t.Stage);
+        // Стадія («на підльоті», «над районом», «приліт») — щодо міста, над яким ціль, а не щодо
+        // цієї точки (балістика — завжди «на підльоті»). Тож вона важить лише поруч: інакше шахед
+        // над Харковом давав 75–98% і тривогу людині за 233 км.
+        bool close = d <= (t.Kind == ThreatKind.Ballistic ? 40 : 15);
         double b;
-        if (stage >= 5) b = 0.98;
-        else if (stage >= 4) b = 0.9;
-        else if (stage >= 3) b = 0.75;
+        if (stage >= 5 && close) b = 0.98;
+        else if (stage >= 4 && close) b = 0.9;
+        else if (stage >= 3 && close) b = 0.75;
         else if (t.Stage == TrackStage.Passed) b = 0.05;
         else if (d <= 8) b = 0.6;
         else if (d <= 15) b = 0.42;
@@ -66,8 +70,9 @@ public static class RiskModel
         if (t.Heading is not null)
         {
             var (minKm, approaching) = Closest(t, p);
-            if (approaching && minKm <= 12) b = b * 1.6 + 0.08;
-            else if (approaching && minKm <= 30) b *= 1.25;
+            // Курс «прямо на точку» важить лише для близьких (≤80 км): за 200+ км курс ще зміниться.
+            if (approaching && minKm <= 12 && d <= 80) b = b * 1.6 + 0.08;
+            else if (approaching && minKm <= 30 && d <= 80) b *= 1.25;
             else if (!approaching) b *= 0.5;
         }
 

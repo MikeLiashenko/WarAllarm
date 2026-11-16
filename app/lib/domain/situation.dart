@@ -106,12 +106,14 @@ RiskResult riskOf(MonitoredPlace pl, List<MapTarget> threats) {
   final t = arr.first;
   final st = kRank[t.stage] ?? 0;
   final d = t.pdist ?? 999;
+  // Стадія — щодо міста, над яким ціль, а не щодо місця: важить лише поруч.
+  final close = d <= (t.cat == 'balist' ? 40 : 15);
   int score;
-  if (st >= 5) {
+  if (st >= 5 && close) {
     score = 100;
-  } else if (st >= 4) {
+  } else if (st >= 4 && close) {
     score = 95;
-  } else if (st >= 3) {
+  } else if (st >= 3 && close) {
     score = 88;
   } else if (d <= 8) {
     score = 75;
