@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -30,26 +32,29 @@ android {
         versionName = flutter.versionName
     }
 
-    // GitHub Actions (build-android.yml) gives the keystore via WARALARM_KEYSTORE so its APK is
-    // signed with the SAME key as the PC build and installs over it. Locally nothing is set →
-    // the debug key, as before.
-    val ciKeystore = System.getenv("WARALARM_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    // One permanent WarAlarm release key, so every APK installs over the previous one, whether it was
+    // built on the PC or on GitHub. PC: android/key.properties (not in git) points at the keystore
+    // (%USERPROFILE%\.android\waralarm-release.jks). GitHub Actions (build-android.yml): the same keystore
+    // from the ANDROID_KEYSTORE_* secrets, handed over in WARALARM_KEYSTORE*. Neither → the debug key.
+    val keyProps = Properties().apply {
+        val f = rootProject.file("key.properties"); if (f.exists()) f.inputStream().use { load(it) }
+    }
+    fun key(prop: String, env: String) = keyProps.getProperty(prop) ?: System.getenv(env)
+    val releaseStore = key("storeFile", "WARALARM_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
     signingConfigs {
-        if (ciKeystore != null) {
-            create("ci") {
-                storeFile = ciKeystore
-                storePassword = System.getenv("WARALARM_KEYSTORE_PASSWORD") ?: "android"
-                keyAlias = System.getenv("WARALARM_KEY_ALIAS") ?: "androiddebugkey"
-                keyPassword = System.getenv("WARALARM_KEY_PASSWORD") ?: "android"
+        if (releaseStore != null) {
+            create("waralarm") {
+                storeFile = releaseStore
+                storePassword = key("storePassword", "WARALARM_KEYSTORE_PASSWORD")
+                keyAlias = key("keyAlias", "WARALARM_KEY_ALIAS")
+                keyPassword = key("keyPassword", "WARALARM_KEY_PASSWORD")
             }
         }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName(if (ciKeystore != null) "ci" else "debug")
+            signingConfig = signingConfigs.getByName(if (releaseStore != null) "waralarm" else "debug")
         }
     }
 }

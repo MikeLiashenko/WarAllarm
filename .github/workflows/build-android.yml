@@ -1,12 +1,11 @@
 # Android .apk без ПК: GitHub збирає застосунок і кладе його в реліз «apk-latest».
 # Завантажити (і з телефону): https://github.com/MikeLiashenko/WarAllarm/releases/download/apk-latest/WarAlarm.apk
 #
-# Підпис. Щоб APK ставився ПОВЕРХ уже встановленого (зібраного на ПК), він має бути підписаний
-# тим самим ключем. Додай у Settings → Secrets and variables → Actions:
-#   ANDROID_KEYSTORE_BASE64  — base64 файлу ключа. Для ключа з ПК (Windows, PowerShell):
-#       [Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\.android\debug.keystore")) | Set-Clipboard
-#   (необов'язково, якщо ключ не debug) ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
-# Без секретів APK підписується стандартним debug-ключем збірки.
+# Підпис: один постійний ключ WarAlarm і тут, і на ПК, тож кожен новий APK ставиться ПОВЕРХ попереднього.
+# Ключ лежить у секретах репозиторію (Settings → Secrets and variables → Actions):
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# На ПК той самий ключ: %USERPROFILE%\.android\waralarm-release.jks + app/android/key.properties (не в git).
+# Без секретів збірка зупиняється, щоб не випустити APK з чужим підписом.
 name: Build Android (.apk)
 
 on:
@@ -51,20 +50,18 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/waralarm.keystore"
-            {
-              echo "WARALARM_KEYSTORE=$RUNNER_TEMP/waralarm.keystore"
-              echo "WARALARM_KEYSTORE_PASSWORD=${KS_PASS:-android}"
-              echo "WARALARM_KEY_ALIAS=${KEY_ALIAS:-androiddebugkey}"
-              echo "WARALARM_KEY_PASSWORD=${KEY_PASS:-android}"
-              echo "SIGNED=secret"
-            } >> "$GITHUB_ENV"
-            echo "🔑 Підпис ключем із секретів"
-          else
-            echo "SIGNED=debug" >> "$GITHUB_ENV"
-            echo "Без секретів — стандартний debug-підпис"
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KS_PASS" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASS" ]; then
+            echo "::error::Немає ключа підпису в секретах ANDROID_KEYSTORE_* — APK з іншим підписом не ставиться поверх"
+            exit 1
           fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/waralarm.keystore"
+          {
+            echo "WARALARM_KEYSTORE=$RUNNER_TEMP/waralarm.keystore"
+            echo "WARALARM_KEYSTORE_PASSWORD=$KS_PASS"
+            echo "WARALARM_KEY_ALIAS=$KEY_ALIAS"
+            echo "WARALARM_KEY_PASSWORD=$KEY_PASS"
+          } >> "$GITHUB_ENV"
+          echo "🔑 Підпис постійним ключем WarAlarm"
 
       - run: flutter pub get
 
@@ -83,9 +80,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$SIGNED" = secret ]; then SIG="ключ із секретів"; else SIG="стандартний debug-підпис"; fi
           gh release delete apk-latest --yes --cleanup-tag || true
           gh release create apk-latest WarAlarm.apk \
             --target "$GITHUB_SHA" --prerelease \
             --title "Android APK ($GITHUB_REF_NAME @ ${GITHUB_SHA::7})" \
-            --notes "Завантажити: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/WarAlarm.apk  ·  Підпис: $SIG"
+            --notes "Завантажити: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/WarAlarm.apk  ·  Підпис: постійний ключ WarAlarm (ставиться поверх попередньої версії)"
