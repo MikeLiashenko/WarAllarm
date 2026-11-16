@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../domain/situation.dart';
 import '../models/map_target.dart';
+import '../models/monitored_place.dart';
 import '../services/alarm_service.dart';
 import 'map_data_controller.dart';
 import 'settings_controller.dart';
@@ -36,6 +37,11 @@ class AlarmController extends ChangeNotifier {
 
   bool _impactRinging = false; // зараз грає сильний сигнал «приліт над домом»
   bool get impactAlarm => _impactRinging;
+
+  bool _ballistic = false; // ☄ тривога саме через загрозу балістики (цілі ще нема)
+  bool get ballisticAlarm => _ballistic;
+  bool _enemyPpo = false; // 🛡 загрозу балістики щойно зняли: «працює вороже ППО»
+  bool get enemyPpo => _enemyPpo;
 
   bool _nuclearRinging = false; // ☢️ активна радіаційна/ядерна небезпека
   bool get nuclearAlarm => _nuclearRinging;
@@ -170,18 +176,30 @@ class AlarmController extends ChangeNotifier {
     final radius = _settings.alarmRadiusKm;
     // Alarm if the situation is severe OR a target is within the user's chosen
     // alarm radius of a selected place.
-    final newLevel = (score >= 55 || nearestKm <= radius)
+    final targetAlarm = score >= 55 || nearestKm <= radius;
+    // ☄ Загроза балістики в області обраного місця — теж тривога (ракети ще нема).
+    final ball = demo ? null : _ballisticPlace();
+    final newLevel = (targetAlarm || ball != null)
         ? 'alarm'
         : (score >= 35 || nearestKm <= radius * 1.7)
             ? 'warn'
             : 'calm';
+    _ballistic = !targetAlarm && ball != null;
+    _enemyPpo = !demo && newLevel != 'alarm' && _enemyPpoPlace() != null;
 
     _title = switch (newLevel) {
-      'alarm' => 'ТРИВОГА',
+      'alarm' => _ballistic ? '☄️ ЗАГРОЗА БАЛІСТИКИ' : 'ТРИВОГА',
       'warn' => 'Загроза поруч',
-      _ => 'Спокійно',
+      _ => _enemyPpo ? '🛡 Працює вороже ППО' : 'Спокійно',
     };
-    _detail = worst == null ? '' : _describe(worst);
+    _detail = _ballistic
+        ? '«${ball!.place.name}»${ball.from.isNotEmpty ? ' · район пуску: ${ball.from}' : ''} · '
+            'пуску ще немає — будь ближче до укриття'
+        : (newLevel == 'calm' && _enemyPpo)
+            ? 'Загрозу балістики знято — схоже, це не пуски по нас. До відбою — уважно.'
+            : worst == null
+                ? ''
+                : _describe(worst);
 
     final sound = _settings.soundAlerts;
     final vibrate = _settings.vibration;
@@ -197,7 +215,7 @@ class AlarmController extends ChangeNotifier {
             sound: sound,
             vibrate: vibrate,
             volume: _settings.alarmVolume,
-            cat: worst?.top?.cat);
+            cat: _ballistic ? 'balist' : worst?.top?.cat);
       }
     } else {
       if (_ringing) {
@@ -222,6 +240,23 @@ class AlarmController extends ChangeNotifier {
       _level = newLevel;
     }
     notifyListeners();
+  }
+
+  /// ☄ Перше обране місце, в області якого діє загроза балістики (і район пуску).
+  ({MonitoredPlace place, String from})? _ballisticPlace() {
+    for (final pl in _map.alarmPlaces) {
+      final from = _map.ballisticAt(pl.lat, pl.lon);
+      if (from != null) return (place: pl, from: from);
+    }
+    return null;
+  }
+
+  /// 🛡 Обране місце, де загрозу балістики щойно зняли через вороже ППО.
+  MonitoredPlace? _enemyPpoPlace() {
+    for (final pl in _map.alarmPlaces) {
+      if (_map.enemyPpoAt(pl.lat, pl.lon)) return pl;
+    }
+    return null;
   }
 
   /// Приліт/над районом (стадія Impact/Overhead) за ≤7 км від обраного місця.

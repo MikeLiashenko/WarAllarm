@@ -96,6 +96,7 @@ class _AlarmOverlayState extends State<AlarmOverlay>
     // only the rings behind the icon pulse, for the "alarm" feel.
     final nuclear = alarm.nuclearAlarm;
     final impact = alarm.impactAlarm;
+    final ballistic = alarm.ballisticAlarm && !nuclear && !impact;
     // Радіація — окремий, темний «не-червоний» фон, щоб миттєво відрізнявся.
     final colors = nuclear
         ? const [Color(0xFF1A1500), Color(0xFF3A2E00)]
@@ -153,7 +154,9 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                                       ? '☢️'
                                       : impact
                                           ? '💥'
-                                          : '🚨',
+                                          : ballistic
+                                              ? '☄️'
+                                              : '🚨',
                                   style: const TextStyle(fontSize: 46)),
                             ),
                           ],
@@ -166,11 +169,13 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                             ? 'РАДІАЦІЙНА НЕБЕЗПЕКА'
                             : impact
                                 ? 'ПРИЛІТ ПОРУЧ'
-                                : 'ТРИВОГА',
+                                : ballistic
+                                    ? 'ЗАГРОЗА БАЛІСТИКИ'
+                                    : 'ТРИВОГА',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                             color: Colors.white,
-                            fontSize: nuclear
+                            fontSize: nuclear || ballistic
                                 ? 30
                                 : impact
                                     ? 42
@@ -191,6 +196,14 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                           fontWeight: FontWeight.w600),
                     ),
                     // Прилёт над домом — предупреждаем, что сейчас может быть громко.
+                    if (ballistic) ...[
+                      const SizedBox(height: 18),
+                      _card(
+                        '☄️ Ракета летить лічені хвилини',
+                        'Пуску ще немає. Будь ближче до укриття; почуєш «пуск» чи вибухи — одразу туди. '
+                            'Якщо монітори скажуть «працює вороже ППО» — тривогу знімемо.',
+                      ),
+                    ],
                     if (impact && !nuclear) ...[
                       const SizedBox(height: 18),
                       _card(

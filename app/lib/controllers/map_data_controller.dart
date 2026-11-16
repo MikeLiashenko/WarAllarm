@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../data/oblast_lookup.dart';
 import '../domain/motion.dart';
 import '../models/analytics_row.dart';
 import '../models/map_target.dart';
@@ -73,6 +74,26 @@ class MapDataController extends ChangeNotifier {
   bool get nuclear => _nuclear && fresh; // тільки на живих даних, ніколи в демо
   String _nuclearMsg = '';
   String get nuclearMsg => _nuclearMsg;
+
+  // ☄ Загроза балістики по областях (state.ballThreat): область → район пуску (або '').
+  // Ракети ще нема, але секунди вирішують — тривога в місцях цих областей.
+  Map<String, String> _ballOblasts = const {};
+  // 🛡 Області, де загрозу щойно зняли, бо «працює вороже ППО» (не пуски по нас).
+  Set<String> _ppoOblasts = const {};
+
+  /// ☄ Загроза балістики в області точки: район пуску ('' — невідомо) або null.
+  String? ballisticAt(double lat, double lon) {
+    if (!fresh || _ballOblasts.isEmpty) return null;
+    final o = OblastLookup.instance.nameAt(lat, lon);
+    return o == null ? null : _ballOblasts[o];
+  }
+
+  /// 🛡 Загрозу балістики в області точки щойно зняли через вороже ППО.
+  bool enemyPpoAt(double lat, double lon) {
+    if (!fresh || _ppoOblasts.isEmpty) return false;
+    final o = OblastLookup.instance.nameAt(lat, lon);
+    return o != null && _ppoOblasts.contains(o);
+  }
 
   // 🔌 Світло (відключення/відновлення) з каналу про світло.
   String _powerStatus = ''; // 'off' | 'on' | ''
@@ -414,6 +435,25 @@ class MapDataController extends ChangeNotifier {
     _aiText = (data['aiText'] ?? '').toString();
     final aiAt = data['aiAt'];
     if (aiAt is num) _aiAt = DateTime.fromMillisecondsSinceEpoch(aiAt.toInt());
+
+    final ball = data['ballThreat'];
+    final ballMap = <String, String>{};
+    final ppoSet = <String>{};
+    if (ball is Map) {
+      final act = ball['active'];
+      if (act is List) {
+        for (final e in act.whereType<Map>()) {
+          final o = (e['o'] ?? '').toString();
+          if (o.isNotEmpty) ballMap[o] = (e['from'] ?? '').toString();
+        }
+      }
+      final ppo = ball['ppo'];
+      if (ppo is Map && ppo['o'] is List) {
+        ppoSet.addAll((ppo['o'] as List).map((x) => x.toString()));
+      }
+    }
+    _ballOblasts = ballMap;
+    _ppoOblasts = ppoSet;
 
     final nuc = data['nuclear'];
     if (nuc is Map) {

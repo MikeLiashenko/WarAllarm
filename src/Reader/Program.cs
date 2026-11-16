@@ -471,6 +471,59 @@ if (args.Length >= 1 && args[0].Equals("course", StringComparison.OrdinalIgnoreC
     return;
 }
 
+// ── ☄ Загроза балістики по журналу (оффлайн):   dotnet run -- ballreplay journal/2026-11-15.jsonl …
+// Що підняло б тривогу по областях, а що зняло (відбій / вороже ППО) — без постів і пушів.
+if (args.Length >= 2 && args[0].Equals("ballreplay", StringComparison.OrdinalIgnoreCase))
+{
+    // --posts: ще й що написали б міські канали (сухий прогон, без Telegram)
+    bool showPosts = args.Contains("--posts");
+    var sims = CityChannel.Known.Select(c => new CityChannel(c, "@sim_" + c.Key, null)).ToList();
+    async Task SimPost(CityChannel cc, string? text) { if (text is not null) await cc.Post(text, null, false); }
+    foreach (var file in args.Skip(1).Where(a => !a.StartsWith("--")).OrderBy(f => f))
+    {
+        var day = DateTime.TryParse(Path.GetFileNameWithoutExtension(file), out var dd) ? dd : DateTime.Today;
+        Console.WriteLine($"\n═══ {Path.GetFileName(file)} ═══");
+        foreach (var line in File.ReadLines(file))
+        {
+            if (!line.Contains("\"kind\":\"post\"")) continue;
+            using var doc = System.Text.Json.JsonDocument.Parse(line);
+            var r = doc.RootElement;
+            var ch = r.GetProperty("ch").GetString() ?? "";
+            var text = r.TryGetProperty("text", out var tx) ? tx.GetString() ?? "" : "";
+            var at = day + TimeSpan.Parse(r.GetProperty("t").GetString() ?? "00:00:00");
+            var hs = SourceCatalog.Get(ch);
+            var loc = hs is { Tier: not SourceTier.Aggregator } ? hs.Oblasts
+                : khChannels.Contains(ch) ? new[] { "Харківська" } : kyChannels.Contains(ch) ? new[] { "Київська" } : Array.Empty<string>();
+            var kind = BallisticAlert.Classify(text);
+            if (kind == BallisticAlert.Kind.None) continue;
+            bool ppo = kind == BallisticAlert.Kind.EnemyPpo;
+            var scope = kind == BallisticAlert.Kind.Threat ? BallisticAlert.ScopeOf(loc, text) : BallisticAlert.CancelScope(loc, text);
+            var one = text.Replace("\n", " ");
+            one = one[..Math.Min(80, one.Length)];
+            if (kind == BallisticAlert.Kind.Threat)
+            {
+                var from = BallisticAlert.SiteOf(text)?.name;
+                var fresh = scope.Length > 0 ? BallisticAlert.Raise(scope, from, ch, at) : Array.Empty<string>();
+                Console.WriteLine($"{at:HH:mm:ss} ☄ {(fresh.Length > 0 ? "ТРИВОГА " + BallisticAlert.Names(fresh) : scope.Length == 0 ? "(області невідомі)" : "(ще діє)"),-48} @{ch}: {one}");
+                if (showPosts && fresh.Length > 0) foreach (var cc in sims) await SimPost(cc, cc.BallisticPost(from, fresh, at));
+            }
+            else
+            {
+                var gone = BallisticAlert.Cancel(scope, ppo, at);
+                if (showPosts)
+                    foreach (var cc in sims)
+                    {
+                        var mine = gone.Intersect(cc.Info.Oblasts).ToArray();
+                        await SimPost(cc, ppo ? (mine.Length > 0 || scope.Intersect(cc.Info.Oblasts).Any() ? cc.EnemyPpoPost(mine.Length > 0, at) : null)
+                                              : mine.Length > 0 ? cc.BallisticClearPost() : null);
+                    }
+                Console.WriteLine($"{at:HH:mm:ss} {(ppo ? "🛡" : "🟢")} {(gone.Length > 0 ? "ЗНЯТО " + BallisticAlert.Names(gone) : "(нічого не діяло)"),-48} @{ch}: {one}  [межі: {(scope.Length == 0 ? "усі" : string.Join(",", scope))}]");
+            }
+        }
+    }
+    return;
+}
+
 // ── Тест сленгу (оффлайн): що розуміємо з живих постів.   dotnet run -- slang
 if (args.Length >= 1 && args[0].Equals("slang", StringComparison.OrdinalIgnoreCase))
 {
@@ -498,6 +551,20 @@ if (args.Length >= 1 && args[0].Equals("slang", StringComparison.OrdinalIgnoreCa
         Console.WriteLine($"{post,-58} → {(Slang.BallisticThreat(post) ? "загроза" : "ЛЕТИТЬ")}");
     foreach (var post in new[] { "наразі без фіксації швидкісних цілей", "Наразі чисто. Без пусків балістичних ракет.", "По балістиці виходів не було, поки все ок", "Сигнал по балістиці скасовано." })
         Console.WriteLine($"{post,-58} → відбій: {ThreatTracker.BallisticClear.IsMatch(post)}");
+    Console.WriteLine("\n── Вороже ППО: знімає загрозу балістики? ──");
+    foreach (var post in new[] { "Попередньо, працює вороже ППО", "Працює вороже ППО, ми просто уважно", "Робота ворожого ППО", "Відомо про роботу засобів ППО ворога.",
+        "Робота ППО в Курську.", "Ймовірно в режимі ворожого ппо", "❕Працює вороже ППО. \n\nНаразі у нас чисто.", "Работает вражеское ПВО", "✅ Наразі пусків немає, схоже працює вороже ППО - уважно до відбою!",
+        "🟣 Загроза балістики з Брянська. Увага.\n \nІмовірний пуск балістичних ракет комплексів «Іскандер» / С-400.\nабо робота ворожої ППО С-300.\n\nНе знаходьтесь під відкритим небом — це небезпечно!",
+        "Чому оголошують тривогу під час роботи ворожої ППО?\n\n▪️Ракети С-300 та С-400 можуть збивати цілі.", "⏺ Ймовірно, вороже ППО збиває добрі БпЛА над акваторією Чорного моря.\n\nЗагроза триває.",
+        "Працює ППО на Салтівці", "Збито ППО 3 шахеди", "Угроза баллистики с Белгорода!", "По балістиці - відбій. Вірогідно, робота ворожого ппо по наших подарунках." })
+    {
+        var one = post.Replace("\n", " ");
+        Console.WriteLine($"{one[..Math.Min(70, one.Length)],-72} → ворожа={Slang.EnemyPpoMention(post)} знімає={Slang.EnemyPpo(post)} загроза={Slang.BallisticMention(post) && Slang.BallisticThreat(post)} відбій={ThreatTracker.BallisticClear.IsMatch(post)}");
+    }
+    Console.WriteLine("\n── Загроза балістики: яких областей ──");
+    foreach (var (post, loc) in new[] { ("🟣 Загроза балістики з Брянська. Увага.", Array.Empty<string>()), ("Загроза балістики з Бєлгорода", Array.Empty<string>()), ("Загроза балістики з Криму", Array.Empty<string>()),
+        ("Угроза баллистики!", new[] { "Харківська" }), ("Загроза балістики", new[] { "Київська" }), ("❗️Загроза балістики", Array.Empty<string>()) })
+        Console.WriteLine($"{post,-40} [{string.Join(",", loc)}] → {BallisticAlert.Names(BallisticAlert.ScopeOf(loc, post))}");
     Console.WriteLine("\n── Зникла ──");
     foreach (var post in new[] { "Більше не фіксується", "Не фіксуються⚠️", "✅ Не фіксується", "без подальшої фіксації.", "Цей не фіксується.", "Локаційно не спостерігається", "Також не спостерігається.", "Припинив існування!", "втопили мразоту", "💥 По ній мінус", "Не фіксується по Харкову" })
         Console.WriteLine($"{post,-58} → зникла {Slang.LostCount(post)?.ToString() ?? "—"}, збито {Slang.ShotCount(post)?.ToString() ?? "—"}");
@@ -925,6 +992,7 @@ if (!string.IsNullOrWhiteSpace(botToken))
         StatusAt: StatusAt,
         RiskAt: RiskAt,
         AlarmAt: AlarmAt,
+        PpoCleared: (la, lo) => BallisticAlert.PpoCleared(la, lo, DateTime.Now),
         MapPng: (lat, lon, name) => name.Length == 0 ? BuildBotMapPng(channel: true) : BuildBotMapPng(at: (lat, lon), name: name),
         Ai: BuildBotAi,
         Stats: BuildBotStats,
@@ -982,6 +1050,7 @@ var daySeen = new HashSet<string>();
 var ppoSeen = new Dictionary<string, DateTime>(); // зона → коли востаннє згадали роботу ППО
 DateTime? nuclearUntil = null; // ☢️ доки активна радіаційна/ядерна небезпека (30 хв від згадки)
 DateTime? lastLaunch = null;   // 🚀 коли востаннє попереджали про пуски (щоб не спамити)
+DateTime lastBallNews = DateTime.MinValue; // ☄ новинний канал: загроза балістики не частіше разу на 5 хв
 DateTime? lastBallistic = null; // ☄ коли востаннє будили через балістику (хаб джерел)
 var kyivOff = new SortedSet<int>(); // 🔌 черги Києва, які ЗАРАЗ без світла (з постів єСвітло)
 string? kyivOffAt = null;           // час останнього перемикання черг («11:30»)
@@ -2026,8 +2095,11 @@ string RiskAt(double lat, double lon)
 (bool alarm, string text) AlarmAt(double lat, double lon, double radiusKm)
 {
     var pt = (lat, lon);
+    // ☄ Загроза балістики в області точки — теж тривога (ракети ще нема, але секунди вирішують).
+    var (ballOn, ballFrom) = BallisticAlert.At(lat, lon, DateTime.Now);
+    var ballText = "☄ Загроза балістики" + (ballFrom is { } bf ? $" · район пуску: {bf}" : "");
     var list = tracker.Active.Where(t => t.Pos is not null && !t.Approx).ToList(); // приблизні (центр області) — не тривога
-    if (list.Count == 0) return (false, "");
+    if (list.Count == 0) return ballOn ? (true, ballText) : (false, "");
     Threat? top = null; double nearest = double.MaxValue;
     foreach (var t in list)
     {
@@ -2036,6 +2108,7 @@ string RiskAt(double lat, double lon)
     }
     var a = RiskModel.For(pt, list.Select(t => (t, t.Amount)).ToList());
     bool alarm = nearest <= radiusKm || a.Percent >= 55;
+    if (!alarm && ballOn) return (true, ballText);
     string text = top != null ? $"{ThreatTracker.Label(top)} ~{nearest:0} км" : "";
     return (alarm, text);
 }
@@ -2578,6 +2651,10 @@ async Task OnUpdate(Update update)
             Ui.Line(ConsoleColor.Green, $"☄  [{time}] {src} · балістику знято з карти: {ballGone}");
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
         }
+        // ☄ Загроза балістики / її відбій / «працює вороже ППО» → тривога по областях
+        // (бот, застосунок, міські й новинний канали). Наші ж міські канали не читаємо.
+        if (!cityChannels.Any(c => string.Equals(c.Handle.TrimStart('@'), uname, StringComparison.OrdinalIgnoreCase)))
+            await BallisticWatch(m.message, avFallback, src, time);
     }
     bool hubOnly = hubSrc is not null && !isUaPrivate && !(uname != null &&
         ((WatchKharkiv && khChannels.Contains(uname)) || (WatchKyiv && kyChannels.Contains(uname))
@@ -2767,7 +2844,7 @@ async Task OnUpdate(Update update)
     // ── Харьковские каналы → монитор до района ────────────────────────────────
     if (WatchKharkiv && uname != null && khChannels.Contains(uname))
     {
-        if (PpoMention(m.message)) ppoSeen["Харків"] = DateTime.Now;
+        if (PpoMention(m.message) && !Slang.EnemyPpoMention(m.message)) ppoSeen["Харків"] = DateTime.Now;
         await HandleKh(KharkivMonitor.Analyze(m.message, MyDistrict), src, time, "Харків");
         return;
     }
@@ -2775,7 +2852,7 @@ async Task OnUpdate(Update update)
     // ── Киевские каналы → монитор по городу (ты бываешь в Киеве) ───────────────
     if (WatchKyiv && uname != null && kyChannels.Contains(uname))
     {
-        if (PpoMention(m.message)) ppoSeen["Київ"] = DateTime.Now;
+        if (PpoMention(m.message) && !Slang.EnemyPpoMention(m.message)) ppoSeen["Київ"] = DateTime.Now;
         await HandleKh(KyivMonitor.Analyze(m.message), src, time, "Київ");
         return;
     }
@@ -2833,6 +2910,58 @@ async Task OnUpdate(Update update)
     }
 
     // прочие каналы — не наши
+}
+
+// ── ☄ Загроза балістики по областях ─────────────────────────────────────────
+// «Загроза балістики з Брянська» → тривога в областях (бот, застосунок, канали);
+// «Відбій загрози балістики» і «працює вороже ППО» її знімають (ППО — кажемо про це).
+async Task BallisticWatch(string text, string[] localCanon, string src, string time)
+{
+    var now = DateTime.Now;
+    var kind = BallisticAlert.Classify(text);
+    if (kind == BallisticAlert.Kind.None) return;
+    bool ppo = kind == BallisticAlert.Kind.EnemyPpo;
+    if (kind == BallisticAlert.Kind.Threat)
+    {
+        var scope = BallisticAlert.ScopeOf(localCanon, text);
+        if (scope.Length == 0) { Ui.Line(ConsoleColor.DarkYellow, $"☄  [{time}] {src} · загроза балістики — не знаю, яких областей (без району пуску)"); return; }
+        var from = BallisticAlert.SiteOf(text)?.name;
+        var fresh = BallisticAlert.Raise(scope, from, src, now);
+        if (fresh.Length == 0) return; // та сама загроза ще діє (перепост) — уже сказали
+        Ui.Line(ConsoleColor.Red, $"☄  [{time}] {src} · ЗАГРОЗА БАЛІСТИКИ{(from != null ? $" ({from})" : "")} → {BallisticAlert.Names(fresh)}");
+        MapWriter.Write(MapPath, tracker, MyDistrict, now); // застосунок: state.ballThreat
+        foreach (var cc in cityChannels)
+            if (cc.BallisticPost(from, fresh, now) is { } bp) await cc.Post(bp, null, silent: false);
+        if (channelPoster is not null && now - lastBallNews > TimeSpan.FromMinutes(5))
+        {
+            lastBallNews = now;
+            await channelPoster.Post($"☄️ <b>Загроза балістики</b>{(from != null ? $" · район пуску: {H(from)}" : "")}\n"
+                + $"{H(BallisticAlert.Names(fresh))}\nПуску ще немає — будь ближче до укриття.\n\n{ChannelFoot}", null);
+        }
+        return;
+    }
+    // Відбій / вороже ППО: названі / свої області; «ППО в Курську» — загрози з Курська; загальне — усі.
+    var cscope = BallisticAlert.CancelScope(localCanon, text);
+    var gone = BallisticAlert.Cancel(cscope, ppo, now);
+    if (gone.Length > 0)
+    {
+        Ui.Line(ConsoleColor.Green, $"{(ppo ? "🛡" : "🟢")} [{time}] {src} · {(ppo ? "працює вороже ППО" : "відбій")} — загрозу балістики знято: {BallisticAlert.Names(gone)}");
+        MapWriter.Write(MapPath, tracker, MyDistrict, now);
+        if (channelPoster is not null)
+            await channelPoster.Post(ppo
+                ? $"🛡 <b>Працює вороже ППО</b>\nЗагрозу балістики знято — схоже, це не пуски по нас ({H(BallisticAlert.Names(gone))}).\nДо офіційного відбою — уважно.\n\n{ChannelFoot}"
+                : $"🟢 <b>Відбій загрози балістики</b>\n{H(BallisticAlert.Names(gone))}\n\n{ChannelFoot}", null, silent: true);
+    }
+    else if (ppo) Ui.Line(ConsoleColor.DarkGray, $"🛡 [{time}] {src} · працює вороже ППО (загрози балістики не було)");
+    foreach (var cc in cityChannels)
+    {
+        // Вороже ППО з місцевого каналу зони — кажемо й без загрози (чути/видно пуски з Бєлгорода).
+        bool local = cscope.Intersect(cc.Info.Oblasts).Any();
+        var mine = gone.Intersect(cc.Info.Oblasts).ToArray();
+        var post = ppo ? (mine.Length > 0 || local ? cc.EnemyPpoPost(mine.Length > 0, now) : null)
+                       : mine.Length > 0 ? cc.BallisticClearPost() : null;
+        if (post is not null) await cc.Post(post, null, silent: true);
+    }
 }
 
 // ── 📡 Хаб джерел: розбір повідомлення каталогу → звірка → карта/сповіщення ─────

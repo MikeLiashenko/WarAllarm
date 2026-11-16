@@ -74,6 +74,10 @@ class Situation {
       tone = AppColors.textMuted;
       status = 'Немає даних';
       message = 'Чекаю монітор… Це не означає «чисто».';
+    } else if (alarm.ballisticAlarm) {
+      tone = AppColors.threat;
+      status = '☄️ Загроза балістики';
+      message = alarm.detail;
     } else if (active) {
       tone = AppColors.threat;
       status = 'Тривога — в укриття';
@@ -85,6 +89,10 @@ class Situation {
       message =
           '${worst!.label} · ${worst.pdist?.round() ?? '?'} км · '
           '${fmtEta(etaNow(worst, data.stateTs))}';
+    } else if (alarm.enemyPpo) {
+      tone = AppColors.safe;
+      status = '🛡 Працює вороже ППО';
+      message = 'Загрозу балістики знято — схоже, це не пуски по нас. До відбою — уважно.';
     } else {
       tone = AppColors.safe;
       status = 'Спокійно';

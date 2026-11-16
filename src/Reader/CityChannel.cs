@@ -68,8 +68,6 @@ public sealed class CityChannel
                                   $"<i>🕒 {DateTime.Now:HH:mm} · обновляется · 🤖 WarAlarm {Title}</i>");
     /// Фінальний рядок дошки, коли небо чисте.
     public string CloseText => T("Цілей більше не видно", "Целей больше не видно");
-    /// Загроза балістики російською (укр. — спільний BallisticThreatText з Program.cs).
-    const string BallisticRu = "⚠️ Угроза баллистики: пуска ещё нет, будь ближе к укрытию";
     /// Логотип міста для карт (assets/logo_<key>.png).
     public string LogoFile => $"logo_{Key}.png";
 
@@ -124,10 +122,7 @@ public sealed class CityChannel
         string? line = null;
         bool loud = false;
         if (e.Signal == KhSignal.News) { }
-        else if (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw))
-        {
-            if (now - _ballAt > TimeSpan.FromMinutes(5)) { line = Ru ? BallisticRu : ballisticText; loud = true; _ballAt = now; }
-        }
+        else if (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw)) { } // загроза балістики — BallisticPost (Program.BallisticWatch)
         else if (Slang.ShotCount(e.Raw) is { } n)
         {   // «мінус» без цілей біля міста — не про нас (або запізнілий перепост)
             if (hadCityThreat) line = $"🎯 {T("Мінус", "Минус")}" + (n > 1 ? $" {n}" : "");
@@ -140,7 +135,7 @@ public sealed class CityChannel
             loud = !hadCityThreat;
         }
 
-        if (Ppo(e.Raw) && now - _ppoAt > TimeSpan.FromMinutes(3))
+        if (Ppo(e.Raw) && !Slang.EnemyPpoMention(e.Raw) && now - _ppoAt > TimeSpan.FromMinutes(3)) // вороже ППО — EnemyPpoPost
         {
             _ppoAt = now;
             var ppoLine = T("🛡 Працює ППО", "🛡 Работает ПВО");
@@ -156,6 +151,45 @@ public sealed class CityChannel
 
         return ($"{H(line)}\n\n{Foot}", !loud);
     }
+
+    // ── ☄ Загроза балістики / 🛡 вороже ППО (Program.BallisticWatch) ───────────────
+    DateTime _enemyPpoAt = DateTime.MinValue;
+    static readonly Dictionary<string, string> RuSite = new()
+    {
+        ["Брянськ"] = "Брянск", ["Бєлгород"] = "Белгород", ["Курськ"] = "Курск", ["Крим"] = "Крым", ["Орел"] = "Орёл",
+        ["Липецьк"] = "Липецк", ["Чорне море"] = "Чёрное море", ["Смоленськ"] = "Смоленск", ["Енгельс"] = "Энгельс",
+        ["Донецьк"] = "Донецк", ["Луганськ"] = "Луганск", ["Маріуполь"] = "Мариуполь", ["Бердянськ"] = "Бердянск",
+        ["Міллерово"] = "Миллерово", ["Каспій"] = "Каспий",
+    };
+
+    /// Загроза балістики, що щойно почалась у [oblasts] → пост (зі звуком) або null (не наша зона / ≤5 хв тому).
+    public string? BallisticPost(string? from, IReadOnlyCollection<string> oblasts, DateTime now)
+    {
+        var mine = oblasts.Intersect(Info.Oblasts).ToList();
+        if (mine.Count == 0 || now - _ballAt < TimeSpan.FromMinutes(5)) return null;
+        _ballAt = now;
+        // Лише своя область міста — без переліку; інакше — де саме («Чернігівщина»).
+        bool own = mine.All(o => o == Info.Oblasts[0] || o == "Kiev City");
+        var where = own ? "" : " — " + BallisticAlert.Names(mine);
+        var site = from is null ? "" : T($"\nРайон пуску: {from}.", $"\nРайон пуска: {(RuSite.TryGetValue(from, out var r) ? r : from)}.");
+        return T($"☄️ <b>Загроза балістики</b>{H(where)}{H(site)}\nПуску ще немає — будь ближче до укриття.\n\n{Foot}",
+                 $"☄️ <b>Угроза баллистики</b>{H(where)}{H(site)}\nПуска ещё нет — будь ближе к укрытию.\n\n{Foot}");
+    }
+
+    /// «Працює вороже ППО» → пост (тихо); [cleared] — у зоні щойно зняли загрозу балістики.
+    public string? EnemyPpoPost(bool cleared, DateTime now)
+    {
+        if (now - _enemyPpoAt < TimeSpan.FromMinutes(cleared ? 2 : 5)) return null;
+        _enemyPpoAt = now;
+        return cleared
+            ? T($"🛡 <b>Працює вороже ППО</b>\nЗагрозу балістики знято — схоже, це не пуски по нас.\nДо відбою — уважно.\n\n{Foot}",
+                $"🛡 <b>Работает вражеское ПВО</b>\nУгрозу баллистики сняли — похоже, это не пуски по нам.\nДо отбоя — внимательно.\n\n{Foot}")
+            : T($"🛡 <b>Працює вороже ППО</b>\nСхоже, це не пуски по нас. До відбою — уважно.\n\n{Foot}",
+                $"🛡 <b>Работает вражеское ПВО</b>\nПохоже, это не пуски по нам. До отбоя — внимательно.\n\n{Foot}");
+    }
+
+    public string BallisticClearPost() =>
+        T($"🟢 <b>Відбій загрози балістики</b>\n\n{Foot}", $"🟢 <b>Отбой угрозы баллистики</b>\n\n{Foot}");
 
     // [fresh] — стадія змінилась саме цією подією (інакше «💥» від минулого вибуху липне до нових постів).
     static string ThreatLine(KhEvent e, Threat t, bool fresh, bool ru)

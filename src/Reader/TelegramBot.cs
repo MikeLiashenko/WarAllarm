@@ -24,7 +24,8 @@ public sealed record BotFeatures(
     Func<string>? Sources = null, // 📡 які канали що дали (SourceHub)
     Func<string?>? Outlook = null, // 🔮 чого чекати цієї ночі (null — оцінки ще нема)
     Func<double, double, int, List<(string id, string text)>>? TargetsNear = null, // 🛰 найближчі цілі (короткі рядки)
-    Func<string, double, double, (string text, string stage)?>? TargetInfo = null); // 🛰 картка цілі (null — зникла)
+    Func<string, double, double, (string text, string stage)?>? TargetInfo = null, // 🛰 картка цілі (null — зникла)
+    Func<double, double, bool>? PpoCleared = null); // 🛡 загрозу балістики в точці щойно зняли через вороже ППО
 
 public sealed class TelegramBot
 {
@@ -276,11 +277,16 @@ public sealed class TelegramBot
                 if (alarm) _calmSince.Remove(chat);
                 if (alarm && !last)
                 {
-                    try { await Send(chat,
-                        $"🔴 <b>ТРИВОГА поруч — {H(place.Name)}</b>\n"
-                        + (text.Length > 0 ? $"🎯 {H(text)}\n" : "")
-                        + $"📏 Зона тривоги — {rad} км\n"
-                        + "\n➤ <b>В укриття!</b> Подалі від вікон, правило двох стін.", AlarmKb); } catch { }
+                    bool ball = text.StartsWith('☄');
+                    try { await Send(chat, ball
+                        ? $"☄️ <b>ЗАГРОЗА БАЛІСТИКИ — {H(place.Name)}</b>\n"
+                          + (text.Contains('·') ? $"🚀 {H(text[(text.IndexOf('·') + 1)..].Trim())}\n" : "")
+                          + "Пуску ще немає, але ракета летить лічені хвилини.\n"
+                          + "\n➤ <b>Будь ближче до укриття</b>; почуєш «пуск» чи вибухи — одразу туди."
+                        : $"🔴 <b>ТРИВОГА поруч — {H(place.Name)}</b>\n"
+                          + (text.Length > 0 ? $"🎯 {H(text)}\n" : "")
+                          + $"📏 Зона тривоги — {rad} км\n"
+                          + "\n➤ <b>В укриття!</b> Подалі від вікон, правило двох стін.", AlarmKb); } catch { }
                     _lastAlarm[chat] = true;
                 }
                 else if (!alarm && last)
@@ -289,8 +295,10 @@ public sealed class TelegramBot
                     if (!_calmSince.TryGetValue(chat, out var since)) { _calmSince[chat] = DateTime.Now; continue; }
                     if (DateTime.Now - since < TimeSpan.FromSeconds(60)) continue;
                     _calmSince.Remove(chat);
-                    try { await Send(chat,
-                        $"🟢 <b>Відбій — {H(place.Name)}</b>\nНаразі поруч чисто.\n\nЧи було чути вибух?", BoomKb); } catch { }
+                    bool ppo = _f.PpoCleared?.Invoke(place.Lat, place.Lon) == true;
+                    try { await Send(chat, ppo
+                        ? $"🛡 <b>Працює вороже ППО — {H(place.Name)}</b>\nЗагрозу балістики знято: схоже, це не пуски по нас.\nДо офіційного відбою — уважно."
+                        : $"🟢 <b>Відбій — {H(place.Name)}</b>\nНаразі поруч чисто.\n\nЧи було чути вибух?", ppo ? null : BoomKb); } catch { }
                     _lastAlarm[chat] = false;
                 }
             }
@@ -490,6 +498,7 @@ public sealed class TelegramBot
         + "📍 /place — змінити місто (можна мікрорайон чи адресу)" + (place is { } p ? $" (зараз: {H(p.Name)})" : "") + "\n"
         + "📏 /radius — радіус тривоги: ціль ближче — 🔴 тривога (5–100 км)\n"
         + "🔕 /stop — вимкнути сповіщення\n\n"
+        + "☄️ Загроза балістики у твоїй області — теж тривога; «працює вороже ППО» її знімає.\n"
         + $"🔔 Сповіщення приходять самі: ціль ближче {radius} км → 🔴 тривога, потім 🟢 відбій.\n"
         + "<i>Бот — допоміжний. Завжди зважай на офіційну тривогу.</i>";
 

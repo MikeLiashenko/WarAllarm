@@ -208,6 +208,8 @@ public static class MapWriter
         sb.Append(",\"oblastWhole\":").Append(OblastWholeJson.Length > 0 ? OblastWholeJson : "{}");
         // ☢️ Ядерна/радіаційна небезпека (застосунок показує окремий екран).
         sb.Append(",\"nuclear\":").Append(NuclearJson.Length > 0 ? NuclearJson : "{\"active\":false}");
+        // ☄ Загроза балістики по областях (+ «🛡 вороже ППО — знято»): застосунок б'є тривогу.
+        sb.Append(",\"ballThreat\":").Append(BallisticAlert.Json(now));
         // 🔌 Світло (відключення/відновлення) — застосунок показує індикатор.
         sb.Append(",\"power\":").Append(PowerJson.Length > 0 ? PowerJson : "{}");
         // 🚀 Пуски / оцінка «у повітрі» від моніторів.

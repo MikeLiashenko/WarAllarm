@@ -120,6 +120,9 @@ public static class OblastGeo
     // сотні точок на кожен запис карти).
     static readonly (double minLat, double maxLat, double minLon, double maxLon)[] Boxes = BoxesOf(Polys);
     static readonly (double minLat, double maxLat, double minLon, double maxLon)[] RaionBoxes = BoxesOf(RaionPolys);
+    /// Середина рамки кожної області (англ. назва полігона) — для «досяжності» від району пуску.
+    public static readonly (string en, double lat, double lon)[] Centers = Polys.Select((p, i) => (p.en, (Boxes[i].minLat + Boxes[i].maxLat) / 2, (Boxes[i].minLon + Boxes[i].maxLon) / 2))
+        .DistinctBy(c => c.en).ToArray();
 
     static (double, double, double, double)[] BoxesOf(List<(string en, List<List<double[]>> rings)> polys) => polys
         .Select(p => p.rings.SelectMany(r => r).ToList())
