@@ -981,6 +981,17 @@ public sealed class SourceHub
         }
     }
 
+    /// Коли по кожній області виходило останнє зведення (≥3 рядки про неї в одному пості).
+    /// Зведення по Київщині не каже нічого про шахеди на Волині — тому час окремо для області.
+    public Dictionary<string, DateTime> ListTimes(DateTime now)
+    {
+        lock (_gate)
+        {
+            _lists.RemoveAll(l => now - l.at > ListTtl);
+            return _lists.GroupBy(l => l.obl).ToDictionary(g => g.Key, g => g.Max(l => l.at));
+        }
+    }
+
     /// Джерела, що бачили ціль у цьому місці (для «підтверджено N»).
     public IReadOnlyList<string> SourcesFor(string place)
     {

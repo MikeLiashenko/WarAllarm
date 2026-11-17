@@ -30,9 +30,22 @@ public static class Audit
         int dupPairs = 0, mixPairs = 0, n = 0;
         var kinds = new Dictionary<string, int>();
         DateTime nextCheck = posts.Count > 0 ? posts[0].at : day;
+        int Bort() => tr.Active.Where(x => !x.Down).Sum(x => x.Amount);
         void Check(DateTime now)
         {
-            tr.Tick(now);
+            int b0 = Bort();
+            var gone = tr.Tick(now, hub.ListCaps(now), hub.LastListAt, hub.ListTimes(now)).Where(u => u.Threat.Stage == TrackStage.Gone).ToList();
+            if (b0 - Bort() >= 8)
+                Console.WriteLine($"\n{now:HH:mm} ⬇ ЗНЯТО за тишею {b0 - Bort()} бортів: " + string.Join("; ", gone.Select(u => $"{ThreatTracker.Label(u.Threat)} {u.Threat.LastPlace}×{u.Threat.Amount} ({(now - u.Threat.LastUpdate).TotalMinutes:0} хв)")));
+            // Раз на 15 хв — що зараз на карті (усе, що трекер тримає): скільки й якого типу, найстаріші.
+            if (now.Minute % 15 == 0)
+            {
+                var all = tr.Active.Where(x => !x.Down && x.DrawPos(now) is not null).ToList();
+                Console.WriteLine($"\n── {now:HH:mm} на карті {all.Count} міток, бортів {all.Sum(x => x.Amount)}: "
+                    + string.Join(", ", all.GroupBy(x => ThreatTracker.Label(x)).OrderByDescending(g => g.Sum(x => x.Amount)).Select(g => $"{g.Key} {g.Sum(x => x.Amount)}"))
+                    + $" · без оновлення >10 хв: {all.Count(x => now - x.LastUpdate > TimeSpan.FromMinutes(10))}"
+                    + $" · обл.: {all.Where(x => x.Approx).Sum(x => x.Amount)}");
+            }
             var act = tr.Active.Where(x => x.Zone == "UA" && !x.Launch && !x.Down && x.DrawPos(now) is not null
                                            && now - x.LastUpdate < TimeSpan.FromMinutes(10)).ToList();
             for (int i = 0; i < act.Count; i++)
@@ -58,12 +71,18 @@ public static class Audit
         {
             while (nextCheck <= at) { Check(nextCheck); nextCheck = nextCheck.AddMinutes(1); }
             if (SourceCatalog.Get(ch) is not { } si) continue;
+            int pb = Bort();
             var r = hub.Process(si, text, at);
             foreach (var s in r.Statuses)
                 if (s.Circling) tr.MarkCircling(s.Pos, s.Kind, at); else tr.MarkShot(s.Pos, s.Kind, s.Shot, at, si.User, s.Lost);
             if (r.MissilesDone) tr.SweepWhere(t => t.Kind == ThreatKind.Missile && at - t.LastUpdate > TimeSpan.FromMinutes(1));
             if (r.Verdict == HubVerdict.AllClear && r.ClearOblast is { } co && co != "*")
                 tr.SweepWhere(t => t.Zone == "UA" && t.Oblast != null && string.Equals(t.Oblast, co, StringComparison.OrdinalIgnoreCase) && at - t.LastUpdate > TimeSpan.FromMinutes(2));
+            if (pb - Bort() >= 8)
+            {
+                var one0 = text.Replace("\n", " ⏎ ");
+                Console.WriteLine($"\n{at:HH:mm:ss} ⬇ ЗНЯТО постом {pb - Bort()} бортів ({r.Verdict} {r.ClearOblast}) @{ch}: {one0[..Math.Min(160, one0.Length)]}");
+            }
             if (r.Verdict != HubVerdict.Confirmed) continue;
             foreach (var he in r.Confirmed)
             {

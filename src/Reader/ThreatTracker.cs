@@ -320,7 +320,9 @@ public sealed class ThreatTracker
                 return new TrackUpdate(t, false, TrackSound.None, Note(t));
             }
             // Прямо сказано «реактивний» — швидкість уточнюємо навіть для вже відомої цілі.
-            t!.Ammo = IsJet(ev.Extra) ? ev.Extra : t.Ammo ?? ev.Extra;
+            // Тип засобу — лише з посту про той самий вид: «Вишгород» від каналу, що пише про ракети,
+            // злився з балістикою й дописав їй «крилата» (17.11 05:38 — «Балістика (крилата)»).
+            t!.Ammo = IsJet(ev.Extra) ? ev.Extra : t.Ammo ?? (ev.Kind == t.Kind ? ev.Extra : null);
             t.Oblast = ev.Oblast ?? t.Oblast;
             t.Recon = ((ev.Extra ?? "") + " " + ev.Raw).ToLowerInvariant().Contains("розвід");
             // Новий пост про ціль, яку вважали збитою, — отже, вона ще летить.
@@ -769,7 +771,8 @@ public sealed class ThreatTracker
     }
 
     // ── тик по таймеру: пересчитать ETA и решить, пора ли пикнуть/сменить стадию ──
-    public List<TrackUpdate> Tick(DateTime now, IReadOnlyDictionary<string, int>? listCaps = null, DateTime lastList = default)
+    public List<TrackUpdate> Tick(DateTime now, IReadOnlyDictionary<string, int>? listCaps = null, DateTime lastList = default,
+                                  IReadOnlyDictionary<string, DateTime>? listTimes = null)
     {
         var outp = new List<TrackUpdate>();
         lock (_gate)
@@ -802,9 +805,23 @@ public sealed class ThreatTracker
             // Зведення виходять раз на 5–10 хв, але бувають паузи на 15+ (1.11: 17:13→17:29), і карта
             // пустіла посеред нальоту. Поки нового зведення немає, повільну ціль із нальоту тримаємо до
             // 20 хв; вийшло зведення, а її там нема — діє звичайний строк, тож сума не роздувається.
+            // Зведення — по СВОЇЙ області: свіже зведення по Київщині не означає, що шахедів на Волині
+            // вже нема (17.11: ~60 бортів на заході зникали пачками через 10 хв і за 15 хв з'являлись знову).
             if (t.Zone == "UA" && t.Kind is ThreatKind.Drone or ThreatKind.Target && ThreatGeo.SpeedKmh(t.Kind, t.Ammo) <= 250
-                && now - lastList < TimeSpan.FromMinutes(20) && lastList <= t.LastUpdate.AddMinutes(1))
-                goneAfter = TimeSpan.FromMinutes(20);
+                && now - lastList < TimeSpan.FromMinutes(listTimes is null ? 20 : 30))
+            {
+                var covered = lastList;
+                var hold = TimeSpan.FromMinutes(20);
+                if (listTimes is not null)
+                {
+                    // У масований наліт зведення по області — раз на ~25 хв (17.11: 07:27 → 07:53),
+                    // тож чекаємо до 30 хв, поки по її області не вийде нове.
+                    var obl = (t.Pos is { } tp ? Geo.Canonical(OblastGeo.Region(tp.lat, tp.lon)) : null) ?? t.Oblast ?? "";
+                    covered = listTimes.TryGetValue(obl, out var la) ? la : default;
+                    hold = TimeSpan.FromMinutes(30);
+                }
+                if (covered <= t.LastUpdate.AddMinutes(1)) goneAfter = hold;
+            }
             // «Падає» — 3 хв без нових згадок, і ціль знімаємо.
             if (t.Down && now - t.DownAt > TimeSpan.FromMinutes(3) && t.LastUpdate <= t.DownAt)
                 goneAfter = TimeSpan.Zero;
@@ -989,6 +1006,10 @@ public sealed class ThreatTracker
         if (t.Ammo is { } r0 && r0.StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase)) return r0;
         // Реактивний шахед — окремий засіб (500 км/год), а не «Шахед (реакт. шахед)».
         if (t.Kind == ThreatKind.Drone && (t.Ammo ?? "").Contains("реакт", StringComparison.OrdinalIgnoreCase)) return "Реактивний шахед";
+        // «Балістика (крилата)», «Балістика (Швидкісна ціль)» — не тип балістики, а шум у підписі.
+        if (t.Kind == ThreatKind.Ballistic && t.Ammo is { } b1 && (b1.Contains("крилат", StringComparison.OrdinalIgnoreCase)
+            || b1.Contains("швидкісн", StringComparison.OrdinalIgnoreCase) || b1.Contains("ціль", StringComparison.OrdinalIgnoreCase)))
+            return name;
         return t.Ammo is { Length: > 0 } a ? $"{name} ({a})" : name;
     }
 
