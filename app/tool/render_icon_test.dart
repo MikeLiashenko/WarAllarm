@@ -3,6 +3,7 @@
 //   windows/runner/resources/app_icon.ico — exe / window / taskbar icon
 //   android/.../mipmap-*/ic_launcher.png  — launcher icons
 //   web/icons/*.png, web/favicon.png       — web app (maskable = full-bleed square)
+//   ios/.../AppIcon.appiconset             — iOS (full-bleed square, iOS rounds it)
 //
 // Run after changing the painter:  flutter test tool/render_icon_test.dart
 import 'dart:io';
@@ -13,10 +14,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:waralarm/widgets/brand_icon.dart';
 
-Future<Uint8List> _png(int px, {bool square = false}) async {
+Future<Uint8List> _png(int px, {bool square = false, bool safeZone = true}) async {
   final rec = ui.PictureRecorder();
   final canvas = Canvas(rec);
-  BrandIconPainter(square: square).paint(canvas, Size(px.toDouble(), px.toDouble()));
+  BrandIconPainter(square: square, safeZone: safeZone).paint(canvas, Size(px.toDouble(), px.toDouble()));
   final img = await rec.endRecording().toImage(px, px);
   final data = await img.toByteData(format: ui.ImageByteFormat.png);
   return data!.buffer.asUint8List();
@@ -66,6 +67,9 @@ void main() {
         File('web/icons/Icon-$px.png').writeAsBytesSync(await _png(px));
         File('web/icons/Icon-maskable-$px.png').writeAsBytesSync(await _png(px, square: true));
       }
+
+      File('ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png')
+          .writeAsBytesSync(await _png(1024, square: true, safeZone: false));
     });
   });
 }

@@ -6,11 +6,15 @@ import 'package:flutter/material.dart';
 /// One painter for everything: the in-app [BrandMark], and the launcher /
 /// Windows / web icons rendered by `tool/render_icon_test.dart`.
 class BrandIconPainter extends CustomPainter {
-  const BrandIconPainter({this.square = false});
+  const BrandIconPainter({this.square = false, this.safeZone = true});
 
   /// Full-bleed square tile with the shield inside the 80% safe zone
   /// (maskable web icons: the launcher cuts its own shape).
   final bool square;
+
+  /// With [square]: shrink the emblem into the 80% safe zone. iOS rounds the
+  /// corners itself and cuts much less, so its icon keeps the emblem full size.
+  final bool safeZone;
 
   static const _blue1 = Color(0xFF2A7BE0);
   static const _blue2 = Color(0xFF0B4DA2);
@@ -38,7 +42,7 @@ class BrandIconPainter extends CustomPainter {
     canvas.restore();
 
     // Emblem; in the maskable square it shrinks into the safe zone.
-    if (square) {
+    if (square && safeZone) {
       canvas.translate(s * 0.1, s * 0.1);
       canvas.scale(0.8);
     }
@@ -83,7 +87,7 @@ class BrandIconPainter extends CustomPainter {
     ..close();
 
   @override
-  bool shouldRepaint(BrandIconPainter old) => old.square != square;
+  bool shouldRepaint(BrandIconPainter old) => old.square != square || old.safeZone != safeZone;
 
   // Tryzub outline traced from WarAlarm.png and made symmetric: closed loops of
   // x, y pairs in units of its height (x from the centre line, y from the top);
