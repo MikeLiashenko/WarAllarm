@@ -408,6 +408,9 @@ public static class PlaceFinder
         return best;
     }
 
+    static readonly string[] WeaponNorm = new[] { "циркон", "калібр", "кинджал", "онікс", "іскандер", "искандер", "торнадо",
+        "смерч", "ураган", "герань", "гербер", "ланцет", "бандерол", "пароді", "кинжал", "калибр" }.Select(Norm).Where(w => w.Length >= 4).ToArray();
+
     /// Знайти місце. <paramref name="region"/> — області каналу/поста (для тезок і
     /// фільтра «не за 500 км»). <paramref name="maxKm"/> — наскільки далеко від
     /// регіону може бути місце (для «голих» назв суворіше).
@@ -415,6 +418,9 @@ public static class PlaceFinder
     {
         var q = Norm(raw);
         if (q.Length < 3) return null;
+        // Назва зброї — не село: «ракетами Іскандер-М/Циркон» → «Циркуни» під Харковом (17.11 13:25,
+        // хибна тривога «Балістика ~10 км» з денного звіту ПС).
+        if (WeaponNorm.Any(w => q.StartsWith(w, StringComparison.Ordinal))) return null;
         // Область замість міста («маневрує на Харківщині») — це не точка. Крім «Запоріжжя»:
         // монітори так кличуть МІСТО («На Запоріжжя»), а не область.
         if (Geo.Canonical(q) is not null && q != "запоріжжя" || OblastWord.IsMatch(q)) return null;
@@ -557,7 +563,10 @@ public sealed class SourceHub
     const int MaxPlaceCount = 60;
     // «173 російських безпілотників знищено над Запоріжжям», «тривають бої… просування» — підсумок/фронт, не ціль у повітрі.
     static readonly Regex Summary = new(
-        @"\d+\s+(?:\p{L}+\s+){0,2}(?:безпілотник|бпла|дрон|шахед|ракет|ціл)\p{L}*\s+(?:було\s+)?(?:знищен|збит|знешкоджен|уражен|подавлен)|просуван\p{L}*\s+(?:зсу|військ)|тривають\s+бої",
+        @"\d+\s+(?:\p{L}+\s+){0,2}(?:безпілотник|бпла|дрон|шахед|ракет|ціл)\p{L}*\s+(?:було\s+)?(?:знищен|збит|знешкоджен|уражен|подавлен)|просуван\p{L}*\s+(?:зсу|військ)|тривають\s+бої"
+        // Денний звіт ПС: «ЗБИТО/ПОДАВЛЕНО 211 ВОРОЖИХ ЦІЛЕЙ», «У ніч на 17 листопада… противник атакував».
+        + @"|(?:збито|знищено|подавлено|збиття)[/\s]+(?:\p{L}+[/\s]+){0,2}\d{2,}\s+(?:\p{L}+\s+){0,2}(?:безпілотник|бпла|дрон|шахед|ракет|ціл)"
+        + @"|у\s+ніч\s+на\s+\d+\s+\p{L}+[^.]{0,80}противник\s+атакував|станом\s+на\s+\d{1,2}[:.]\d{2}\s+підтверджено",
         RegexOptions.IgnoreCase);
     // Цитата посадовця, заяви, продовження «попередження на 48 годин», подяки побратимам — новина,
     // а не ціль (11.14: «ракета FREYJA готова, — Зеленський» → «шахед над Борщагівкою»).
@@ -624,6 +633,10 @@ public sealed class SourceHub
         RegexOptions.IgnoreCase | RegexOptions.Singleline);
     // Тип із самого рядка, коли парсер дав лише «ціль»: «Ситуация по реактивным: 1 курсом на …».
     static readonly Regex DroneWord = new(@"реактив|шахед|шохєд|(?<!\p{L})звич|шаболд|бпла|дрон|мопед|балалайк|турб|косилк|ударн", RegexOptions.IgnoreCase);
+    // Ракети/КАБ/балістика названі в тексті поста — тоді спадок «дрон» із заголовка не застосовуємо.
+    static readonly Regex RocketWord = new(@"ракет|бандерол|(?<!\p{L})каб|крилат|баліст|швидкісн|іскандер|калібр|кинджал|(?<!\p{L})х-\d|рсзв|(?<!\p{L})ціль|(?<!\p{L})цель", RegexOptions.IgnoreCase);
+    static bool ManyPlaces(List<ThreatEvent> events) => events.Count >= 3 && events.Sum(e => Math.Max(1, e.Count)) >= 8;
+
     // «Далі/Далее Мерефа» — продовження руху. КАБ не «летить далі»: це дрон або ракета.
     static readonly Regex Continue = new(@"^\W*(?:(?:і|и|та|а)\s+)?(?:далі|далее|дальше|потім|потом|знову|опять|снова|продовжує|продолжает)\b", RegexOptions.IgnoreCase);
 
@@ -894,6 +907,15 @@ public sealed class SourceHub
                 var kind = ev.Kind;
                 var extra = ev.Extra;
                 if (kind == ThreatKind.Target && DroneWord.IsMatch(ev.Raw)) kind = ThreatKind.Drone;
+                // Тип названо в заголовку ЦЬОГО поста («Найближчі до міста реактивний БПЛА: ▪️1 на Мерефу»,
+                // «◦ Ударний Бп 1 грп.») — він важливіший за ракету/КАБ з попереднього поста каналу
+                // (17.11: шахеди на Мерефу/Коротич/Пісочин ставали ракетою й КАБами).
+                else if (kind == ThreatKind.Target && DroneWord.IsMatch(clean) && !RocketWord.IsMatch(clean)
+                         || ev.Kind == ThreatKind.Target && kind == ThreatKind.Target && ManyPlaces(events) && !RocketWord.IsMatch(clean)
+                            && CtxKind(src.User, ev.Raw, at) is { kind: ThreatKind.Missile or ThreatKind.Kab or ThreatKind.Ballistic })
+                    // Великий список «8 на Хмільницю, 4 на Гончарівське, 2 повз Дніпровське» без слова «ракета» —
+                    // це рій дронів, а не ракети з минулого поста.
+                    kind = DroneWord.IsMatch(clean) ? ThreatKind.Drone : ThreatKind.Target;
                 else if (kind == ThreatKind.Target && CtxKind(src.User, ev.Raw, at) is { } cx)
                 { kind = cx.kind; extra ??= cx.extra; }
                 // «Далее Мерефа» без типу, а контексту дрона нема — краще «ціль», ніж вигаданий КАБ.
