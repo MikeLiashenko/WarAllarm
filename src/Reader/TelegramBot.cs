@@ -26,7 +26,8 @@ public sealed record BotFeatures(
     Func<string?>? Outlook = null, // 🔮 чого чекати цієї ночі (null — оцінки ще нема)
     Func<double, double, int, List<(string id, string text)>>? TargetsNear = null, // 🛰 найближчі цілі (короткі рядки)
     Func<string, double, double, (string text, string stage)?>? TargetInfo = null, // 🛰 картка цілі (null — зникла)
-    Func<double, double, bool>? PpoCleared = null); // 🛡 загрозу балістики в точці щойно зняли через вороже ППО
+    Func<double, double, bool>? PpoCleared = null, // 🛡 загрозу балістики в точці щойно зняли через вороже ППО
+    Func<double, double, DangerStars.Result>? Stars = null); // ⭐ небезпека надворі в точці (0–5)
 
 public sealed class TelegramBot
 {
@@ -263,6 +264,17 @@ public sealed class TelegramBot
         }
     }
 
+    // ⭐ «Небезпека надворі: ★★★★☆ 4/5 — дуже висока» під тривогою (як у 📊 Статусі й застосунку).
+    string StarsLine(Place place)
+    {
+        try
+        {
+            if (_f.Stars?.Invoke(place.Lat, place.Lon) is not { Stars: > 0 } r) return "";
+            return $"⭐ Небезпека надворі: {DangerStars.Bar(r.Stars)} {r.Stars}/5 — {r.Level.ToLowerInvariant()}\n";
+        }
+        catch { return ""; }
+    }
+
     // Кожні ~10 с: для кожного користувача з містом — тривога поруч → сповіщення.
     async Task RunUserAlarms(CancellationToken ct)
     {
@@ -279,14 +291,17 @@ public sealed class TelegramBot
                 if (alarm && !last)
                 {
                     bool ball = text.StartsWith('☄');
+                    var stars = StarsLine(place);
                     try { await Send(chat, ball
                         ? $"☄️ <b>ЗАГРОЗА БАЛІСТИКИ — {H(place.Name)}</b>\n"
                           + (text.Contains('·') ? $"🚀 {H(text[(text.IndexOf('·') + 1)..].Trim())}\n" : "")
+                          + stars
                           + "Пуску ще немає, але ракета летить лічені хвилини.\n"
                           + "\n➤ <b>Будь ближче до укриття</b>; почуєш «пуск» чи вибухи — одразу туди."
                         : $"🔴 <b>ТРИВОГА поруч — {H(place.Name)}</b>\n"
                           + (text.Length > 0 ? $"🎯 {H(text)}\n" : "")
                           + $"📏 Зона тривоги — {rad} км\n"
+                          + stars
                           + "\n➤ <b>В укриття!</b> Подалі від вікон, правило двох стін.", AlarmKb); } catch { }
                     _lastAlarm[chat] = true;
                 }

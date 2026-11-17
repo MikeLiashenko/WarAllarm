@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../domain/danger_stars.dart';
 import '../domain/situation.dart';
 import '../models/map_target.dart';
 import '../models/monitored_place.dart';
@@ -56,6 +57,19 @@ class AlarmController extends ChangeNotifier {
 
   String _detail = '';
   String get detail => _detail;
+
+  /// ⭐ Небезпека надворі (0–5) для найнебезпечнішого з обраних місць — на екрані тривоги,
+  /// як у боті під «ТРИВОГА поруч». null — на демо/застарілих даних.
+  DangerStars? get stars {
+    if (_map.isDemo || _map.stale) return null;
+    DangerStars? best;
+    for (final pl in _map.alarmPlaces) {
+      final d = dangerStarsFor(pl, _map.alarmTargets,
+          aviation: _map.aviation, ballisticFrom: _map.ballisticAt(pl.lat, pl.lon));
+      if (best == null || d.stars > best.stars) best = d;
+    }
+    return best;
+  }
 
   /// «Я в укритті — стоп» silences the whole alarm episode: no auto-repeat.
   /// It re-arms only once the danger is over (calm for [_calmToClear]), so the

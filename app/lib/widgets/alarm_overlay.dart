@@ -183,6 +183,19 @@ class _AlarmOverlayState extends State<AlarmOverlay>
                             height: 1.05,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 2)),
+                    // ⭐ Наскільки небезпечно надворі — як у боті під «ТРИВОГА поруч».
+                    if (alarm.stars case final st? when !nuclear && st.stars > 0) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        '${'★' * st.stars}${'☆' * (5 - st.stars)}  ${st.stars}/5 · ${st.level.toLowerCase()}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Color(0xFFFFD94A),
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     Text(
                       alarm.detail.isEmpty

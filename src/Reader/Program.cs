@@ -1019,6 +1019,7 @@ if (!string.IsNullOrWhiteSpace(botToken))
         RiskAt: RiskAt,
         AlarmAt: AlarmAt,
         PpoCleared: (la, lo) => BallisticAlert.PpoCleared(la, lo, DateTime.Now),
+        Stars: StarsAt,
         MapPng: (lat, lon, name) => name.Length == 0 ? BuildBotMapPng(channel: true) : BuildBotMapPng(at: (lat, lon), name: name),
         Ai: BuildBotAi,
         Stats: PlaceStats,
