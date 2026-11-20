@@ -55,14 +55,17 @@ public static class BallisticAlert
     // «По балістиці ймовірно ППО» — це те саме, що «вороже ППО».
     static readonly Regex PpoOfBallistic = new(@"(?:балісти|баллист)\w*\W{0,3}(?:\w+\s+){0,2}?(?:ппо|пво)(?!\p{L})", O);
     // Не живі сигнали: оцінки, підсумки, поради на вечір.
-    static readonly Regex NotLive = new(@"оцінка|за добу|минулої ночі|цієї ночі|вночі|ймовірність застосування|запас|закликаєм|рекоменду|не перебувати", O);
+    // «уважно найближчу годину-дві до загрози балістики», «Починаючи з 01:30 підвищена загроза» — прогноз, не сигнал.
+    static readonly Regex NotLive = new(@"оцінка|за добу|минулої ночі|цієї ночі|вночі|ймовірність застосування|запас|закликаєм|рекоменду|не перебувати"
+        + @"|найближч\w*\s+(?:годин|час)|годину-дві|починаючи\s+з", O);
 
     public static Kind Classify(string text)
     {
         if (Slang.EnemyPpo(text)) return Kind.EnemyPpo;
         if (!Slang.BallisticMention(text)) return Kind.None;
         if (PpoOfBallistic.IsMatch(text) && text.Length <= 220 && !text.Contains('?')) return Kind.EnemyPpo;
-        if (ThreatTracker.BallisticClear.IsMatch(text) || ClearMore.IsMatch(text)) return Kind.Clear;
+        if (ThreatTracker.BallisticClearNow(text) || ClearMore.IsMatch(text)) return Kind.Clear;
+        if (ThreatTracker.BallisticClear.IsMatch(text)) return Kind.None; // «буде відбій, якщо…» — ще ні те, ні те
         return text.Length <= 400 && Slang.BallisticThreat(text) && !NotLive.IsMatch(text) ? Kind.Threat : Kind.None;
     }
 

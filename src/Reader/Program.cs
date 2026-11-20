@@ -505,7 +505,8 @@ if (args.Length >= 2 && args[0].Equals("ballreplay", StringComparison.OrdinalIgn
             var kind = BallisticAlert.Classify(text);
             if (kind == BallisticAlert.Kind.None) continue;
             bool ppo = kind == BallisticAlert.Kind.EnemyPpo;
-            var scope = kind == BallisticAlert.Kind.Threat ? BallisticAlert.ScopeOf(loc, text) : BallisticAlert.CancelScope(loc, text);
+            var cloc = hs is { Oblasts.Length: > 0 and <= 4 } ? hs.Oblasts : loc; // як наживо: регіональний агрегатор знімає свої області
+            var scope = kind == BallisticAlert.Kind.Threat ? BallisticAlert.ScopeOf(loc, text) : BallisticAlert.CancelScope(cloc, text);
             var one = text.Replace("\n", " ");
             one = one[..Math.Min(80, one.Length)];
             if (kind == BallisticAlert.Kind.Threat)
@@ -2700,8 +2701,10 @@ async Task OnUpdate(Update update)
 
         // ☄ Балістика летить лічені хвилини: «чисто по балістиці» знімає її одразу,
         // «вибухи у Києві» — та, що летіла туди, уже долетіла (не «летить» після вибухів).
+        // Регіональний агрегатор (@veselyy_pivden — південь) знімає лише свої області, а не всю країну.
+        var ballLocal = hubSrc is { Oblasts.Length: > 0 and <= 4 } hl ? hl.Oblasts : avFallback;
         int ballGone = 0;
-        if (ThreatTracker.BallisticClear.IsMatch(m.message)) ballGone = tracker.ClearBallistic();
+        if (ThreatTracker.BallisticClearNow(m.message)) ballGone = tracker.ClearBallistic(ballLocal);
         else if (Regex.Match(m.message, @"вибух\w*\s+(?:у|в|на)\s+([А-ЯІЇЄҐ][\p{L}'’ʼ\-]+)") is { Success: true } vm
                  && ThreatGeo.Resolve(vm.Groups[1].Value) is { } vp)
             ballGone = tracker.LandBallistic((vp.lat, vp.lon), DateTime.Now);
@@ -2715,7 +2718,7 @@ async Task OnUpdate(Update update)
         // ☄ Загроза балістики / її відбій / «працює вороже ППО» → тривога по областях
         // (бот, застосунок, міські й новинний канали). Наші ж міські канали не читаємо.
         if (!cityChannels.Any(c => string.Equals(c.Handle.TrimStart('@'), uname, StringComparison.OrdinalIgnoreCase)))
-            await BallisticWatch(m.message, avFallback, src, time);
+            await BallisticWatch(m.message, avFallback, src, time, ballLocal);
     }
     bool hubOnly = hubSrc is not null && !isUaPrivate && !(uname != null &&
         ((WatchKharkiv && khChannels.Contains(uname)) || (WatchKyiv && kyChannels.Contains(uname))
@@ -2976,7 +2979,7 @@ async Task OnUpdate(Update update)
 // ── ☄ Загроза балістики по областях ─────────────────────────────────────────
 // «Загроза балістики з Брянська» → тривога в областях (бот, застосунок, канали);
 // «Відбій загрози балістики» і «працює вороже ППО» її знімають (ППО — кажемо про це).
-async Task BallisticWatch(string text, string[] localCanon, string src, string time)
+async Task BallisticWatch(string text, string[] localCanon, string src, string time, string[]? cancelLocal = null)
 {
     var now = DateTime.Now;
     var kind = BallisticAlert.Classify(text);
@@ -3002,7 +3005,7 @@ async Task BallisticWatch(string text, string[] localCanon, string src, string t
         return;
     }
     // Відбій / вороже ППО: названі / свої області; «ППО в Курську» — загрози з Курська; загальне — усі.
-    var cscope = BallisticAlert.CancelScope(localCanon, text);
+    var cscope = BallisticAlert.CancelScope(cancelLocal ?? localCanon, text);
     var gone = BallisticAlert.Cancel(cscope, ppo, now);
     if (gone.Length > 0)
     {

@@ -232,9 +232,10 @@ public sealed class ThreatTracker
         // плутає тезок: «Новоселівка» на Чернігівщині ≠ Новоселівка на Полтавщині).
         // Інакше: точне місто; якщо нема в довіднику — центр області (з заголовка поста).
         // Область названо в пості — місто лише в ній (інакше далі піде центр області).
-        var g = at
-                ?? (ev.Oblast is { } eo0 && ev.City is { } cc0 ? PlaceFinder.FindIn(cc0, eo0) ?? PlaceFinder.Unique(cc0)
-                    : ThreatGeo.Resolve(ev.City) ?? (ev.City is { } cc ? PlaceFinder.Find(cc, Array.Empty<string>()) : null));
+        (string name, double lat, double lon)? Find(string? city) =>
+            ev.Oblast is { } eo0 && city is { } cc0 ? PlaceFinder.FindIn(cc0, eo0) ?? PlaceFinder.Unique(cc0)
+            : ThreatGeo.Resolve(city) ?? (city is { } cc ? PlaceFinder.Find(cc, Array.Empty<string>()) : null);
+        var g = at ?? Find(ev.City) ?? (ev.Fallback is { } fb ? Find(fb) : null);
         bool approx = false;
         // «на півночі Сумщини, курсом на Полтаву» — у тій частині області, а не над містом курсу.
         if (g is null && ev.Toward is not null && ev.Oblast is not null && OblastGeo.PartPoint(ev.Oblast, ev.Side) is { } part)
@@ -911,13 +912,21 @@ public sealed class ThreatTracker
 
     // «Чисто по балістиці», «По балістичних ракетах чисто», «по швидкісним чисто»,
     // «Наразі чисто по швидкісним цілям», «Отбой по баллистике».
+    /// «Ждем минут 10, если не будет ракет, буде відбій по баллистике» — це ще не відбій.
+    public static bool BallisticClearNow(string text) =>
+        BallisticClear.IsMatch(text) && !Regex.IsMatch(text, @"(?<!\p{L})(?:буде|будет|якщо|если|ждем|ждём|чекаємо|чекаєм)(?!\p{L})", RegexOptions.IgnoreCase);
+
     public static readonly Regex BallisticClear = new(
         @"(?:чисто|відбій|отбой)\W{0,3}(?:\w+\s+){0,2}?(?:по\s+)?(?:балісти|баллист|швидкісн|скоростн)|(?:балісти|баллист|швидкісн|скоростн)\w*\W{0,3}(?:\w+\s+){0,2}?(?:чисто|відбій|отбой)"
         + @"|без\s+(?:фіксації\s+)?(?:пусків|швидкісн|балісти)|виходів\s+не\s+було|(?:балісти|швидкісн)\w*\W{0,3}(?:\w+\s+){0,1}?скасован|скасован\w*\W{0,3}(?:\w+\s+){0,2}?балісти",
         RegexOptions.IgnoreCase);
 
     // «Чисто по балістиці / по швидкісних» — уся балістика (і кола пусків) знімається одразу.
-    public int ClearBallistic() => SweepWhere(t => t.Kind == ThreatKind.Ballistic).Count;
+    // «По балістиці чисто» з каналу свого регіону (@veselyy_pivden — південь) — лише там: 20.11 він
+    // щоразу знімав з карти балістику на Київ через хвилину після «Балістична ракета на Київ».
+    public int ClearBallistic(IReadOnlyCollection<string>? oblasts = null) =>
+        SweepWhere(t => t.Kind == ThreatKind.Ballistic && (oblasts is not { Count: > 0 }
+            || (t.To ?? t.Pos) is { } p && oblasts.Any(o => PlaceFinder.InOblast(p, o)))).Count;
 
     // «Вибухи у Києві» — балістика, що летіла туди (ціль ≤ 40 км), уже долетіла.
     public int LandBallistic((double lat, double lon) at, DateTime now) =>

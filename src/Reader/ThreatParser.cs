@@ -18,6 +18,10 @@ public record ThreatEvent(ThreatKind Kind, string? Oblast, string? City, int Cou
     // а Toward — лише куди летить. City тоді null — це не «ціль над Полтавою».
     public string? Toward { get; init; }
     public string? Side { get; init; }
+    // «в р-ні Бродів та Миколаївки», «Ракети на Луцьк та Рівне» — друге місце того ж рядка (Parse робить з нього ще одну ціль).
+    public string? AlsoAt { get; init; }
+    // Місце за старим правилом («на Y» з «повз X на Y»), якщо X нема в довіднику.
+    public string? Fallback { get; init; }
 }
 
 public static class Geo
@@ -136,7 +140,8 @@ public static class ThreatParser
             {
                 var tl = ParseTargetLine(line, oblast);
                 var bw = WeaponCatalog.Match(line);
-                events.Add(new(ThreatKind.Ballistic, oblast, tl?.City, tl?.Count ?? 0,
+                // «Балістика повз Чернігів на Київ» — ціль Київ (за 1–3 хв уже там), а не те, повз що летить.
+                events.Add(new(ThreatKind.Ballistic, oblast, tl?.Fallback ?? tl?.City, tl?.Count ?? 0,
                     bw is { } bww ? WeaponCatalog.DisplayName(bww) : null, line, FromOf(line)));
                 continue;
             }
@@ -190,7 +195,10 @@ public static class ThreatParser
                 pref = true;
             }
             // «на півночі Сумщини, курсом на Полтаву» — одна ціль, кома тут не розділяє цілі.
-            if (ParseTargetLine(body, oblast) is { Toward: not null } whole) { events.Add(whole); continue; }
+            // Так само «повз Турбів, курсом на Стрижавку» — кома лише перед курсом. Але «над Старою Гнилицею
+            // на Малинівку, Чугуїв, Есхар» — кілька місць, тут ділимо.
+            if (ParseTargetLine(body, oblast) is { Toward: not null } whole && (whole.City is null || CourseTail.IsMatch(body)))
+            { events.Add(whole); continue; }
             if (pref || body.Contains(','))
             {
                 bool any = false;
@@ -207,7 +215,9 @@ public static class ThreatParser
         }
         Stamp();
 
-        return events;
+        return events.SelectMany(e => e.AlsoAt is { } also
+            ? new[] { e with { AlsoAt = null }, e with { City = also, AlsoAt = null } }
+            : new[] { e }).ToList();
     }
 
     // Висота з рядка («…, висота ~150 м», «знижується») — на всі цілі цього рядка; рядок
@@ -237,6 +247,13 @@ public static class ThreatParser
         var kind = weapon?.Kind ?? DetectKind(line);
         string? extra = weapon is { } w ? WeaponCatalog.DisplayName(w) : null;
 
+        // ПС ЗСУ пише, ДЕ ціль зараз: «в р-ні Ладижина (Вінниччина) курс західний», «повз Дунаївці на
+        // Хмельниччині у західному напрямку», «на Вінниччині на/повз Ситківці», «з Хмельниччини на
+        // Тернопільщину (р-н Гусятина)», «південніше Коростеня», «поряд із Житомиром у напрямку Хмельниччини».
+        // Тоді місце — воно, а «на X» / «курсом на X» — лише куди летить. Раніше бралось перше «на …»:
+        // «курсом на захід» не давало місця зовсім (20.11: третина постів ПС ЗСУ — «місце не знайдено»).
+        var at = AtPlaceLine(line, oblast);
+
         // ПС ЗСУ / агрегатори: «БпЛА на півночі Сумщини, курсом на Полтаву», «з Сумщини курсом
         // на Полтаву». Ціль — у названій частині області; місто після «курсом на» — лише
         // напрямок. Раніше ціль ставили НА Полтаву, хоча вона ще над Сумщиною.
@@ -244,7 +261,7 @@ public static class ThreatParser
         var where = Regex.Match(line,
             @"\b(?:на|в|у|з|із|зі|над)\s+(?:(півночі|півдні|сході|заході|центрі|північному\s+сході|північному\s+заході|південному\s+сході|південному\s+заході|північному-сході|південному-сході)\s+)?([\w'’ʼ\-]+(?:щин|ччин)\w*)",
             RegexOptions.IgnoreCase);
-        if (course.Success && where.Success && where.Index < course.Index && Geo.Canonical(where.Groups[2].Value) is { } inObl)
+        if (at is null && course.Success && where.Success && where.Index < course.Index && Geo.Canonical(where.Groups[2].Value) is { } inObl)
             return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, inObl, null, count, extra, line, FromOf(line))
             { Toward = course.Groups[1].Value.Trim(), Side = where.Groups[1].Success ? where.Groups[1].Value : null };
 
@@ -260,13 +277,74 @@ public static class ThreatParser
         // «на Бровари з півночі», «на Вишгород/Київ»…
         if (city != null)
             city = Regex.Split(city,
-                @"\s+(?:повз|через|у напрямку|в напрямку|курс|напрямок|з півночі|з півдня|зі сходу|із заходу|низько|приблизно|знову|кружля\w*)\b|/",
+                @"\s+(?:повз|через|у напрямку|в напрямку|курс|напрямок|з півночі|з півдня|зі сходу|із заходу|низько|приблизно|знову|кружля\w*"
+                + @"|з\s+(?:північно|південно)[\p{L}\-]*|з\s+(?:північного|південного|східного|західного)|рухаю\w*|рухаєт\w*|(?:та\s+)?змін\w*)\b|/",
                 RegexOptions.IgnoreCase)[0].Trim();
+        // «на Черкащину західним курсом», «на Миколаївщину курсом» — лише область.
+        // Але не «Миколаївщині з Криму» (після області — назва, не напрямок).
+        if (city != null && Regex.Match(city, @"^([\p{L}'\-]+(?:щин|ччин)\p{L}*)\s+(?-i:\p{Ll})(.*)$") is { Success: true } ot && Geo.Canonical(ot.Groups[1].Value) is not null
+            && Regex.Matches(ot.Groups[2].Value, @"(?-i:\p{Lu})[\p{L}'’ʼ\-]*").All(w => Geo.Canonical(w.Value) is not null))
+            city = ot.Groups[1].Value;
+        // «Ракети на Луцьк та Рівне» — дві цілі.
+        string? also = null;
+        if (city != null && Regex.Match(city, @"^(" + Name + @")\s+(?:та|і|й)\s+(" + Name + @")\b") is { Success: true } two)
+        { city = two.Groups[1].Value; also = two.Groups[2].Value; }
 
+        if (at is { } a)
+            return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, a.oblast, a.place, count, extra, line, FromOf(line))
+            { Toward = a.toward, AlsoAt = a.also, Fallback = city != a.place ? city : null };
         // «5 км до Новослобідки» без засобу — не ціль (тут «до» лише відстань), нехай читає BareNames.
         if (kind == ThreatKind.Unknown && Regex.IsMatch(line, @"\bкм\s+до\s", RegexOptions.IgnoreCase)) return null;
         if (city == null && kind == ThreatKind.Unknown) return null; // не похоже на цель
-        return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, oblast, city, count, extra, line, FromOf(line));
+        return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, oblast, city, count, extra, line, FromOf(line)) { AlsoAt = also };
+    }
+
+    static readonly Regex CourseTail = new(@"^[^,]*,\s*(?:курс\p{L}*|(?:у|в)\s+напрямку|далі|(?:у|в)\s+бік)(?!\p{L})[^,]*$", RegexOptions.IgnoreCase);
+
+    // Назва з великої, до двох слів («Велику Олександрівку», «Кривого Рогу»).
+    const string Name = @"(?-i:[А-ЯІЇЄҐ])[\p{L}'’ʼ\-]+(?:\s+(?-i:[А-ЯІЇЄҐ])[\p{L}'’ʼ\-]+)?";
+    static readonly Regex AtPlaceRe = new(
+        @"(?<!\p{L})(?:(?:в|у)\s+(?:районі|р-ні|р-н)|(?<![сц]ьк\p{L}{0,3}\s+)(?:р-ні|р-н)|повз|через|над|біля|поблизу|неподалік\s+від|поряд\s+(?:і?з|зі)|центр[іуа]?|(?:півн|півд|сх|зах)\p{L}*іше)"
+        + @"\.?\s+(?:(?:н\.\s?п|нп|м|с|смт)\.?\s*)?(?<p>" + Name + @")(?:\s*,?\s+(?:та|і|й)\s+(?:(?:в|у)\s+(?:районі|р-ні)\s+)?(?<q>" + Name + @"))?",
+        RegexOptions.IgnoreCase);
+    static readonly Regex TowardRe = new(@"(?<!\p{L})(?:курс(?:ом)?\s+на|(?:у|в)\s+напрямку|на)\s+(?<t>" + Name + ")", RegexOptions.IgnoreCase);
+    // Річки, а не міста: «через Дніпро», «над Десною».
+    static readonly Regex River = new(@"^(?:десн|дністр|дуна[йюя]|ворскл|сейм|інгул|південн\p{L}* буг)", RegexOptions.IgnoreCase);
+
+    /// Місце, де ціль зараз («в р-ні X», «повз X», «через X»…), область-підказка і куди летить.
+    static (string place, string? oblast, string? toward, string? also)? AtPlaceLine(string line, string? oblast)
+    {
+        var ln = Regex.Replace(line, @"(?<!\p{L})(?:на\s*/\s*повз|повз\s*/\s*на)(?!\p{L})", "повз", RegexOptions.IgnoreCase);
+        // «через зону відчуження Чорнобильської АЕС» — це Чорнобиль.
+        ln = Regex.Replace(ln, @"зон\p{L}*\s+відчуження(?:\s+Чорнобильськ\p{L}*\s+АЕС)?|Чорнобильськ\p{L}*\s+АЕС|ЧАЕС|ЧЗВ|ЧЗО", "Чорнобиль", RegexOptions.IgnoreCase);
+        Match? pm = null;
+        foreach (Match m in AtPlaceRe.Matches(ln))
+        {
+            var name = m.Groups["p"].Value;
+            if (Geo.Canonical(name) is not null || PlaceFinder.OblastWord.IsMatch(name) || River.IsMatch(name)
+                || Regex.IsMatch(ln[(m.Groups["p"].Index + name.Length)..], @"^\s+обл", RegexOptions.IgnoreCase)) continue; // «через Сумську область»
+            pm = m; break;
+        }
+        if (pm is null) return null;
+        var place = pm.Groups["p"].Value;
+        // «через Бериславский район» — район цілком.
+        if (Regex.IsMatch(place, @"(?:ськ|цьк|ск|цк)\p{L}*$") && Regex.Match(ln[(pm.Index + pm.Length)..], @"^\s+(район|р-н)(?!\p{L})", RegexOptions.IgnoreCase) is { Success: true } rn) place += " " + rn.Groups[1].Value;
+        // Область: «(Вінниччина)» одразу після назви, «на Хмельниччині» у рядку, «на Тернопільщину (р-н Гусятина)».
+        string? hint = Regex.Match(ln[(pm.Index + pm.Length)..], @"^\s*\(([^)]+)\)") is { Success: true } pr ? Geo.Canonical(pr.Groups[1].Value) : null;
+        hint ??= Regex.Match(ln, @"(?<!\p{L})(?:на|в|у)\s+([\p{L}'\-]+(?:щин|ччин)і)(?!\p{L})", RegexOptions.IgnoreCase) is { Success: true } lo ? Geo.Canonical(lo.Groups[1].Value) : null;
+        hint ??= Regex.Match(ln[..pm.Index], @"([\p{L}'\-]+(?:щин|ччин)у)\s*\(\s*$", RegexOptions.IgnoreCase) is { Success: true } ac ? Geo.Canonical(ac.Groups[1].Value) : null;
+        // «на Львівщину повз Золочів» — Золочів на Львівщині (не той, що на Харківщині).
+        hint ??= Regex.Match(ln[..pm.Index], @"(?<!\p{L})(?:на|в|у)\s+([\p{L}'\-]+(?:щин|ччин)у)\s*$", RegexOptions.IgnoreCase) is { Success: true } ap ? Geo.Canonical(ap.Groups[1].Value) : null;
+        string? toward = null;
+        foreach (Match t in TowardRe.Matches(ln))
+        {
+            if (t.Index >= pm.Index && t.Index < pm.Index + pm.Length) continue;
+            var tn = t.Groups["t"].Value;
+            if (Geo.Canonical(tn) is not null || PlaceFinder.OblastWord.IsMatch(tn) || tn == place) continue;
+            toward = tn; break;
+        }
+        var also = pm.Groups["q"].Success && Geo.Canonical(pm.Groups["q"].Value) is null ? pm.Groups["q"].Value : null;
+        return (place, hint ?? oblast, toward, also);
     }
 
     /// Звідки летить: «з Курська», «із Чернігівщини», «від Куликівки», «з акваторії Чорного моря».
@@ -300,7 +378,7 @@ public static class ThreatParser
     {
         var l = line.ToLowerInvariant();
         if (Regex.IsMatch(l, DroneRe)) return ThreatKind.Drone;
-        if (l.Contains("каб") || l.Contains("умпк") || l.Contains("умпб") || Regex.IsMatch(l, @"фаб[-\s]?\d")) return ThreatKind.Kab;
+        if (l.Contains("каб") || Regex.IsMatch(l, @"авіабомб|авіаційн\w*\s+бомб|керован\w*\s+(?:авіаційн\w*\s+)?бомб") || l.Contains("умпк") || l.Contains("умпб") || Regex.IsMatch(l, @"фаб[-\s]?\d")) return ThreatKind.Kab;
         if (Regex.IsMatch(l, @"балісти|кн-?23|точка[-\s]?у")) return ThreatKind.Ballistic;
         if (Regex.IsMatch(l, @"ракет|крилат|калібр|кинджал|іскандер|циркон|онікс|onyx|х[-\s]?\d{2,3}|с[-\s]?300")) return ThreatKind.Missile;
         return WeaponCatalog.Match(l)?.Kind ?? ThreatKind.Unknown;
