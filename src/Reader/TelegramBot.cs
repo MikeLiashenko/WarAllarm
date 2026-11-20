@@ -35,11 +35,18 @@ public sealed class TelegramBot
     const string SubsFile = "bot_subscribers.json";
 
     sealed record Place(string Name, double Lat, double Lon);
-    sealed record Upd(long Id, long Chat, string? Text, string? CbData, string? CbId, long MsgId, double? Lat, double? Lon);
+    // Live — трансляція геопозиції («Поки не вимкну»): до LiveUntil; LiveStop — трансляцію зупинили.
+    sealed record Upd(long Id, long Chat, string? Text, string? CbData, string? CbId, long MsgId, double? Lat, double? Lon,
+                      DateTime? LiveUntil = null, bool LiveStop = false);
+    // 🛰 Жива геопозиція: де людина зараз (з трансляції Telegram) — тривоги рахуються тут, а не для «свого міста».
+    sealed record Live(double Lat, double Lon, string Name, DateTime Until, DateTime Seen, double AnnLat, double AnnLon);
 
     readonly string _api;
     readonly BotFeatures _f;
     readonly ConcurrentDictionary<long, Place?> _users = new();      // chat → місто (null = ще не задано)
+    readonly ConcurrentDictionary<long, Live> _live = new();         // chat → де зараз (трансляція геопозиції)
+    // Телефон шле точку лише коли рухається; стоїть добу без жодної — вважаємо, що трансляція згасла.
+    static readonly TimeSpan LiveStale = TimeSpan.FromHours(24);
     readonly ConcurrentDictionary<long, int> _radius = new();        // 📏 радіус зони тривоги, км (нема — типовий, як у застосунку)
     public const int RadiusDefault = 25, RadiusMin = 5, RadiusMax = 100;
     static readonly int[] RadiusChoices = { 5, 10, 15, 20, 25, 30, 40, 50, 70, 100 };
@@ -93,6 +100,7 @@ public sealed class TelegramBot
     }
 
     static readonly object MoreKb = Inline(
+        new[] { Btn("🛰 Стежити за мною (геопозиція)", "cmd:/live") },
         new[] { Btn("🔮 Що вночі", "cmd:/tonight"), Btn("🌙 Підсумок ночі", "cmd:/night") },
         new[] { Btn("🎯 Ризик", "cmd:/risk") },
         new[] { Btn("📈 Аналітика", "cmd:/stats"), Btn("📡 Джерела", "cmd:/sources") },
@@ -159,7 +167,7 @@ public sealed class TelegramBot
     readonly HashSet<string> _pending = new(); // chat|команда — уже в черзі або виконується
     DateTime _lastPoll = DateTime.UtcNow;
 
-    static string KeyOf(Upd u) => $"{u.Chat}|{u.CbData ?? u.Text ?? $"{u.Lat},{u.Lon}"}";
+    static string KeyOf(Upd u) => $"{u.Chat}|{u.CbData ?? u.Text ?? $"{u.Lat},{u.Lon}{(u.LiveUntil is null ? "" : "|live")}{(u.LiveStop ? "|stop" : "")}"}";
     static string Short(string s) => s.Length > 40 ? s[..40] + "…" : s;
 
     public async Task RunAsync(CancellationToken ct = default)
@@ -244,7 +252,9 @@ public sealed class TelegramBot
                     try
                     {
                         if (u.CbData != null) await HandleCallback(u.Chat, u.CbData, u.CbId!, u.MsgId);
-                        else if (u.Lat is { } la && u.Lon is { } lo) await SetPlaceByLocation(u.Chat, la, lo);
+                        else if (u.LiveStop) await EndLive(u.Chat, "вимкнено в Telegram");
+                        else if (u.Lat is { } la && u.Lon is { } lo && u.LiveUntil is { } lu) await OnLiveLocation(u.Chat, la, lo, lu);
+                        else if (u.Lat is { } la2 && u.Lon is { } lo2) await SetPlaceByLocation(u.Chat, la2, lo2);
                         else if (u.Text != null) await Handle(u.Chat, u.Text.Trim());
                     }
                     catch (Exception ex) { Console.Error.WriteLine("⚠ bot handle: " + ex.Message); }
@@ -275,15 +285,86 @@ public sealed class TelegramBot
         catch { return ""; }
     }
 
+    // ── 🛰 Жива геопозиція ────────────────────────────────────────────────────
+    /// Де рахувати тривоги: там, де людина зараз (жива трансляція), інакше — її місто.
+    Place? AlarmPlace(long chat)
+    {
+        if (_live.TryGetValue(chat, out var lv))
+        {
+            if (DateTime.UtcNow < lv.Until && DateTime.UtcNow - lv.Seen < LiveStale) return new Place(lv.Name, lv.Lat, lv.Lon);
+            _ = EndLive(chat, DateTime.UtcNow >= lv.Until ? "час трансляції минув" : "телефон давно не надсилав геопозицію");
+        }
+        return _users.TryGetValue(chat, out var p) ? p : null;
+    }
+
+    static string NearName(double lat, double lon)
+    {
+        var best = Cities.All.MinBy(c => ThreatGeo.Km((c.lat, c.lon), (lat, lon)));
+        return ThreatGeo.Km((best.lat, best.lon), (lat, lon)) <= 15 ? best.name : $"біля {best.name}";
+    }
+
+    async Task OnLiveLocation(long chat, double lat, double lon, DateTime until)
+    {
+        var name = NearName(lat, lon);
+        bool fresh = !_live.TryGetValue(chat, out var was);
+        if (!_users.ContainsKey(chat)) { _users[chat] = null; SaveSubs(); }
+        _live[chat] = fresh ? new Live(lat, lon, name, until, DateTime.UtcNow, lat, lon)
+                            : was! with { Lat = lat, Lon = lon, Name = name, Until = until, Seen = DateTime.UtcNow };
+        if (fresh)
+        {
+            _lastAlarm.Remove(chat); _calmSince.Remove(chat);
+            var home = _users.TryGetValue(chat, out var h) && h is not null ? h.Name : null;
+            await Send(chat,
+                "🛰 <b>Стежу за тобою наживо</b>\n"
+                + $"📍 Зараз: <b>{H(name)}</b>\n"
+                + $"🔔 Тривоги — там, де ти є, у зоні <b>{RadiusOf(chat)} км</b>. Працює й коли Telegram закритий.\n"
+                + (home is null ? "" : $"Зупиниш трансляцію — повернусь до «{H(home)}».\n")
+                + (until < DateTime.MaxValue.AddYears(-1) ? $"⏳ Трансляція до {until.ToLocalTime():HH:mm} — для «завжди» обери «Поки не вимкну».\n" : ""), MainKb);
+            if (AlarmPlace(chat) is { } np) await SendStatus(chat, np);
+            return;
+        }
+        // Переїхав в інше місце (≥15 км від того, про яке казали) — тихо кажемо, де тепер стежимо.
+        if (ThreatGeo.Km((was!.AnnLat, was.AnnLon), (lat, lon)) >= 15)
+        {
+            _live[chat] = _live[chat] with { AnnLat = lat, AnnLon = lon };
+            await Send(chat, $"📍 Тепер стежу біля <b>{H(name)}</b> (зона {RadiusOf(chat)} км).", null, silent: true);
+        }
+    }
+
+    async Task EndLive(long chat, string why)
+    {
+        if (!_live.TryRemove(chat, out _)) return;
+        _lastAlarm.Remove(chat); _calmSince.Remove(chat);
+        var home = _users.TryGetValue(chat, out var h) ? h : null;
+        try
+        {
+            await Send(chat, $"🛰 <b>Трансляцію геопозиції зупинено</b> ({H(why)}).\n"
+                + (home is not null ? $"🔔 Тривоги знову для «{H(home.Name)}»." : "📍 Напиши своє місто, щоб тривоги приходили далі.")
+                + "\nУвімкнути знову — /live", MainKb);
+        }
+        catch { }
+    }
+
+    const string LiveHelp =
+        "🛰 <b>Стежити за мною (геопозиція)</b>\n\n"
+        + "Тривоги приходитимуть туди, де ти <b>зараз</b> — удома, в дорозі, в іншому місті. Телефон сам надсилає "
+        + "геопозицію у фоні: працює навіть коли Telegram і бот закриті.\n\n"
+        + "<b>Як увімкнути</b> (один раз):\n"
+        + "1. У цьому чаті натисни 📎 (скріпка)\n"
+        + "2. «Геопозиція» → <b>«Транслювати геопозицію»</b>\n"
+        + "3. Обери <b>«Поки не вимкну»</b>\n\n"
+        + "Вимкнути — «Зупинити трансляцію» вгорі чату. Тоді тривоги знову для твого міста.\n"
+        + "<i>Геопозицію бачить лише бот, ніде не зберігаю — тільки щоб рахувати відстань до цілей.</i>";
+
     // Кожні ~10 с: для кожного користувача з містом — тривога поруч → сповіщення.
     async Task RunUserAlarms(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             try { await Task.Delay(TimeSpan.FromSeconds(10), ct); } catch { break; }
-            foreach (var (chat, place) in _users.ToArray())
+            foreach (var chat in _users.Keys.Union(_live.Keys).ToArray())
             {
-                if (place is null) continue;
+                if (AlarmPlace(chat) is not { } place) continue;
                 int rad = RadiusOf(chat);
                 var (alarm, text) = _f.AlarmAt(place.Lat, place.Lon, rad);
                 bool last = _lastAlarm.TryGetValue(chat, out var l) && l;
@@ -323,7 +404,7 @@ public sealed class TelegramBot
             if (_f.TargetInfo is { } ti)
                 foreach (var (chat, tr) in _tracking.ToArray())
                 {
-                    var pl = _users.TryGetValue(chat, out var up) ? up : null;
+                    var pl = AlarmPlace(chat);
                     if (pl is null) { _tracking.Remove(chat); continue; }
                     var info = ti(tr.id, pl.Lat, pl.Lon);
                     if (info is not { } inf)
@@ -363,7 +444,9 @@ public sealed class TelegramBot
     async Task Handle(long chat, string text)
     {
         var cmd = text.Split(' ', '\n')[0].Split('@')[0].ToLowerInvariant();
-        bool hasCity = _users.TryGetValue(chat, out var pl) && pl is not null;
+        // Трансляція геопозиції увімкнена — 📊 Статус, 🛰 Цілі, 🏠 Укриття… для того місця, де людина зараз.
+        var pl = AlarmPlace(chat);
+        bool hasCity = pl is not null;
 
         switch (cmd)
         {
@@ -386,6 +469,7 @@ public sealed class TelegramBot
                 return;
 
             case "/stop":
+                _live.Remove(chat);
                 _users.Remove(chat); _lastAlarm.Remove(chat); _tracking.Remove(chat); _calmSince.Remove(chat); _radius.Remove(chat);
                 SaveSubs();
                 await Send(chat, "🔕 <b>Сповіщення вимкнено.</b>\nПовернутись — /start", new { remove_keyboard = true });
@@ -395,6 +479,12 @@ public sealed class TelegramBot
         if (Match(text, cmd, "/more", "☰", "ще", "меню"))
         {
             await Send(chat, "☰ <b>Ще можливості</b>", MoreKb);
+            return;
+        }
+        if (Match(text, cmd, "/live", "🛰 стежити за мною", "стежити за мною", "геопозиція", "де я"))
+        {
+            await Send(chat, (_live.TryGetValue(chat, out var lv)
+                ? $"🛰 <b>Уже стежу за тобою наживо</b> · зараз: {H(lv.Name)}\n\n" : "") + LiveHelp, MainKb);
             return;
         }
         if (Match(text, cmd, "/radius", "📏", "радіус", "радиус", "радіус тривоги"))
@@ -518,6 +608,7 @@ public sealed class TelegramBot
         + "<b>Налаштування</b>\n"
         + "📍 /place — змінити місто (можна мікрорайон чи адресу)" + (place is { } p ? $" (зараз: {H(p.Name)})" : "") + "\n"
         + "📏 /radius — радіус тривоги: ціль ближче — 🔴 тривога (5–100 км)\n"
+        + "🛰 /live — стежити за мною: тривоги там, де ти зараз (трансляція геопозиції)\n"
         + "🔕 /stop — вимкнути сповіщення\n\n"
         + "☄️ Загроза балістики у твоїй області — теж тривога; «працює вороже ППО» її знімає.\n"
         + $"🔔 Сповіщення приходять самі: ціль ближче {radius} км → 🔴 тривога, потім 🟢 відбій.\n"
@@ -643,7 +734,7 @@ public sealed class TelegramBot
             ("map", "🗺 Карта тривог"), ("alerts", "🚨 Офіційні тривоги"), ("shelter", "🏠 Укриття поруч"),
             ("risk", "🎯 Ризик по типах"), ("tonight", "🔮 Чого чекати цієї ночі"), ("night", "🌙 Підсумок ночі"), ("stats", "📈 Аналітика"),
             ("sources", "📡 Джерела"), ("ai", "🤖 ШІ-аналіз"), ("place", "📍 Змінити місто"), ("radius", "📏 Радіус тривоги"),
-            ("help", "❓ Довідка"), ("stop", "🔕 Вимкнути сповіщення"),
+            ("live", "🛰 Стежити за мною (геопозиція)"), ("help", "❓ Довідка"), ("stop", "🔕 Вимкнути сповіщення"),
         };
         await Call("setMyCommands", new { commands = cmds.Select(x => new { command = x.c, description = x.d }) });
         // Кнопка меню біля поля вводу відкриває живу карту.
@@ -653,7 +744,7 @@ public sealed class TelegramBot
     async Task<List<Upd>> GetUpdates(CancellationToken ct)
     {
         var outp = new List<Upd>();
-        using var doc = await GetJson($"{_api}/getUpdates?timeout=25&offset={_offset}&allowed_updates=[\"message\",\"callback_query\"]", ct);
+        using var doc = await GetJson($"{_api}/getUpdates?timeout=25&offset={_offset}&allowed_updates=[\"message\",\"edited_message\",\"callback_query\"]", ct);
         if (doc.RootElement.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.False)
             throw new Exception($"{(doc.RootElement.TryGetProperty("error_code", out var ec) ? ec.GetInt32() : 0)} "
                 + (doc.RootElement.TryGetProperty("description", out var de) ? de.GetString() : ""));
@@ -668,11 +759,21 @@ public sealed class TelegramBot
                     cq.GetProperty("id").GetString(),
                     cm.TryGetProperty("message_id", out var mid) ? mid.GetInt64() : 0, null, null));
             }
-            else if (u.TryGetProperty("message", out var m) && m.TryGetProperty("chat", out var ch)
+            else if ((u.TryGetProperty("message", out var m) || u.TryGetProperty("edited_message", out m)) && m.TryGetProperty("chat", out var ch)
                      && m.TryGetProperty("location", out var loc))
             {
+                // 🛰 Трансляція: «live_period» є, поки транслюють (0x7FFFFFFF — «Поки не вимкну»); оновлення приходять
+                // як edited_message. Відредаговане без live_period — трансляцію зупинили. Разова точка — нове «моє місто».
+                bool edited = u.TryGetProperty("edited_message", out _);
+                DateTime? until = null;
+                if (loc.TryGetProperty("live_period", out var lp) && lp.TryGetInt64(out var secs))
+                {
+                    var sent = DateTimeOffset.FromUnixTimeSeconds(m.TryGetProperty("date", out var dt) ? dt.GetInt64() : DateTimeOffset.UtcNow.ToUnixTimeSeconds()).UtcDateTime;
+                    until = secs >= 0x7FFFFFFF ? DateTime.MaxValue : sent.AddSeconds(secs);
+                }
                 outp.Add(new Upd(id, ch.GetProperty("id").GetInt64(), null, null, null, 0,
-                    loc.GetProperty("latitude").GetDouble(), loc.GetProperty("longitude").GetDouble()));
+                    loc.GetProperty("latitude").GetDouble(), loc.GetProperty("longitude").GetDouble(),
+                    until, LiveStop: edited && until is null));
             }
             else if (u.TryGetProperty("message", out var m2) &&
                      m2.TryGetProperty("text", out var t) && m2.TryGetProperty("chat", out var ch2))
@@ -701,11 +802,11 @@ public sealed class TelegramBot
     }
 
     // Надсилає HTML-повідомлення; повертає його id (для редагування) або null.
-    async Task<long?> Send(long chat, string text, object? markup = null)
+    async Task<long?> Send(long chat, string text, object? markup = null, bool silent = false)
     {
         var resp = await Call("sendMessage", markup is null
-            ? new { chat_id = chat, text, parse_mode = "HTML", disable_web_page_preview = true }
-            : (object)new { chat_id = chat, text, parse_mode = "HTML", disable_web_page_preview = true, reply_markup = markup });
+            ? new { chat_id = chat, text, parse_mode = "HTML", disable_web_page_preview = true, disable_notification = silent }
+            : (object)new { chat_id = chat, text, parse_mode = "HTML", disable_web_page_preview = true, disable_notification = silent, reply_markup = markup });
         if ((int)resp.StatusCode == 403) { _users.Remove(chat); SaveSubs(); return null; } // заблокував бота
         if (!resp.IsSuccessStatusCode) { Console.Error.WriteLine($"⚠ bot send: {await resp.Content.ReadAsStringAsync()}"); return null; }
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());

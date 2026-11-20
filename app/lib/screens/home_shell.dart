@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -37,6 +39,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   AlertsController? _alerts;
   SettingsController? _settings;
   DateTime _lastWidget = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _geoTick;
+
+  /// 🛰 Де телефон зараз (з фонового сторожа) → місце «📍 Я зараз» у застосунку.
+  Future<void> _pullHere() async {
+    final map = _map, settings = _settings;
+    if (map == null || settings == null || !BackgroundAlarm.supported) return;
+    if (!settings.backgroundAlarm) { map.setHere(null, null, 0); return; }
+    final s = await BackgroundAlarm.status();
+    if (!mounted) return;
+    map.setHere(s.hasFreshFix ? s.lat : null, s.hasFreshFix ? s.lon : null, s.at);
+  }
 
   @override
   void initState() {
@@ -49,7 +62,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _map = context.read<MapDataController>()..addListener(_pushWidget);
     _alerts = context.read<AlertsController>()..addListener(_pushWidget);
     _settings = context.read<SettingsController>();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _pushWidget());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pushWidget();
+      _pullHere();
+    });
+    _geoTick = Timer.periodic(const Duration(seconds: 30), (_) => _pullHere());
   }
 
   void _pushWidget() {
@@ -73,6 +90,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _geoTick?.cancel();
     _map?.removeListener(_pushWidget);
     _alerts?.removeListener(_pushWidget);
     WidgetsBinding.instance.removeObserver(this);
@@ -82,6 +100,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     BackgroundAlarm.setAppForeground(state == AppLifecycleState.resumed);
+    if (state == AppLifecycleState.resumed) _pullHere();
   }
 
   @override

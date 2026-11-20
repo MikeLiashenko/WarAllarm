@@ -7,6 +7,7 @@ import '../controllers/alarm_controller.dart';
 import '../controllers/map_data_controller.dart';
 import '../controllers/settings_controller.dart';
 import '../controllers/theme_controller.dart';
+import '../models/monitored_place.dart';
 import '../firebase_config.dart';
 import '../services/ai_service.dart';
 import '../services/background_alarm.dart';
@@ -86,7 +87,7 @@ class SettingsScreen extends StatelessWidget {
 
           if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) ...[
             _Group(
-              title: 'Фонові тривоги',
+              title: '🛰 Геопозиція у фоні',
               children: const [_BackgroundAlarmToggle()],
             ),
             const SizedBox(height: 14),
@@ -394,8 +395,9 @@ class _AudibilitySetting extends StatelessWidget {
   }
 }
 
-/// Turns the Android foreground watcher on/off. On enable it requests the
-/// notification permission and warns about battery optimisation.
+/// 🛰 Android background watcher: follows the phone's location and wakes you when a
+/// target comes into your zone — with the app closed, the phone locked, after a reboot.
+/// Native GeoWatchService (Kotlin); here only the switch, permissions and its status.
 class _BackgroundAlarmToggle extends StatefulWidget {
   const _BackgroundAlarmToggle();
   @override
@@ -404,6 +406,38 @@ class _BackgroundAlarmToggle extends StatefulWidget {
 
 class _BackgroundAlarmToggleState extends State<_BackgroundAlarmToggle> {
   bool _busy = false;
+  GeoWatchStatus _st = const GeoWatchStatus();
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final s = await BackgroundAlarm.status();
+    if (mounted) setState(() => _st = s);
+  }
+
+  /// The fallback point when the phone has no fix: the first place whose bell is on.
+  MonitoredPlace? _homePlace() {
+    final ps = context.read<MapDataController>().alarmPlaces.where((p) => p.id != 'here');
+    return ps.isEmpty ? null : ps.first;
+  }
+
+  Future<bool> _ask(String title, String text, String yes) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text(title),
+          content: Text(text),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Пізніше')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(yes)),
+          ],
+        ),
+      ) ==
+      true;
 
   Future<void> _toggle(bool v) async {
     if (_busy) return;
@@ -411,21 +445,66 @@ class _BackgroundAlarmToggleState extends State<_BackgroundAlarmToggle> {
     final settings = context.read<SettingsController>();
     final messenger = ScaffoldMessenger.of(context);
     if (v) {
-      final ok = await BackgroundAlarm.enable();
-      settings.setBackgroundAlarm(true);
-      messenger.showSnackBar(SnackBar(
-        content: Text(ok
-            ? 'Увімкнено. Щоб будило вночі — вимкни «оптимізацію батареї» для WarAlarm у налаштуваннях телефону.'
-            : 'Дозвіл на сповіщення не надано — увімкни його в налаштуваннях телефону.'),
-        duration: const Duration(seconds: 6),
-      ));
+      final home = _homePlace();
+      final ok = await BackgroundAlarm.enable(
+        radiusKm: settings.alarmRadiusKm,
+        homeLat: home?.lat,
+        homeLon: home?.lon,
+        homeName: home?.name,
+      );
+      settings.setBackgroundAlarm(ok);
+      if (!ok) {
+        messenger.showSnackBar(const SnackBar(
+          content: Text('Без дозволу на геопозицію стежити не вийде — дозволь його в налаштуваннях телефону.'),
+          duration: Duration(seconds: 6),
+        ));
+      } else {
+        var st = await BackgroundAlarm.status();
+        if (mounted && !st.background &&
+            await _ask('Дозволити «завжди»?',
+                'Щоб WarAlarm сам вмикався після перезавантаження телефону, у наступному вікні обери '
+                    '«Дозволити завжди» (Allow all the time). Без цього після перезавантаження '
+                    'треба буде один раз торкнутися сповіщення.',
+                'Далі')) {
+          st = await BackgroundAlarm.requestBackground();
+        }
+        if (mounted && !st.battery &&
+            await _ask('Щоб будило вночі',
+                'Вимкни для WarAlarm «оптимізацію батареї» — інакше телефон може приспати стеження.',
+                'Відкрити')) {
+          await BackgroundAlarm.openBatterySettings();
+        }
+        messenger.showSnackBar(const SnackBar(
+          content: Text('🛰 Стежу за тобою: тривога, щойно ціль підійде до того місця, де ти зараз.'),
+          duration: Duration(seconds: 5),
+        ));
+      }
     } else {
       await BackgroundAlarm.disable();
       settings.setBackgroundAlarm(false);
-      messenger.showSnackBar(
-          const SnackBar(content: Text('Фонові тривоги вимкнено')));
+      if (mounted) context.read<MapDataController>().setHere(null, null, 0);
+      messenger.showSnackBar(const SnackBar(content: Text('Фонове стеження вимкнено')));
     }
+    await _refresh();
     if (mounted) setState(() => _busy = false);
+  }
+
+  String _statusLine(SettingsController s) {
+    if (!s.backgroundAlarm) {
+      return 'Телефон сам стежитиме, де ти, і гучно розбудить, коли ціль підлетить ближче '
+          '${s.alarmRadiusKm.round()} км — навіть коли застосунок закритий, а телефон заблоковано. '
+          'Потрібен дозвіл на геопозицію.';
+    }
+    final parts = <String>[
+      _st.running ? '🟢 Працює' : '⏸ Не працює — торкнись перемикача ще раз',
+      if (_st.hasFreshFix)
+        '📍 геопозиція о ${TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(_st.at)).format(context)}'
+      else
+        '📍 чекаю на геопозицію',
+      if (!_st.background) '⚠ після перезавантаження — торкнись сповіщення',
+      if (!_st.battery) '🔋 оптимізація батареї увімкнена',
+    ];
+    return parts.join(' · ');
   }
 
   @override
@@ -434,22 +513,32 @@ class _BackgroundAlarmToggleState extends State<_BackgroundAlarmToggle> {
     return Column(
       children: [
         _ToggleRow(
-          icon: Icons.shield_moon_rounded,
-          title: 'Стежити із закритим застосунком',
-          subtitle: 'Розбудить навіть уночі, коли телефон заблоковано',
+          icon: Icons.my_location_rounded,
+          title: 'Стежити за мною у фоні',
+          subtitle: 'Тривоги там, де ти зараз — навіть із закритим застосунком',
           value: s.backgroundAlarm,
           onChanged: _busy ? (_) {} : _toggle,
           accent: AppColors.threat,
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-          child: Text(
-            'WarAlarm працюватиме у фоні й покаже гучну повноекранну тривогу, '
-            'коли загроза підійде до твого місця. Потрібні: дозвіл на сповіщення '
-            'і вимкнена «оптимізація батареї». Не тривожить на демо-даних.',
-            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-          ),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: Text(_statusLine(s), style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
         ),
+        if (s.backgroundAlarm && !_st.battery)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 16, 8),
+              child: TextButton.icon(
+                onPressed: () async {
+                  await BackgroundAlarm.openBatterySettings();
+                  await _refresh();
+                },
+                icon: const Icon(Icons.battery_alert_rounded, size: 18),
+                label: const Text('Вимкнути оптимізацію батареї'),
+              ),
+            ),
+          ),
       ],
     );
   }

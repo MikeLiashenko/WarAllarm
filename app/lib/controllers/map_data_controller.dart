@@ -185,8 +185,31 @@ class MapDataController extends ChangeNotifier {
 
   /// Only the user's own places (from "Мої місця"). The selector shows
   /// "Всі місця" + each of these separately — no built-in home/Kyiv chips.
+  // 🛰 «📍 Я зараз» — остання точка фонового стежения за геопозицією (Android).
+  ({double lat, double lon, int at})? _here;
+  ({double lat, double lon, int at})? get here => _here;
+
+  /// Нова точка від GeoWatchService (null — стеження вимкнене / точки нема).
+  void setHere(double? lat, double? lon, int at) {
+    final next = lat == null || lon == null ? null : (lat: lat, lon: lon, at: at);
+    final prev = _here;
+    if (next == null && prev == null) return;
+    // Шум GPS у межах ~200 м карту не смикає.
+    if (next != null && prev != null &&
+        (next.lat - prev.lat).abs() < 0.002 && (next.lon - prev.lon).abs() < 0.003) {
+      _here = next;
+      return;
+    }
+    _here = next;
+    notifyListeners();
+  }
+
   List<MonitoredPlace> get places {
     final list = <MonitoredPlace>[];
+    final h = _here;
+    if (h != null && DateTime.now().millisecondsSinceEpoch - h.at < 30 * 60 * 1000) {
+      list.add(MonitoredPlace(id: 'here', icon: '📍', name: 'Я зараз', sub: 'геопозиція', lat: h.lat, lon: h.lon));
+    }
     final saved = _store.readJsonList('saved_places');
     for (var i = 0; i < saved.length; i++) {
       final p = saved[i];

@@ -174,6 +174,22 @@ public static class MapWriter
             sb.Append("]}");
         }
         sb.Append(']');
+        // 🛰 Компактно для фонового сторожа в телефоні (GeoWatchService): лише живі точні цілі —
+        // [lat, lon, "назва", ×N, "місце"]. Повні «threats» уночі — десятки КБ, а він читає раз на 30 с.
+        // Об'єкт, а не масив: порожній масив Firebase не зберігає, а «v» каже телефону, що сервер новий.
+        sb.Append(",\"near\":{\"v\":1,\"t\":[");
+        bool firstNear = true;
+        foreach (var (t, amount) in merged)
+        {
+            if (t.Launch || t.Down || t.Stage == TrackStage.Passed || t.LastPlace.EndsWith("(обл.)") || t.Pos is not { } np) continue;
+            if (!firstNear) sb.Append(',');
+            firstNear = false;
+            var jn = ThreatTracker.JetGuess(t, rawThreats);
+            sb.Append('[').Append(N(Math.Round(np.lat, 3))).Append(',').Append(N(Math.Round(np.lon, 3)))
+              .Append(",\"").Append(Esc(jn is { } jg2 ? ThreatTracker.GuessLabel(jg2) : ThreatTracker.Label(t))).Append("\",")
+              .Append(amount).Append(",\"").Append(Esc(t.PlaceLabel)).Append("\"]");
+        }
+        sb.Append("]}");
         sb.Append(",\"stats\":"); AppendStats(sb, now);
         sb.Append(",\"rows\":"); AppendRows(sb, now);
         // Ймовірність удару (дім + місця) — той самий рушій, що в застосунку.

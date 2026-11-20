@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../services/background_alarm.dart';
 import '../services/local_store.dart';
 
 /// App preferences, persisted locally. Independent of the website design.
@@ -88,6 +89,7 @@ class SettingsController extends ChangeNotifier {
   void setAlarmRadiusKm(double v) {
     _alarmRadiusKm = v.clamp(5, 100);
     _store.setDouble('set_alarm_radius', _alarmRadiusKm);
+    BackgroundAlarm.configure(radiusKm: _alarmRadiusKm); // 🛰 фоновий сторож рахує ту саму зону
     notifyListeners();
   }
 
