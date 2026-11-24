@@ -284,7 +284,9 @@ TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
   final quiet = math.max(0, nowMs - (t.seenMs == 0 ? nowMs : t.seenMs)) / 60000;
   final route = t.route;
   if (t.forecast && route.length >= 2) {
-    // Launch group (forecast): flies its whole typical route from the launch time.
+    // Launch group (forecast): flies its route from the (virtual) start and stops at its
+    // end — the Reader cuts the route at the all-clear border, so it never flies on
+    // over oblasts without an alarm.
     final p = alongRoute(route, frozen ? 0 : spd * 0.85 * quiet);
     return TargetMotion(lat: p.lat, lon: p.lon, heading: p.heading, quietMin: quiet.toDouble());
   }

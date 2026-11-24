@@ -43,7 +43,9 @@ AlarmForecast? forecastAlarm(MonitoredPlace place, List<MapTarget> targets, {int
     final spd = speedKmPerMin(t) * 0.85; // km/min along the route
     if (spd <= 0) continue;
     final m = motionOf(t, now);
-    final ahead = routeAhead(t.route, m.lat, m.lon);
+    // A launch group's map route stops at the all-clear border — but the ETA is exactly
+    // about places with no alarm yet: count it along the whole typical route.
+    final ahead = routeAhead(t.fullRoute.length >= 2 ? t.fullRoute : t.route, m.lat, m.lon);
     if (ahead.length < 2) continue;
     final total = routeLengthKm(ahead);
     double? hitKm;

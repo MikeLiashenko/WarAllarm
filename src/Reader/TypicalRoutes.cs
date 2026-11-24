@@ -105,6 +105,22 @@ public static class TypicalRoutes
         return leftAt is { } la ? Cut(route, la - 3) : route;
     }
 
+    /// Відрізок маршруту між [fromKm] і [toKm] від початку (перша й остання точки — на них).
+    public static List<(double lat, double lon)> Slice(IReadOnlyList<(double lat, double lon)> route, double fromKm, double toKm)
+    {
+        var res = new List<(double lat, double lon)> { At(route, fromKm) };
+        double run = 0;
+        for (int i = 1; i < route.Count; i++)
+        {
+            run += ThreatGeo.Km(route[i - 1], route[i]);
+            if (run <= fromKm + 0.5) continue;
+            if (run >= toKm - 0.5) break;
+            res.Add(route[i]);
+        }
+        if (toKm > fromKm + 0.5) res.Add(At(route, toKm));
+        return res;
+    }
+
     // Перші [km] маршруту; null — якщо від нього майже нічого не лишилось.
     static List<(double lat, double lon)>? Cut(List<(double lat, double lon)> route, double km)
     {

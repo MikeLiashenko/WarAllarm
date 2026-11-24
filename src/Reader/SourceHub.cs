@@ -799,10 +799,18 @@ public sealed class SourceHub
             { st.News++; return new(HubVerdict.News, [], "обстріл (не ціль у повітрі)"); }
 
             // Відбій від місцевого спостерігача свого регіону / офіційного.
+            // «Кр.Ріг : + Тривога по Бандероль ⏎ Наразі локаційно чисто, тривога дана превентивно» — це
+            // тривога, а не відбій (24.11: знімало 9 цілей по всій Дніпропетровщині).
+            if (Clear.IsMatch(clean) && clean.Length < 90 && Regex.IsMatch(clean, @"превентивн|тривог\w*\s+(?:дана|оголошен)", RegexOptions.IgnoreCase))
+            { st.Noise++; return new(HubVerdict.Noise, [], "превентивна тривога (не відбій)"); }
             if (Clear.IsMatch(clean) && clean.Length < 90)
             {
                 string? obl = src.Oblasts.Length == 1 ? src.Oblasts[0] : null;
                 if (src.Tier == SourceTier.Official || RaionWord.IsMatch(clean)) obl = null;
+                // «Зпр: чисто» від нікопольського каналу — про Запорізьку, а «Кр.Ріг : чисто» — лише про місто:
+                // область каналу цілком не знімаємо.
+                if (Regex.Match(clean, @"^\W*([\p{L}][\p{L}.'’ʼ\-]{1,20})\s*:") is { Success: true } ch0)
+                    obl = OblastHint(ch0.Groups[1].Value.TrimEnd('.')) is { } ho0 ? (src.Tier == SourceTier.Official ? null : ho0) : null;
                 return new(HubVerdict.AllClear, [], "відбій", obl ?? (src.Tier == SourceTier.Official ? "*" : null));
             }
             if (Memorial.IsMatch(clean))
@@ -922,13 +930,17 @@ public sealed class SourceHub
                     var rawObl = Regex.Match(ev.Raw, @"^\W*([\p{L}'\-]{2,20})\s*:") is { Success: true } rh ? OblastHint(rh.Groups[1].Value) : null;
                     // «3 бандеролі на місто» — місто, про яке канал щойно писав.
                     bool ofCity = Regex.IsMatch(phrase, @"^(?:місто|город)\W*$", RegexOptions.IgnoreCase);
+                    // «в напрямку міста», «над містом» — інші відмінки: місто з заголовка поста, якщо є.
+                    bool cityWord = ofCity || Regex.IsMatch(phrase, @"^(?:міст[ауі]|містом|город[ауе]|городом)\W*$", RegexOptions.IgnoreCase);
                     // Парсер лишає перше місце з «Вишневе/Пулини»; другий варіант теж потрібен.
                     if (ev.City is { Length: > 0 } ec && Regex.Match(ev.Raw, Regex.Escape(ec) + @"(?:\s*/\s*[^/\n;,.()]+)+") is { Success: true } alts)
                         phrase = alts.Value;
                     // «Одеса, 6 бандеролей на місто!» — місто названо тут же, на початку поста.
-                    if (ofCity && Regex.Match(ev.Raw, @"^\W*(\p{Lu}[\p{L}'’ʼ\-]{2,})\s*[,:!—–-]") is { Success: true } head
+                    if (cityWord && Regex.Match(ev.Raw, @"^\W*(\p{Lu}[\p{L}'’ʼ\-]{2,})\s*[,:!—–-]") is { Success: true } head
                         && Locate(head.Groups[1].Value, rawObl ?? ev.Oblast, src, bare, out bool headName) is { } hg && headName)
                         g = hg;
+                    // «🏍 Чернігів: Реактивний БпЛА в напрямку міста», «Суми - вибухи. Ще БПЛА над містом».
+                    else if (cityWord && HeadCity(clean) is { } hc) g = hc;
                     else if (ofCity && _lastPlaced.TryGetValue(src.User, out var lastP) && at - lastP.at <= StatusTtl)
                         g = (lastP.place, lastP.pos.lat, lastP.pos.lon);
                     else
@@ -942,6 +954,12 @@ public sealed class SourceHub
                         if (g is null && ev.Fallback is { } fb0 && (Regex.Match(ev.Raw, Regex.Escape(fb0) + @"(?:\s*/\s*[^/\n;,.()]+)+") is { Success: true } fa ? fa.Value : fb0) is var fb
                             && Locate(fb, rawObl ?? ev.Oblast, src, bare, out bool fbName) is { } fg && fbName)
                         { g = fg; phrase = fb; hadName = true; }
+                        // «Реактивний на Новокодацький район Дніпра», «на Покровський ЖМ Дніпра» — район міста.
+                        if (g is null && hadName && Regex.Match(phrase, @"(?:район|ж/?м|масив|мікрорайон|мкр\.?|м-н)\s+(\p{Lu}[\p{L}'’ʼ\-]{2,})\W*$", RegexOptions.IgnoreCase) is { Success: true } dm
+                            && BigCity(dm.Groups[1].Value) is { } dc) g = dc;
+                        // «Київ: ⏎ Реактивний курсом на Лісовий масив», «Суми: … повз Зелений Гай», «Харьков. ⏎ БпЛА над
+                        // Эпицентром»: місця нема в довіднику, але пост — про велике місто з заголовка.
+                        if (g is null && hadName && HeadCity(clean) is { } hc2) g = hc2;
                         if (!hadName) continue; // «Збили», «Транзит», «Центр» — статус, а не місце
                     }
                 }
@@ -1231,6 +1249,8 @@ public sealed class SourceHub
         ["Одесса"] = "Одеса", ["Одессу"] = "Одеса", ["Николаев"] = "Миколаїв", ["Запорожье"] = "Запоріжжя",
         ["Чернигов"] = "Чернігів", ["Сумы"] = "Суми", ["Кривой Рог"] = "Кривий Ріг", ["Песочин"] = "Пісочин",
         ["Волчанск"] = "Вовчанськ", ["Чугуев"] = "Чугуїв", ["Купянск"] = "Куп'янськ", ["Лозовая"] = "Лозова",
+        ["Днепра"] = "Дніпро", ["Сум"] = "Суми", ["Запорожья"] = "Запоріжжя", ["Николаева"] = "Миколаїв", ["Чернигова"] = "Чернігів",
+        ["Полтавы"] = "Полтава", ["Одессы"] = "Одеса", ["Кривого Рога"] = "Кривий Ріг", ["Житомира"] = "Житомир", ["Херсона"] = "Херсон",
     };
 
     static string RuToUk(string s)
@@ -1264,7 +1284,25 @@ public sealed class SourceHub
         "Кривий Ріг", "Кременчук", "Кам'янське", "Біла Церква", "Нікополь", "Павлоград", "Мелітополь", "Бердянськ", "Маріуполь",
         "Умань", "Бровари", "Бориспіль", "Конотоп", "Шостка", "Ніжин", "Лубни", "Мукачево", "Дрогобич", "Бердичів", "Ізмаїл",
         "Олександрія", "Слов'янськ", "Краматорськ", "Покровськ", "Енергодар", "Чорноморськ", "Кам'янець-Подільський", "Коростень",
+        "Славутич", "Фастів", "Охтирка", "Ромни", "Прилуки", "Миргород", "Лозова", "Ізюм", "Чугуїв", "Куп'янськ", "Вишгород",
+        "Ірпінь", "Обухів", "Васильків", "Звягель", "Южноукраїнськ", "Вознесенськ", "Первомайськ", "Сарни", "Ковель",
     };
+
+    /// Обласний центр або велике місто за назвою (будь-який відмінок), без сіл-тезок.
+    static (string name, double lat, double lon)? BigCity(string name) =>
+        // «Рівненщина», «Київщина», «Сумська» — область, а не її центр.
+        !Regex.IsMatch(name, @"(?:щин|ччин|чин)\p{L}*$|обл", RegexOptions.IgnoreCase)
+        && ThreatGeo.Resolve(RuToUk(name)) is { } cg
+        && (Geo.Canonical(name) is null || PlaceFinder.Literal(cg.name, RuToUk(name))) && (Capitals.Values.Contains(cg.name) || BigCities.Contains(cg.name))
+        && PlaceFinder.Literal(cg.name, RuToUk(name)) ? cg : null;
+
+    /// Велике місто в заголовку поста: «Чернігів: …», «Суми - вибухи…», «Харьков. ⏎ …», «Київ: ⏎ …», «Дніпро, обидва…».
+    /// Лише в короткому пості про засіб у повітрі (не оголошення, не реклама «НІКОПОЛЬ, У НАС…»).
+    static (string name, double lat, double lon)? HeadCity(string text) =>
+        text.Length > 220 || text.Length > 100 && !(DroneWord.IsMatch(text) || RocketWord.IsMatch(text) || WeaponCatalog.Match(text) is not null)
+        || AlarmOnly.IsMatch(text) || AlertNotice.IsMatch(text) ? null :
+        Regex.Match(text, @"^[^\p{L}\n]*(\p{Lu}[\p{L}'’ʼ\-]{2,}(?:\s+\p{Lu}[\p{L}'’ʼ\-]{2,})?)\s*(?:[,:!—–]|\s-\s|\.?[ \t]*\n)") is { Success: true } m
+            ? BigCity(m.Groups[1].Value) : null;
 
     /// Знайти місце з фрази поста. <paramref name="hadName"/> = false — у фразі взагалі
     /// немає назви («Збили», «Транзит»), тобто це не «не знайдено», а «без місця».
@@ -1382,6 +1420,8 @@ public sealed class SourceHub
             // Назва засобу перед місцем: «бандероль — Оболонь», «бандеролі: Дарниця», «ракета Бровари».
             var wm = Regex.Match(seg, @"^(?:бандерол\w*|ракет\w*|крилат\w*|ціл[ьі]\w*|каб\w*|шахед\w*|реактив\w*|рбпла|бпла)\s*[-—–:]?\s*", RegexOptions.IgnoreCase);
             if (wm.Success) { seg = seg[wm.Length..]; if (seg.Length == 0) continue; }
+            // «Новий реактивний Добрянка/Любеч/Славутич» — «Новий» тут про ціль (не «Новий Буг»).
+            seg = Regex.Replace(seg, @"^(?:новий|нова|нові|новый|новая|новые)\s+(?=(?:реактив|шахед|бпла|рбпла|дрон|ціл|мопед|ракет))", "", RegexOptions.IgnoreCase);
             seg = Regex.Replace(seg, @"^(?:і\s+)?(?:ще|знову|другий|третій|перший|один|два|три|в районі|у районі|район|рбпла|бпла|шахед\w*|реактив\w*)\s+", "", RegexOptions.IgnoreCase);
             // «Далі Федорівка», «Далее Балашовка», «На Яворницьке», «Розворот На Ховми».
             for (Match lw; (lw = Regex.Match(seg, @"^(\S+)\s+")).Success && LeadWord.IsMatch(lw.Groups[1].Value);) seg = seg[lw.Length..];

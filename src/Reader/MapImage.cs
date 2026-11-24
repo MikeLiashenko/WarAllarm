@@ -401,11 +401,8 @@ public static class MapImage
         // 🚀 Групи пуску (прогноз): куди летять типовим маршрутом.
         foreach (var g in groups)
         {
-            var p = g.PosAt(now);
             var c = CatColor(g.Reactive ? "shahed_jet" : "shahed");
-            var gone = ThreatGeo.Km(g.Route[0], p);
-            var ahead = new List<(double lat, double lon)> { p };
-            ahead.AddRange(g.Route.Skip(1).Where(w => ThreatGeo.Km(g.Route[0], w) > gone + 1));
+            var ahead = g.Ahead(now); // лише до межі відбою / кордону
             using var dash = Dashed(c.WithAlpha(0x5A), 1.4f);
             for (int i = 1; i < ahead.Count; i++)
                 canvas.DrawLine(P(ahead[i - 1].lon, ahead[i - 1].lat), P(ahead[i].lon, ahead[i].lat), dash);

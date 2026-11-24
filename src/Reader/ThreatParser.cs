@@ -261,6 +261,10 @@ public static class ThreatParser
         var where = Regex.Match(line,
             @"\b(?:на|в|у|з|із|зі|над)\s+(?:(півночі|півдні|сході|заході|центрі|північному\s+сході|північному\s+заході|південному\s+сході|південному\s+заході|північному-сході|південному-сході)\s+)?([\w'’ʼ\-]+(?:щин|ччин)\w*)",
             RegexOptions.IgnoreCase);
+        // «з Брянщини на Чернігівщині курсом на Сновськ» — перша «-щина» російська: беремо першу нашу.
+        if (course.Success)
+            for (var wm = where; wm.Success && wm.Index < course.Index; wm = wm.NextMatch())
+                if (Geo.Canonical(wm.Groups[2].Value) is not null) { where = wm; break; }
         if (at is null && course.Success && where.Success && where.Index < course.Index && Geo.Canonical(where.Groups[2].Value) is { } inObl)
             return new(kind == ThreatKind.Unknown ? ThreatKind.Target : kind, inObl, null, count, extra, line, FromOf(line))
             { Toward = course.Groups[1].Value.Trim(), Side = where.Groups[1].Success ? where.Groups[1].Value : null };
@@ -283,7 +287,9 @@ public static class ThreatParser
         // «на Черкащину західним курсом», «на Миколаївщину курсом» — лише область.
         // Але не «Миколаївщині з Криму» (після області — назва, не напрямок).
         if (city != null && Regex.Match(city, @"^([\p{L}'\-]+(?:щин|ччин)\p{L}*)\s+(?-i:\p{Ll})(.*)$") is { Success: true } ot && Geo.Canonical(ot.Groups[1].Value) is not null
-            && Regex.Matches(ot.Groups[2].Value, @"(?-i:\p{Lu})[\p{L}'’ʼ\-]*").All(w => Geo.Canonical(w.Value) is not null))
+            && (Regex.Matches(ot.Groups[2].Value, @"(?-i:\p{Lu})[\p{L}'’ʼ\-]*").All(w => Geo.Canonical(w.Value) is not null)
+                // «на Чернігівщину з Брянщини» — звідки (з Росії), а не друге місце.
+                || Regex.IsMatch(ot.Value, @"^\S+\s+(?:з|із|зі|від)\s+(?:брянщин|курщин|бєлгородщин|білгородщин|белгородщин|орловщин|смоленщин|рос[іи]|рф\b)\p{L}*\W*$", RegexOptions.IgnoreCase)))
             city = ot.Groups[1].Value;
         // «Ракети на Луцьк та Рівне» — дві цілі.
         string? also = null;

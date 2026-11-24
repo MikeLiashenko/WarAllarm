@@ -129,6 +129,18 @@ public static class OblastGeo
         .Select(pts => (pts.Min(x => x[1]), pts.Max(x => x[1]), pts.Min(x => x[0]), pts.Max(x => x[0])))
         .ToArray();
 
+    // Окуповані (повністю або здебільшого) райони поза Кримом і Луганщиною — грубо, для
+    // прогнозу груп пуску: над окупованою тривоги не оголошують, тож там він не зупиняється.
+    static readonly HashSet<string> OccupiedRaions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Мелітопольський район", "Бердянський район", "Василівський район", "Генічеський район", "Скадовський район",
+        "Каховський район", "Донецький район", "Горлівський район", "Кальміуський район", "Маріупольський район", "Волноваський район",
+    };
+    /// Окупована територія (Крим, Луганщина, окуповані райони півдня й Донбасу) — грубо.
+    public static bool Occupied(double lat, double lon) =>
+        NameAt(lat, lon) is "Crimea" or "Sevastopol'" or "Luhans'k"
+        || RaionAt(lat, lon) is { } r && OccupiedRaions.Contains(r);
+
     /// Район, що містить точку («Харківський район», як у фіді тривог), або null.
     public static string? RaionAt(double lat, double lon) => NameIn(RaionPolys, RaionBoxes, lat, lon);
 

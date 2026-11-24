@@ -509,7 +509,7 @@ function extras(s, now){
   for(const g of (Array.isArray(s.launches) ? s.launches : [])){
     const route = (g.route||[]).filter(p => Array.isArray(p) && p.length===2);
     if(route.length < 2) continue;
-    if((g.kmh||157)*(now-(g.t0||now))/3600000 >= routeLen(route)) continue;
+    // Маршрут — лише до межі відбою / кордону: у кінці група чекає (знімає її сервер), а не зникає.
     out.push({ id:'launch:'+g.id, label:'Пуск з '+g.origin+(g.reactive?' (реакт.)':''), cat:'shahed', lat:route[0][0], lon:route[0][1],
       n:g.n||1, kmh:g.kmh||157, seen:g.t0||now, route, forecast:true });
   }

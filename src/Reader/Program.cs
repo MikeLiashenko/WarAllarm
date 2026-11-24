@@ -436,6 +436,13 @@ if (args.Length >= 2 && args[0].Equals("audit", StringComparison.OrdinalIgnoreCa
     return;
 }
 
+// ── 🔮 Прогноз груп пуску по журналу:   dotnet run -- fcast journal/2026-11-22.jsonl … [-v]
+if (args.Length >= 2 && args[0].Equals("fcast", StringComparison.OrdinalIgnoreCase))
+{
+    ForecastAudit.Run(args.Skip(1).Where(a => !a.StartsWith('-')).OrderBy(f => f).ToList(), args.Contains("-v"));
+    return;
+}
+
 // ── 🔁 Прогін журналу через теперішній хаб:   dotnet run -- replay [РРРР-ММ-ДД|файл] [вихід.txt]
 if (args.Length >= 1 && args[0].Equals("replay", StringComparison.OrdinalIgnoreCase))
 {
@@ -1526,6 +1533,8 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             }
             prevActive = nowActive;
             ActiveAlarmOblasts.Clear(); ActiveAlarmOblasts.UnionWith(nowActive);
+            // 🚀 Прогноз груп пуску зупиняється на межі відбою (як справжні цілі в застосунку).
+            if (snap.Ok) { var alarmSnap = snap; LaunchGroups.InAlarm = (la, lo) => alarmSnap.LevelAt(la, lo) is not null; }
             AreaLog.Sync(snap, DateTime.Now); // 📈 історія тривог по районах: звірка з офіційним фідом
             activeSeeded = true;
             // 1) API: покласти тривоги у state → публікується у Firebase (state/alerts).
@@ -2020,11 +2029,8 @@ string? AlarmEtaText(double lat, double lon)
     var cands = new List<(List<(double lat, double lon)> route, double kmh, string via, bool forecast)>();
     foreach (var g in LaunchGroups.Active)
     {
-        var p = g.PosAt(now);
-        var gone = ThreatGeo.Km(g.Route[0], p);
-        var ahead = new List<(double lat, double lon)> { p };
-        ahead.AddRange(g.Route.Skip(1).Where(w => ThreatGeo.Km(g.Route[0], w) > gone + 1));
-        cands.Add((ahead, g.Kmh * 0.85, $"пуск з {g.Origin}{(g.Reactive ? " (реакт.)" : "")} ×{g.Left}", true));
+        var ahead = g.Rest(now); // уся решта маршруту: тривога тут — саме там, де її ще нема
+        cands.Add((ahead, g.Speed, $"пуск з {g.Origin}{(g.Reactive ? " (реакт.)" : "")} ×{g.Left}", true));
     }
     foreach (var t in tracker.Active)
         if (t.Pos is { } tp && t.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target

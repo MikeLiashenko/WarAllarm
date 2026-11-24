@@ -63,6 +63,10 @@ class MapTarget {
   /// ціль): блідо на карті, не вмикає тривогу й не рахується в лічильниках.
   final bool forecast;
 
+  /// Групи пуску: увесь типовий маршрут ([route] обрізано на межі відбою, де група чекає).
+  /// Для «коли орієнтовно тривога тут»: туди, де тривоги ще нема, група теж долетить.
+  final List<List<double>> fullRoute;
+
   /// «на Харків»: [lat]/[lon] — місто, куди летить (на ньому тривога); мітка рухається [route].
   final bool toPlace;
 
@@ -111,6 +115,7 @@ class MapTarget {
     this.down = false,
     this.route = const [],
     this.forecast = false,
+    this.fullRoute = const [],
     this.toPlace = false,
     this.orbit = false,
     this.areaKm = 0,
@@ -124,7 +129,7 @@ class MapTarget {
         sources: sources, srcs: srcs, kmh: kmh,
         from: from, to: to, fromName: fromName, fromGuess: fromGuess,
         t0: t0, launch: launch,
-        headingKnown: headingKnown, altM: altM, altNote: altNote, down: down, toPlace: toPlace, orbit: orbit, route: route, forecast: forecast, areaKm: areaKm,
+        headingKnown: headingKnown, altM: altM, altNote: altNote, down: down, toPlace: toPlace, orbit: orbit, route: route, forecast: forecast, fullRoute: fullRoute, areaKm: areaKm,
       );
 
   static List<List<double>> _route(dynamic v) => v is List

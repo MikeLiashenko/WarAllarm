@@ -63,6 +63,7 @@ dotnet run -- channeltest kyiv|kharkiv   # тестовый пост в горо
 dotnet run -- channelsetup kyiv|kharkiv  # аватар + описание канала через Bot API, проверка прав бота
 dotnet run -- citysim kyiv|kharkiv       # сухой прогон *_samples.txt: что ушло бы в городской канал (ничего не шлёт)
 dotnet run -- mappng out.png demo kyiv   # демо-карта PNG (последний аргумент — логотип города, необязательно)
+dotnet run -- fcast journal/2026-11-2*.jsonl [-v]   # аудит прогноза групп пуска по журналу: где летел, была ли там тревога, далеко ли реальные цели
 ```
 
 ## Городские каналы

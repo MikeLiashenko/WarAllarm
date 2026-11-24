@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../data/oblast_lookup.dart';
-import '../domain/motion.dart';
 import '../models/analytics_row.dart';
 import '../models/map_target.dart';
 import '../models/monitored_place.dart';
@@ -394,8 +393,9 @@ class MapDataController extends ChangeNotifier {
       if (route.length < 2) continue;
       final kmh = (g['kmh'] as num?)?.toDouble() ?? 157;
       final t0 = (g['t0'] as num?)?.toInt() ?? now;
-      // Already at the end of the route — nothing left to show.
-      if (kmh * (now - t0) / 3600000 >= routeLengthKm(route)) continue;
+      // The route ends where the group may still fly (the all-clear border, the front
+      // line, how deep a forecast may go): at its end the group waits there — the
+      // Reader removes it when no alarm comes. It no longer flies the whole country.
       final reactive = g['reactive'] == true;
       final origin = (g['origin'] ?? '').toString();
       final via = (g['via'] ?? '').toString(); // через Славутич дві дороги: на Київ і на захід
@@ -410,6 +410,10 @@ class MapDataController extends ChangeNotifier {
         seenMs: t0,
         route: route,
         forecast: true,
+        fullRoute: [
+          for (final p in (g['full'] as List? ?? const []))
+            if (p is List && p.length == 2) [(p[0] as num).toDouble(), (p[1] as num).toDouble()],
+        ],
         place: 'прогноз',
         stageLabel: 'прогноз маршруту',
         fromName: origin,
