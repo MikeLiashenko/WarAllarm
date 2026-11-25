@@ -515,7 +515,7 @@ if (args.Length >= 2 && args[0].Equals("ballreplay", StringComparison.OrdinalIgn
             if (kind == BallisticAlert.Kind.None) continue;
             bool ppo = kind == BallisticAlert.Kind.EnemyPpo;
             var cloc = hs is { Oblasts.Length: > 0 and <= 4 } ? hs.Oblasts : loc; // як наживо: регіональний агрегатор знімає свої області
-            var scope = kind == BallisticAlert.Kind.Threat ? BallisticAlert.ScopeOf(loc, text) : BallisticAlert.CancelScope(cloc, text);
+            var scope = kind == BallisticAlert.Kind.Threat ? BallisticAlert.ScopeOf(loc, text, at) : BallisticAlert.CancelScope(cloc, text);
             var one = text.Replace("\n", " ");
             one = one[..Math.Min(80, one.Length)];
             if (kind == BallisticAlert.Kind.Threat)
@@ -3000,7 +3000,7 @@ async Task BallisticWatch(string text, string[] localCanon, string src, string t
     bool ppo = kind == BallisticAlert.Kind.EnemyPpo;
     if (kind == BallisticAlert.Kind.Threat)
     {
-        var scope = BallisticAlert.ScopeOf(localCanon, text);
+        var scope = BallisticAlert.ScopeOf(localCanon, text, now);
         if (scope.Length == 0) { Ui.Line(ConsoleColor.DarkYellow, $"☄  [{time}] {src} · загроза балістики — не знаю, яких областей (без району пуску)"); return; }
         var from = BallisticAlert.SiteOf(text)?.name;
         var fresh = BallisticAlert.Raise(scope, from, src, now);

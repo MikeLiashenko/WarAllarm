@@ -121,11 +121,29 @@ public static class BallisticAlert
 
     /// Області загрози: названі в пості; інакше місцевий канал — його області (якщо район пуску
     /// досяжний); інакше — куди б'ють із названого району пуску / напрямку. Порожньо — невідомо.
-    public static string[] ScopeOf(IEnumerable<string> localCanon, string text)
+    // Район пуску з останніх постів-загроз: місцеві канали за хвилину перепощують «Загроза балістики!»
+    // уже без нього (25.11 22:44: пуск з Брянська по Києву, а тривога загорілась і в Запоріжжі,
+    // Дніпрі, Житомирі, на Донеччині — «Загроза балістики!», «Ⓜ️ Північна загроза балістики»).
+    static (string name, double lat, double lon, DateTime at)? _lastSite;
+    static readonly TimeSpan SiteMemory = TimeSpan.FromMinutes(6);
+
+    public static string[] ScopeOf(IEnumerable<string> localCanon, string text, DateTime? at = null)
     {
         var said = Mentioned(text);
         if (said.Length > 0) return said;
+        var now = at ?? DateTime.Now;
         var site = SiteOf(text);
+        lock (Gate)
+        {
+            if (site is { } st) _lastSite = (st.name, st.lat, st.lon, now);
+            // «Ⓜ️ Північна загроза балістики» (нікопольський канал) — не їхня: пуск на північ (Київ, Чернігів, Суми).
+            else if (Regex.IsMatch(text, @"північн\w*\s+(?:\w+\s+)?загроз|северн\w*\s+(?:\w+\s+)?угроз", O))
+            {
+                var loc0 = Local(localCanon);
+                return North.Where(o => loc0.Count == 0 || loc0.Contains(o)).ToArray();
+            }
+            else if (_lastSite is { } ls && now - ls.at <= SiteMemory) site = (ls.name, ls.lat, ls.lon);
+        }
         var local = Local(localCanon);
         if (local.Count > 0)
             return site is { } s0
