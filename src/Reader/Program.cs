@@ -117,7 +117,9 @@ DateTime airReportedAt = DateTime.MinValue;
 LaunchBatch? lastBatch = null;               // остання хвиля пусків
 DateTime? carrierUp = null;                  // 🛫 коли злетів МіГ-31К (null — сів або не злітав)
 // Єдиний підпис постів у каналі (курсивом, щоб не відволікав від суті).
-const string ChannelFoot = "<i>🤖 WarAlarm · дані приблизні</i>";
+// Підпис постів основного каналу: «🤖 WarAlarm» — посилання на бота (мітка ch_main — звідки прийшли).
+static string ChannelFoot() => TelegramBot.Link("ch_main") is { } bl
+    ? $"<i><a href=\"{bl}\">🤖 WarAlarm</a> · дані приблизні</i>" : "<i>🤖 WarAlarm · дані приблизні</i>";
 var launchLog = new List<(DateTime at, LaunchBatch b)>(); // 🌙 усі хвилі — для «що вже пущено цього вечора»
 // Області з офіційною тривогою зараз (цикл офіційних тривог) — для «⏰ коли тривога тут».
 var ActiveAlarmOblasts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1039,7 +1041,7 @@ if (!string.IsNullOrWhiteSpace(botToken))
             var ev = EveningOutlook.EveningOf(DateTime.Now);
             if (!EveningOutlook.Has(ev)) return null;
             var lines = EveningOutlook.Lines(LaunchedTonight(DateTime.Now));
-            return lines.Count == 0 ? null : $"<b>{H(EveningOutlook.Title(ev))}</b>\n\n{H(string.Join("\n", lines))}\n\n<i>За оцінками моніторів — прогноз, а не факт.</i>\n{ChannelFoot}";
+            return lines.Count == 0 ? null : $"<b>{H(EveningOutlook.Title(ev))}</b>\n\n{H(string.Join("\n", lines))}\n\n<i>За оцінками моніторів — прогноз, а не факт.</i>\n{ChannelFoot()}";
         },
         TargetsNear: TargetsNear,
         TargetInfo: TargetInfo);
@@ -1327,7 +1329,7 @@ async Task RunOutlookLoop(ChannelPoster? channel)
             if (lines.Count == 0) continue;
             MapWriter.OutlookJson = EveningOutlook.Json(launched);
             var title = EveningOutlook.Title(ev);
-            var html = $"<b>{H(title)}</b>\n\n{H(string.Join("\n", lines))}\n\n<i>За оцінками моніторів — прогноз, а не факт. Стежте за тривогою.</i>\n{ChannelFoot}";
+            var html = $"<b>{H(title)}</b>\n\n{H(string.Join("\n", lines))}\n\n<i>За оцінками моніторів — прогноз, а не факт. Стежте за тривогою.</i>\n{ChannelFoot()}";
             if (postedFor != ev)
             {
                 postId = channel is null ? null : await channel.Post(html, null, silent: false);
@@ -1747,7 +1749,7 @@ static string BuildAlarmPost(List<string> newly, OfficialAlerts.Snapshot s)
     sb.AppendLine($"🇺🇦 По країні: 🔴 {s.RedUa.Count} · 🟡 {s.YellowUa.Count} обл.");
     sb.AppendLine("➤ Прямуйте в укриття. Бережіть себе 🇺🇦");
     sb.AppendLine();
-    sb.Append(ChannelFoot);
+    sb.Append(ChannelFoot());
     return sb.ToString();
 }
 
@@ -1760,7 +1762,7 @@ static string MapCaption(OfficialAlerts.Snapshot s, int targets)
     sb.AppendLine($"🔴 {red} · 🟡 {yel} обл. · 🛸 у повітрі ~{targets}");
     if (red > 0) sb.AppendLine("🔥 " + RedList(s));
     sb.AppendLine();
-    sb.Append(ChannelFoot);
+    sb.Append(ChannelFoot());
     return sb.ToString();
 }
 
@@ -1780,7 +1782,7 @@ static string BuildClearPost(List<string> cleared, int remaining)
     sb.AppendLine();
     sb.AppendLine($"🔴 Ще під тривогою: {remaining} обл.");
     sb.AppendLine();
-    sb.Append(ChannelFoot);
+    sb.Append(ChannelFoot());
     return sb.ToString();
 }
 
@@ -1798,7 +1800,7 @@ Task RunThreatNews(ChannelPoster channel) => RunLiveBoard(channel, _ => true, (a
             ? BuildCityRaidPost(active, raidCities, ppoNow)
             : BuildOblastPost(active, AirborneNow(active.Sum(t => t.Amount)));
         return (core, raidCities.ToHashSet());
-    }, "Цілей у повітрі більше не видно", ChannelFoot, LiveFoot, "");
+    }, "Цілей у повітрі більше не видно", ChannelFoot(), LiveFoot, "");
 
 // Спільна логіка «живої дошки» (основний канал і міські): [filter] — які цілі дошка бачить,
 // [build] — текст (без підпису) + міста під нальотом, [closeText]/[closeFoot] — фінальний рядок,
@@ -2785,7 +2787,7 @@ async Task OnUpdate(Update update)
                                       + (etaHome is null ? "" : "\n\n" + etaHome),
                                       ThreatKind.Drone, Urgent: false, Info: true));
             if (channelPoster is not null)
-                await channelPoster.Post($"<b>{H(head)}</b>\n{H(string.Join("\n", rows))}\n\n⚠️ Летять на Україну — стежте за картою.\n\n{ChannelFoot}", null);
+                await channelPoster.Post($"<b>{H(head)}</b>\n{H(string.Join("\n", rows))}\n\n⚠️ Летять на Україну — стежте за картою.\n\n{ChannelFoot()}", null);
             return;
         }
         if (LaunchFeed.ParseAirborne(m.message) is int air)
@@ -2815,7 +2817,7 @@ async Task OnUpdate(Update update)
         {
             await Notify("UA", new AlarmInfo(time, src, "🛬 МіГ-31К сів — загрози «Кинжалів» від нього вже нема", oneLine, ThreatKind.Ballistic, false, Info: true), clear: false);
             if (channelPoster is not null)
-                await channelPoster.Post($"🛬 <b>МіГ-31К сів</b>\nЗагрози «Кинжалів» від нього вже нема. Слідкуйте за картою.\n\n{ChannelFoot}", null);
+                await channelPoster.Post($"🛬 <b>МіГ-31К сів</b>\nЗагрози «Кинжалів» від нього вже нема. Слідкуйте за картою.\n\n{ChannelFoot()}", null);
         }
         return;
     }
@@ -2842,7 +2844,7 @@ async Task OnUpdate(Update update)
             await Notify("UA", new AlarmInfo(time, src, $"{icon} {head}! {advice}", txt, lKind, true, Silent: false), clear: false);
             if (channelPoster is not null)
                 await channelPoster.Post(
-                    $"{icon} <b>УВАГА — {H(head)}</b>\n<blockquote>{H(CleanQuote(txt))}</blockquote>\n{H(advice)}\n\n{ChannelFoot}", null);
+                    $"{icon} <b>УВАГА — {H(head)}</b>\n<blockquote>{H(CleanQuote(txt))}</blockquote>\n{H(advice)}\n\n{ChannelFoot()}", null);
         }
         // не return — у пості можуть бути й цілі; хай далі теж розпарситься
     }
@@ -3006,7 +3008,7 @@ async Task BallisticWatch(string text, string[] localCanon, string src, string t
         {
             lastBallNews = now;
             await channelPoster.Post($"☄️ <b>Загроза балістики</b>{(from != null ? $" · район пуску: {H(from)}" : "")}\n"
-                + $"{H(BallisticAlert.Names(fresh))}\nПуску ще немає — будь ближче до укриття.\n\n{ChannelFoot}", null);
+                + $"{H(BallisticAlert.Names(fresh))}\nПуску ще немає — будь ближче до укриття.\n\n{ChannelFoot()}", null);
         }
         return;
     }
@@ -3019,8 +3021,8 @@ async Task BallisticWatch(string text, string[] localCanon, string src, string t
         MapWriter.Write(MapPath, tracker, MyDistrict, now);
         if (channelPoster is not null)
             await channelPoster.Post(ppo
-                ? $"🛡 <b>Працює вороже ППО</b>\nЗагрозу балістики знято — схоже, це не пуски по нас ({H(BallisticAlert.Names(gone))}).\nДо офіційного відбою — уважно.\n\n{ChannelFoot}"
-                : $"🟢 <b>Відбій загрози балістики</b>\n{H(BallisticAlert.Names(gone))}\n\n{ChannelFoot}", null, silent: true);
+                ? $"🛡 <b>Працює вороже ППО</b>\nЗагрозу балістики знято — схоже, це не пуски по нас ({H(BallisticAlert.Names(gone))}).\nДо офіційного відбою — уважно.\n\n{ChannelFoot()}"
+                : $"🟢 <b>Відбій загрози балістики</b>\n{H(BallisticAlert.Names(gone))}\n\n{ChannelFoot()}", null, silent: true);
     }
     else if (ppo) Ui.Line(ConsoleColor.DarkGray, $"🛡 [{time}] {src} · працює вороже ППО (загрози балістики не було)");
     foreach (var cc in cityChannels)

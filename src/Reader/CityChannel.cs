@@ -62,7 +62,9 @@ public sealed class CityChannel
     }
 
     /// Підпис постів міського каналу (аналог ChannelFoot).
-    public string Foot => T($"<i>🤖 WarAlarm {Title} · дані приблизні</i>", $"<i>🤖 WarAlarm {Title} · данные приблизительные</i>");
+    public string Foot => T($"<i>{BotName} · дані приблизні</i>", $"<i>{BotName} · данные приблизительные</i>");
+    // «🤖 WarAlarm Київ» — посилання на бота з міткою каналу (ch_kyiv): видно, скільки людей прийшло звідси.
+    string BotName => TelegramBot.Link("ch_" + Key) is { } bl ? $"<a href=\"{bl}\">🤖 WarAlarm {H(Title)}</a>" : $"🤖 WarAlarm {H(Title)}";
     /// Рядок «оновлюється» під живою дошкою.
     public string LiveFoot() => T($"<i>🕒 {DateTime.Now:HH:mm} · оновлюється · 🤖 WarAlarm {Title}</i>",
                                   $"<i>🕒 {DateTime.Now:HH:mm} · обновляется · 🤖 WarAlarm {Title}</i>");

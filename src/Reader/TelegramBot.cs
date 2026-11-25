@@ -61,12 +61,30 @@ public sealed class TelegramBot
     readonly ConcurrentDictionary<long, List<Geocode.Hit>> _geoPending = new();
     long _offset;
 
+    // ── 📣 Поділитися: особисте посилання-запрошення t.me/<бот>?start=r<chat> ──────
+    // Хто кого привів — окремий файл (не bot_subscribers.json): /stop і новий /start не накручують
+    // лічильник, а друг, що вже колись був у боті, не рахується вдруге.
+    const string RefFile = "bot_referrals.json";
+    /// Ім'я бота без «@» (з getMe) — для посилань у каналах і в «Поділитися». null — ще не відомо.
+    public static string? Username { get; private set; }
+    readonly ConcurrentDictionary<long, long> _refBy = new();      // запрошений → хто запросив
+    readonly ConcurrentDictionary<string, int> _fromTag = new();   // мітка посилання (?start=ch_kyiv) → скільки прийшло
+    readonly ConcurrentDictionary<long, bool> _everSeen = new();   // хто будь-коли запускав бота (щоб не рахувати двічі)
+
     public TelegramBot(string token, BotFeatures features)
     {
         _api = $"https://api.telegram.org/bot{token}";
         _f = features;
         LoadSubs();
+        LoadRefs();
+        foreach (var id in _users.Keys) _everSeen[id] = true;
     }
+
+    /// Посилання на бота з міткою, звідки прийшли (канали, сайт): t.me/<бот>?start=<tag>.
+    public static string? Link(string? tag = null) =>
+        Username is { } u ? $"https://t.me/{u}" + (tag is { Length: > 0 } ? "?start=" + tag : "") : null;
+
+    public int ReferralCount => _refBy.Count;
 
     public int SubscriberCount => _users.Count;
 
@@ -105,7 +123,8 @@ public sealed class TelegramBot
         new[] { Btn("🎯 Ризик", "cmd:/risk") },
         new[] { Btn("📈 Аналітика", "cmd:/stats"), Btn("📡 Джерела", "cmd:/sources") },
         new[] { Btn("🤖 ШІ-аналіз", "cmd:/ai"), Btn("📍 Змінити місто", "cmd:/place") },
-        new[] { Btn("📏 Радіус тривоги", "cmd:/radius"), Btn("❓ Довідка", "cmd:/help") });
+        new[] { Btn("📏 Радіус тривоги", "cmd:/radius"), Btn("❓ Довідка", "cmd:/help") },
+        new[] { Btn("📣 Поділитися з друзями", "cmd:/share") });
 
     // 📏 Вибір радіусу: поточний позначено ✅.
     static object RadiusKb(int cur) => Inline(
@@ -173,6 +192,7 @@ public sealed class TelegramBot
     public async Task RunAsync(CancellationToken ct = default)
     {
         try { await InitOffset(); } catch { }
+        try { await InitMe(); } catch { }
         try { await SetCommands(); } catch { }
         _ = RunUserAlarms(ct);                 // персональні тривоги в особисті
         _ = Task.Run(() => Worker(ct));
@@ -451,6 +471,8 @@ public sealed class TelegramBot
         switch (cmd)
         {
             case "/start":
+                // «/start r123» — прийшов за запрошенням, «/start ch_kyiv» — з каналу / сайту.
+                await OnStartPayload(chat, text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(1).FirstOrDefault());
                 if (!_users.ContainsKey(chat)) _users[chat] = null;
                 SaveSubs();
                 if (hasCity)
@@ -479,6 +501,11 @@ public sealed class TelegramBot
         if (Match(text, cmd, "/more", "☰", "ще", "меню"))
         {
             await Send(chat, "☰ <b>Ще можливості</b>", MoreKb);
+            return;
+        }
+        if (Match(text, cmd, "/share", "📣", "поділитися", "поделиться", "запросити"))
+        {
+            await SendShare(chat);
             return;
         }
         if (Match(text, cmd, "/live", "🛰 стежити за мною", "стежити за мною", "геопозиція", "де я"))
@@ -609,6 +636,7 @@ public sealed class TelegramBot
         + "📍 /place — змінити місто (можна мікрорайон чи адресу)" + (place is { } p ? $" (зараз: {H(p.Name)})" : "") + "\n"
         + "📏 /radius — радіус тривоги: ціль ближче — 🔴 тривога (5–100 км)\n"
         + "🛰 /live — стежити за мною: тривоги там, де ти зараз (трансляція геопозиції)\n"
+        + "📣 /share — поділитися ботом з друзями\n"
         + "🔕 /stop — вимкнути сповіщення\n\n"
         + "☄️ Загроза балістики у твоїй області — теж тривога; «працює вороже ППО» її знімає.\n"
         + $"🔔 Сповіщення приходять самі: ціль ближче {radius} км → 🔴 тривога, потім 🟢 відбій.\n"
@@ -696,7 +724,8 @@ public sealed class TelegramBot
         await Send(chat,
             $"✅ <b>Готово! Твоє місто — {H(p.Name)}</b>\n"
             + $"🔔 Напишу, щойно ціль залетить у зону <b>{RadiusOf(chat)} км</b>, і дам відбій, коли мине (📏 /radius — змінити).\n"
-            + "Змінити місто — просто напиши іншу назву чи адресу.", MainKb);
+            + "Змінити місто — просто напиши іншу назву чи адресу.\n\n"
+            + "📣 Корисно? Поділись із рідними й друзями — /share", MainKb);
         await SendStatus(chat, p);
     }
 
@@ -726,6 +755,93 @@ public sealed class TelegramBot
     }
 
     // Меню команд у Telegram (кнопка «/» біля поля вводу).
+    async Task InitMe()
+    {
+        using var doc = await GetJson($"{_api}/getMe");
+        if (doc.RootElement.TryGetProperty("result", out var r) && r.TryGetProperty("username", out var un)) Username = un.GetString();
+        Console.WriteLine($"🤖 бот @{Username} · запрошень: {_refBy.Count}"
+            + (_fromTag.IsEmpty ? "" : " · з посилань: " + string.Join(", ", _fromTag.OrderByDescending(x => x.Value).Select(x => $"{x.Key} {x.Value}"))));
+    }
+
+    const string ShareText = "🛡 WarAlarm — попереджає, коли щось летить саме до твого міста чи району: шахеди, ракети, "
+        + "балістика. ⭐ Наскільки небезпечно надворі зараз, укриття поруч, жива карта. Безкоштовно.";
+
+    async Task SendShare(long chat)
+    {
+        if (Link("r" + chat) is not { } link)
+        {
+            await Send(chat, "📣 Поділитися поки не вийшло — спробуй за хвилину.");
+            return;
+        }
+        int mine = _refBy.Values.Count(v => v == chat);
+        var share = "https://t.me/share/url?url=" + Uri.EscapeDataString(link) + "&text=" + Uri.EscapeDataString(ShareText);
+        await Send(chat,
+            "📣 <b>Поділись WarAlarm з тими, за кого хвилюєшся</b>\n\n"
+            + "Кожен отримає тривогу саме для свого міста чи району — і зірки небезпеки надворі.\n\n"
+            + $"🔗 Твоє посилання:\n{link}\n\n"
+            + (mine > 0 ? $"🎉 За твоїм запрошенням уже приєдналось: <b>{mine}</b>. Дякую!" : "Натисни кнопку нижче й обери, кому надіслати 👇"),
+            Inline(new object[] { new { text = "📤 Надіслати друзям", url = share } }));
+    }
+
+    // Мітка з посилання. Запрошення рахуємо лише для нової людини й не самому собі.
+    async Task OnStartPayload(long chat, string? payload)
+    {
+        bool fresh = _everSeen.TryAdd(chat, true);
+        if (!fresh) return;
+        if (payload is not { Length: > 0 }) { SaveRefs(); return; }
+        if (Regex.Match(payload, @"^r(\d{1,15})$") is { Success: true } rm && long.TryParse(rm.Groups[1].Value, out var by) && by != chat)
+        {
+            if (!_refBy.TryAdd(chat, by)) return;
+            SaveRefs();
+            int n = _refBy.Values.Count(v => v == by);
+            Console.WriteLine($"📣 бот: запрошення від {by} → усього {n}");
+            if (_users.ContainsKey(by))
+                await Send(by, $"🎉 За твоїм запрошенням до WarAlarm приєднався ще хтось — усього <b>{n}</b>. Дякую, що ділишся!", silent: true);
+            return;
+        }
+        if (Regex.IsMatch(payload, @"^[A-Za-z0-9_\-]{1,40}$"))
+        {
+            _fromTag.AddOrUpdate(payload, 1, (_, v) => v + 1);
+            SaveRefs();
+        }
+    }
+
+    void LoadRefs()
+    {
+        try
+        {
+            if (!File.Exists(RefFile)) return;
+            using var doc = JsonDocument.Parse(File.ReadAllText(RefFile));
+            if (doc.RootElement.TryGetProperty("by", out var by))
+                foreach (var p in by.EnumerateObject())
+                    if (long.TryParse(p.Name, out var id) && p.Value.TryGetInt64(out var r)) _refBy[id] = r;
+            if (doc.RootElement.TryGetProperty("tags", out var tags))
+                foreach (var p in tags.EnumerateObject())
+                    if (p.Value.TryGetInt32(out var n)) _fromTag[p.Name] = n;
+            if (doc.RootElement.TryGetProperty("seen", out var seen))
+                foreach (var v in seen.EnumerateArray())
+                    if (v.TryGetInt64(out var id)) _everSeen[id] = true;
+        }
+        catch (Exception ex) { Console.Error.WriteLine("⚠ " + RefFile + ": " + ex.Message); }
+    }
+
+    readonly object _refLock = new();
+    void SaveRefs()
+    {
+        lock (_refLock) try
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                by = _refBy.ToDictionary(x => x.Key.ToString(), x => x.Value),
+                tags = _fromTag.ToDictionary(x => x.Key, x => x.Value),
+                seen = _everSeen.Keys.OrderBy(x => x).ToArray(),
+            });
+            File.WriteAllText(RefFile + ".tmp", json);
+            File.Move(RefFile + ".tmp", RefFile, true);
+        }
+        catch (Exception ex) { Console.Error.WriteLine("⚠ " + RefFile + ": " + ex.Message); }
+    }
+
     async Task SetCommands()
     {
         var cmds = new (string c, string d)[]
@@ -734,7 +850,7 @@ public sealed class TelegramBot
             ("map", "🗺 Карта тривог"), ("alerts", "🚨 Офіційні тривоги"), ("shelter", "🏠 Укриття поруч"),
             ("risk", "🎯 Ризик по типах"), ("tonight", "🔮 Чого чекати цієї ночі"), ("night", "🌙 Підсумок ночі"), ("stats", "📈 Аналітика"),
             ("sources", "📡 Джерела"), ("ai", "🤖 ШІ-аналіз"), ("place", "📍 Змінити місто"), ("radius", "📏 Радіус тривоги"),
-            ("live", "🛰 Стежити за мною (геопозиція)"), ("help", "❓ Довідка"), ("stop", "🔕 Вимкнути сповіщення"),
+            ("live", "🛰 Стежити за мною (геопозиція)"), ("share", "📣 Поділитися з друзями"), ("help", "❓ Довідка"), ("stop", "🔕 Вимкнути сповіщення"),
         };
         await Call("setMyCommands", new { commands = cmds.Select(x => new { command = x.c, description = x.d }) });
         // Кнопка меню біля поля вводу відкриває живу карту.
