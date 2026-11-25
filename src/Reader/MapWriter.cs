@@ -75,6 +75,9 @@ public static class MapWriter
 
     /// Builds the live state JSON (threats + stats + rows + cfg + aiText).
     /// Shared by the offline map.html and the Firebase publisher.
+    /// Публічні канали WarAlarm (ключ, назва, @ без «@») — для сайту.
+    public static readonly List<(string key, string title, string handle)> Channels = new();
+
     public static string BuildState(ThreatTracker tracker, string homeName, DateTime now)
     {
         var home = tracker.Home;
@@ -101,6 +104,9 @@ public static class MapWriter
         sb.Append(",\"homeName\":\"").Append(Esc(homeName)).Append('"');
         // Ім'я бота — сайт показує кнопку «🔔 Тривоги в Telegram» з QR (посилання з міткою site).
         if (TelegramBot.Username is { } bot) sb.Append(",\"bot\":\"").Append(Esc(bot)).Append('"');
+        // Канали (основний і міські) — сайт показує їх поруч із ботом, з QR.
+        if (Channels.Count > 0)
+            sb.Append(",\"channels\":[").Append(string.Join(",", Channels.Select(c => $"{{\"k\":\"{Esc(c.key)}\",\"t\":\"{Esc(c.title)}\",\"h\":\"{Esc(c.handle)}\"}}"))).Append(']');
         sb.Append(",\"home\":{\"lat\":").Append(N(home.lat)).Append(",\"lon\":").Append(N(home.lon)).Append('}');
         sb.Append(",\"threats\":[");
         for (int i = 0; i < merged.Count; i++)

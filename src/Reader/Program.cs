@@ -1079,6 +1079,11 @@ foreach (var c in CityChannel.Known)
         + (watched ? "" : $"\n   ⚠ watch_{c.Key}=false у settings.local.txt — локальних моніторів {c.Name} не буде, лише тривоги й дошка."));
 }
 Console.WriteLine();
+// 📢 Канали для сайту (кнопка «🔔 WarAlarm у Telegram»): лише публічні @-імена.
+static string? PublicHandle(string? h) => h is { } x && System.Text.RegularExpressions.Regex.Match(x.Trim(), @"^@?([A-Za-z][A-Za-z0-9_]{4,31})$") is { Success: true } m ? m.Groups[1].Value : null;
+if (channelPoster is not null && PublicHandle(channelName) is { } mainH) MapWriter.Channels.Add(("main", "Вся Україна", mainH));
+foreach (var cc in cityChannels)
+    if (PublicHandle(cc.Handle) is { } ch) MapWriter.Channels.Add((cc.Key, cc.Name, ch));
 CityChannel? CityOf(string zone) => cityChannels.FirstOrDefault(c => c.Name == zone);
 // Денні лічильники для авто-зведення в канал (оголошення тривог по областях
 // + помічені цілі за типом/місцем). Накопичуються в циклах, скидаються після зведення.

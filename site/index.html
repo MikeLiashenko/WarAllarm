@@ -96,22 +96,29 @@
     background:rgba(17,22,29,.93);color:var(--tx);font:inherit;font-weight:800;font-size:13.5px;padding:9px 14px;cursor:pointer;
     box-shadow:0 6px 20px rgba(0,0,0,.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
   #botBtn:hover{background:#1D3658}
-  #botCard{position:fixed;inset:0;z-index:40;background:rgba(5,8,12,.6);display:flex;align-items:center;justify-content:center;padding:16px}
-  #botCard[hidden],#botBtn[hidden],#botQr[hidden]{display:none}
-  #botCard .bc{position:relative;width:min(360px,100%);background:#11161D;border:1px solid rgba(76,147,255,.3);border-radius:18px;
-    box-shadow:0 14px 40px rgba(0,0,0,.6);padding:18px 18px 16px;text-align:center}
+  #botCard{position:fixed;inset:0;z-index:40;background:rgba(5,8,12,.6);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
+  #botCard[hidden],#botBtn[hidden]{display:none}
+  #botCard .bc{position:relative;width:min(700px,100%);max-height:100%;overflow:auto;background:#11161D;border:1px solid rgba(76,147,255,.3);
+    border-radius:18px;box-shadow:0 14px 40px rgba(0,0,0,.6);padding:18px}
   #botCard .x{position:absolute;right:10px;top:8px;background:none;border:0;color:var(--mut);font-size:18px;cursor:pointer;padding:4px}
-  #botCard .t{font-weight:800;font-size:17px;padding:0 18px}
-  #botCard .s{color:#AEB9C8;font-size:13.5px;line-height:1.45;margin-top:8px}
-  #botQr{margin:14px auto 4px;width:176px;height:176px;background:#fff;border-radius:12px;padding:8px}
-  #botQr svg{width:100%;height:100%;display:block}
-  #botCard .qh{color:var(--mut);font-size:12px}
-  #botCard .go{display:block;margin-top:14px;background:var(--primary);color:#fff;text-decoration:none;border-radius:12px;padding:12px;
-    font-weight:800;font-size:15px}
-  #botCard .go:hover{background:#3B7FE6}
-  #botCard .cp{margin-top:8px;background:none;border:0;color:#8DBBFF;font:inherit;font-weight:700;font-size:13px;cursor:pointer;padding:6px}
+  #botCard .t{font-weight:800;font-size:17px;padding-right:28px}
+  #botCard .s{color:#AEB9C8;font-size:13.5px;line-height:1.45;margin-top:6px;max-width:60ch}
+  #tgList{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:14px}
+  .tgi{display:flex;flex-direction:column;align-items:center;gap:6px;background:#161D27;border:1px solid #222A35;border-radius:14px;padding:12px 10px;text-align:center;min-width:0}
+  .tgi.main{border-color:rgba(76,147,255,.55)}
+  .tgi .qr{width:132px;height:132px;background:#fff;border-radius:10px;padding:6px}
+  .tgi .qr svg{width:100%;height:100%;display:block}
+  .tgi .nm{font-weight:800;font-size:14px}
+  .tgi .h{color:var(--mut);font-size:12px;overflow-wrap:anywhere}
+  .tgi .go{display:block;width:100%;background:var(--primary);color:#fff;text-decoration:none;border-radius:10px;padding:8px;font-weight:800;font-size:13.5px}
+  .tgi:not(.main) .go{background:#22303F}
+  .tgi .go:hover{filter:brightness(1.15)}
+  .tgi .cp{background:none;border:0;color:#8DBBFF;font:inherit;font-weight:700;font-size:12px;cursor:pointer;padding:2px}
+  #botCard .qh{color:var(--mut);font-size:12px;margin-top:10px}
   .tg #botBtn{display:none}
-  @media(max-width:600px){ #botBtn{right:10px;top:58px;padding:8px 12px;font-size:13px} #botQr,#botCard .qh{display:none} }
+  @media(max-width:600px){ #botBtn{right:10px;top:58px;padding:8px 12px;font-size:13px}
+    #tgList{grid-template-columns:1fr;gap:8px} .tgi{flex-direction:row;flex-wrap:wrap;text-align:left;padding:10px 12px}
+    .tgi .qr,#botCard .qh{display:none} .tgi .tx{flex:1;min-width:0} .tgi .go{width:auto;padding:8px 14px} .tgi .cp{display:none} }
 </style>
 </head>
 <body>
@@ -119,13 +126,12 @@
 <div id="hud"><b>WarAlarm · Карта тривог</b><div id="sub">завантаження…</div><div id="stars" hidden></div></div>
 <div id="upd"></div>
 <button id="botBtn" hidden>🔔 Тривоги в Telegram</button>
-<div id="botCard" hidden><div class="bc">
+<div id="botCard" hidden><div class="bc" role="dialog" aria-labelledby="botT">
   <button class="x" aria-label="Закрити">✕</button>
-  <div class="t">🔔 Тривоги для твого міста — у Telegram</div>
-  <div class="s">Бот WarAlarm напише, щойно щось летить саме до тебе: шахеди, ракети, балістика. ⭐ Наскільки небезпечно надворі, укриття поруч, жива карта. Безкоштовно.</div>
-  <div id="botQr"></div><div class="qh">Наведи камеру телефона на код</div>
-  <a id="botGo" class="go" target="_blank" rel="noopener">Відкрити бота</a>
-  <button id="botCopy" class="cp">Скопіювати посилання</button>
+  <div class="t" id="botT">🔔 WarAlarm у Telegram</div>
+  <div class="s">Бот пише, щойно щось летить саме до твого міста чи району: шахеди, ракети, балістика, і показує, наскільки небезпечно надворі. Канали — коротко про тривоги й цілі для всієї України та міст.</div>
+  <div id="tgList"></div>
+  <div class="qh">QR — наведи камеру телефона.</div>
 </div></div>
 <div id="err"></div>
 <div id="legend">
@@ -842,7 +848,7 @@ function demo(){
 const isDemo = location.search.indexOf('demo') >= 0;
 // Свіжа версія сторінки: Telegram (міні-застосунок) і браузери довго тримають стару в кеші. Якщо на сервері
 // новіша — один раз перезавантажуємось на неї з ?v=… (нова адреса — повз кеш). При змінах сторінки міняй SITE_VER.
-const SITE_VER = '2026-11-25.1';
+const SITE_VER = '2026-11-25.2';
 (async () => {
   try{
     const t = await fetch(location.pathname + '?ver=' + Date.now(), { cache:'no-store' }).then(r => r.text());
@@ -880,36 +886,49 @@ if(/tgWebApp/.test(location.hash) || window.TelegramWebviewProxy){
 // Дані: живий потік Firebase (повний стан один раз, далі — лише змінені поля), а не
 // весь стан (~70 КБ) кожні 7 с з кожного відкритого браузера — це був платний трафік.
 // Схована вкладка закриває потік; якщо потік не працює — запасне опитування раз на 30 с.
-// 🔔 Посилання на бота: ім'я — зі стану (state.bot, Reader бере його з Telegram), мітки site / site_qr —
-// бот рахує, скільки людей прийшло з сайту.
-let botName = '';
-const botUrl = tag => 'https://t.me/' + botName + '?start=' + tag;
+// 🔔 Бот і канали в Telegram: імена — зі стану (state.bot, state.channels — Reader бере з Telegram і налаштувань).
+// Посилання на бота з міткою (site / site_qr) — бот рахує, скільки людей прийшло з сайту.
+const TG_NAME = /^[A-Za-z][A-Za-z0-9_]{4,39}$/;
+let tgKey = '', tgItems = [];
 function botLink(){
-  const b = latest && typeof latest.bot === 'string' && /^[A-Za-z0-9_]{5,40}$/.test(latest.bot) ? latest.bot : '';
-  if(b === botName) return;
-  botName = b;
-  document.getElementById('botBtn').hidden = !b;
+  const items = [];
+  if(latest && typeof latest.bot === 'string' && TG_NAME.test(latest.bot))
+    items.push({ main:true, nm:'🤖 Бот WarAlarm', h:latest.bot, url:'https://t.me/'+latest.bot+'?start=site', qr:'https://t.me/'+latest.bot+'?start=site_qr', go:'Відкрити бота' });
+  for(const c of (latest && Array.isArray(latest.channels) ? latest.channels : []))
+    if(c && typeof c.h === 'string' && TG_NAME.test(c.h))
+      items.push({ nm:'📢 '+(c.t ? 'Канал · '+c.t : 'Канал'), h:c.h, url:'https://t.me/'+c.h, qr:'https://t.me/'+c.h, go:'Відкрити канал' });
+  const key = items.map(i => i.url).join('|');
+  if(key === tgKey) return;
+  tgKey = key; tgItems = items;
+  document.getElementById('botBtn').hidden = !items.length;
 }
+function esc(t){ return String(t).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
 function openBot(){
-  if(!botName) return;
-  document.getElementById('botGo').href = botUrl('site');
-  document.getElementById('botCopy').textContent = 'Скопіювати посилання';
+  if(!tgItems.length) return;
+  const list = document.getElementById('tgList');
+  list.innerHTML = tgItems.map((it, i) =>
+    '<div class="tgi'+(it.main?' main':'')+'"><div class="qr" data-i="'+i+'"></div><div class="tx"><div class="nm">'+esc(it.nm)+'</div><div class="h">@'+esc(it.h)+'</div></div>'
+    + '<a class="go" target="_blank" rel="noopener" href="'+esc(it.url)+'">'+esc(it.go)+'</a><button class="cp" data-i="'+i+'">Копіювати посилання</button></div>').join('');
   document.getElementById('botCard').hidden = false;
-  const box = document.getElementById('botQr');
-  const render = () => { try{ const q = qrcode(0, 'M'); q.addData(botUrl('site_qr')); q.make(); box.innerHTML = q.createSvgTag(4, 0); }catch(e){ box.hidden = true; } };
+  const render = () => list.querySelectorAll('.qr').forEach(box => {
+    try{ const q = qrcode(0, 'M'); q.addData(tgItems[+box.dataset.i].qr); q.make(); box.innerHTML = q.createSvgTag(4, 0); }
+    catch(e){ box.hidden = true; }
+  });
   if(window.qrcode) render();
-  else { const sc = document.createElement('script'); sc.src = 'qrcode.js'; sc.onload = render; sc.onerror = () => { box.hidden = true; }; document.head.appendChild(sc); }
+  else { const sc = document.createElement('script'); sc.src = 'qrcode.js'; sc.onload = render;
+    sc.onerror = () => list.querySelectorAll('.qr').forEach(b => b.hidden = true); document.head.appendChild(sc); }
 }
 function closeBot(){ document.getElementById('botCard').hidden = true; }
 document.getElementById('botBtn').onclick = openBot;
 document.querySelector('#botCard .x').onclick = closeBot;
-document.getElementById('botCard').onclick = e => { if(e.target.id === 'botCard') closeBot(); };
-addEventListener('keydown', e => { if(e.key === 'Escape') closeBot(); });
-document.getElementById('botCopy').onclick = async () => {
-  const b = document.getElementById('botCopy');
-  try{ await navigator.clipboard.writeText(botUrl('site')); b.textContent = 'Скопійовано ✓'; }
-  catch(e){ b.textContent = botUrl('site'); }
+document.getElementById('botCard').onclick = async e => {
+  if(e.target.id === 'botCard'){ closeBot(); return; }
+  const b = e.target.closest('.cp'); if(!b) return;
+  const url = tgItems[+b.dataset.i].url;
+  try{ await navigator.clipboard.writeText(url); b.textContent = 'Скопійовано ✓'; }
+  catch(err){ b.textContent = url; }
 };
+addEventListener('keydown', e => { if(e.key === 'Escape') closeBot(); });
 function stamp(){
   botLink();
   document.getElementById('err').textContent = '';
