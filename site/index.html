@@ -842,7 +842,7 @@ function demo(){
 const isDemo = location.search.indexOf('demo') >= 0;
 // Свіжа версія сторінки: Telegram (міні-застосунок) і браузери довго тримають стару в кеші. Якщо на сервері
 // новіша — один раз перезавантажуємось на неї з ?v=… (нова адреса — повз кеш). При змінах сторінки міняй SITE_VER.
-const SITE_VER = '2026-11-15.2';
+const SITE_VER = '2026-11-25.1';
 (async () => {
   try{
     const t = await fetch(location.pathname + '?ver=' + Date.now(), { cache:'no-store' }).then(r => r.text());
