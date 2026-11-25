@@ -79,9 +79,18 @@ jobs:
       - name: Publish release apk-latest
         env:
           GH_TOKEN: ${{ github.token }}
+        # Не «видалити й створити»: 25.11 GitHub двічі віддав 500/503 на видалення релізу, і новий APK
+        # не вийшов. Тепер — новий файл поверх старого (посилання те саме), тег переносимо на цей коміт.
         run: |
-          gh release delete apk-latest --yes --cleanup-tag || true
-          gh release create apk-latest WarAlarm.apk \
-            --target "$GITHUB_SHA" --prerelease \
-            --title "Android APK ($GITHUB_REF_NAME @ ${GITHUB_SHA::7})" \
-            --notes "Завантажити: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/WarAlarm.apk  ·  Підпис: постійний ключ WarAlarm (ставиться поверх попередньої версії)"
+          TITLE="Android APK ($GITHUB_REF_NAME @ ${GITHUB_SHA::7})"
+          NOTES="Завантажити: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/WarAlarm.apk  ·  Підпис: постійний ключ WarAlarm (ставиться поверх попередньої версії)"
+          git tag -f apk-latest "$GITHUB_SHA" && git push -f origin refs/tags/apk-latest
+          for i in 1 2 3 4; do
+            if gh release view apk-latest >/dev/null 2>&1; then
+              gh release upload apk-latest WarAlarm.apk --clobber && gh release edit apk-latest --title "$TITLE" --notes "$NOTES" --prerelease && exit 0
+            else
+              gh release create apk-latest WarAlarm.apk --target "$GITHUB_SHA" --prerelease --title "$TITLE" --notes "$NOTES" && exit 0
+            fi
+            sleep $((10 * i))
+          done
+          exit 1
