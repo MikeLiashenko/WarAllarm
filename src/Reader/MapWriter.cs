@@ -99,6 +99,8 @@ public static class MapWriter
         var sb = new StringBuilder();
         sb.Append("{\"ts\":").Append(((DateTimeOffset)now.ToUniversalTime()).ToUnixTimeMilliseconds());
         sb.Append(",\"homeName\":\"").Append(Esc(homeName)).Append('"');
+        // Ім'я бота — сайт показує кнопку «🔔 Тривоги в Telegram» з QR (посилання з міткою site).
+        if (TelegramBot.Username is { } bot) sb.Append(",\"bot\":\"").Append(Esc(bot)).Append('"');
         sb.Append(",\"home\":{\"lat\":").Append(N(home.lat)).Append(",\"lon\":").Append(N(home.lon)).Append('}');
         sb.Append(",\"threats\":[");
         for (int i = 0; i < merged.Count; i++)
