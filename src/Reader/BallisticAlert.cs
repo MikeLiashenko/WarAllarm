@@ -58,6 +58,14 @@ public static class BallisticAlert
     // «уважно найближчу годину-дві до загрози балістики», «Починаючи з 01:30 підвищена загроза» — прогноз, не сигнал.
     static readonly Regex NotLive = new(@"оцінка|за добу|минулої ночі|цієї ночі|вночі|ймовірність застосування|запас|закликаєм|рекоменду|не перебувати"
         + @"|найближч\w*\s+(?:годин|час)|годину-дві|починаючи\s+з", O);
+    /// Прогноз / планування / запаси, а не пуск зараз (24.11: «Попередження про застосування ворогом
+    /// балістичного озброєння протягом 48 годин… Увага таким районам», «Підвищена на балістику протягом
+    /// ночі» вмикали «☄ Загроза балістики» по Київщині; «До 20 балістичних ракет в Брянську», «ворог вже
+    /// підготувався до чергової атаки» — «☄ БАЛІСТИКА ЛЕТИТЬ» для каналів півдня).
+    public static readonly Regex Forecast = new(@"протягом\s+(?:\d+\s+)?(?:ночі|ноч|годин|доби|діб|дня|днів|тижн)"
+        + @"|найближч\w*\s+(?:\w+\s+)?(?:ноч|дн|доб|тижн)|на\s+(?:цю|найближчу)\s+ніч|сьогодні\s+вночі|до\s+ранку"
+        + @"|увага\s+таким|ворог\s+планує|планує\s+(?:завдати|удар)|готу[єю]т?ься|підготува\w*|готові\s+до|в\s+наявності"
+        + @"|(?:^|\n)\s*до\s+\d+\s+(?:\p{L}+\s+)?(?:балістичн|ракет)", O);
 
     public static Kind Classify(string text)
     {
@@ -66,7 +74,7 @@ public static class BallisticAlert
         if (PpoOfBallistic.IsMatch(text) && text.Length <= 220 && !text.Contains('?')) return Kind.EnemyPpo;
         if (ThreatTracker.BallisticClearNow(text) || ClearMore.IsMatch(text)) return Kind.Clear;
         if (ThreatTracker.BallisticClear.IsMatch(text)) return Kind.None; // «буде відбій, якщо…» — ще ні те, ні те
-        return text.Length <= 400 && Slang.BallisticThreat(text) && !NotLive.IsMatch(text) ? Kind.Threat : Kind.None;
+        return text.Length <= 400 && Slang.BallisticThreat(text) && !NotLive.IsMatch(text) && !Forecast.IsMatch(text) ? Kind.Threat : Kind.None;
     }
 
     /// Район пуску з поста («з Таганрогу», «з району Брянської області»).

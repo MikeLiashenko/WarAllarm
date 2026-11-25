@@ -720,6 +720,7 @@ public sealed class SourceHub
     static bool IsBallisticText(string clean) =>
         (Ballistic.IsMatch(clean) || WeaponCatalog.Match(clean)?.Kind == ThreatKind.Ballistic)
         && !NotBallistic.IsMatch(clean) && clean.Length < 160 && !ThreatTracker.BallisticClear.IsMatch(clean)
+        && !BallisticAlert.Forecast.IsMatch(clean) // «До 20 балістичних ракет в Брянську», «ворог підготувався»
         && !Regex.IsMatch(clean, @"відбій|отбой|оцінка|чисто|ніч|ночі|за добу|випустил|застосувал|атакувал|фото|відео|вирв|після|наслідк|влуч|прил[іе]т|удар\w* по", RegexOptions.IgnoreCase);
 
     // Де і яку ціль канал називав востаннє: до неї стосуються «мінус» і «кружляє» без місця.
