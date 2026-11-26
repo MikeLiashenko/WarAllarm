@@ -211,13 +211,17 @@ public static class EveningOutlook
         var sents = Regex.Split(text.Replace("\r", ""), @"(?<=[.!?])\s+|\n+")
             .Select(x => Regex.Replace(x, @"[^\p{L}\p{N}\s.,:;%«»""'’ʼ()/+–—-]", "").Trim(' ', '*', '-', '•'))
             .Where(x => x.Length > 3 && VoiceTopic.IsMatch(x) && !Regex.IsMatch(x, @"добраніч|доброї ночі|тихої|бережіть", O)
-                        && !Regex.IsMatch(x, @"^\W*(?:було|прилет|вибух|збито|по факту)", O)) // «Було 8 балістичних ракет» — підсумок, не прогноз
+                        && !Regex.IsMatch(x, @"^\W*(?:було|прилет|вибух|збито|по факту)", O) // «Було 8 балістичних ракет» — підсумок, не прогноз
+                        // «орієнтуйтесь на інші джерела… реагуйте на офіційні тривоги» — порада, не прогноз (26.11, Чернігів).
+                        && !(Regex.IsMatch(x, @"орієнтуйт|інші джерела|реагуйте|не ігноруйте|звертайте увагу", O)
+                             && !Regex.IsMatch(x, @"пуск|баліст|ракет|бпла|шахед|удар|атак", O)))
             .ToList();
         if (sents.Count == 0) return false;
         // Заява на всю країну (Зеленський, Повітряні сили, ГУР) — «Україна», а не регіон каналу, що її переслав.
         var own = Area(ch, oblasts);
         bool national = Regex.IsMatch(text, @"зеленськ|президент|повітрян\w* сил|сирськ|буданов|(?<!\p{L})гур(?!\p{L})|генштаб", O);
-        string? who = Regex.Match(text, @"[—–-]\s*(Зеленський|Буданов|Сирський|Ігнат)", O) is { Success: true } wm ? wm.Groups[1].Value : null;
+        string? who = Regex.Match(text, @"[—–-]\s*(Зеленський|Буданов|Сирський|Ігнат)", O) is { Success: true } wm ? wm.Groups[1].Value
+            : Regex.IsMatch(text, @"зеленськ|президент", O) ? "Зеленський" : null;
         // «Для Києва існує загроза…» від західного монітора — це про Київ, а не про його зону (26.11).
         var byArea = new Dictionary<string, List<string>>();
         foreach (var x in sents)
@@ -240,7 +244,8 @@ public static class EveningOutlook
             foreach (var (area, xs) in byArea)
             {
                 var all = string.Join(" ", xs);
-                var sum = (who is not null && area == "Україна" ? who + ": " : "") + string.Join(" ", xs.Take(2));
+                var body = Regex.Replace(string.Join(" ", xs.Take(2)), @"[,.]?\s*[—–-]\s*(?:Зеленськ|Буданов|Сирськ|Ігнат)\p{L}*\.?\s*$", ".", O);
+                var sum = (who is not null && area == "Україна" ? who + ": " : "") + body;
                 if (sum.Length > 170) sum = sum[..167].TrimEnd(' ', ',', '.') + "…";
                 // Перше речення — вердикт монітора: «Не вбачаю суттєвих загроз…» далі про спорядження бортів — усе одно спокійно.
                 int lv = Regex.IsMatch(xs[0], @"не вбачаю|не очікуємо|спокійн", O) && !High.IsMatch(xs[0]) ? 0 : LevelOf(all);
@@ -308,7 +313,10 @@ public static class EveningOutlook
             foreach (var v in Voices.Values.OrderByDescending(v => v.At))
             {
                 var w = Words(v.Text);
-                if (uniq.Any(u => u.Area == v.Area && Words(u.Text) is var uw && uw.Intersect(w).Count() >= 0.6 * Math.Max(1, Math.Min(uw.Count, w.Count)))) continue;
+                // Ту саму заяву (Зеленський) різні канали переказують по-своєму — теж один рядок.
+                string? Who(Voice x) => Regex.Match(x.Text, @"^(Зеленський|Буданов|Сирський|Ігнат):") is { Success: true } m ? m.Groups[1].Value : null;
+                if (uniq.Any(u => u.Area == v.Area && (Who(u) is { } a && a == Who(v)
+                        || Words(u.Text) is var uw && uw.Intersect(w).Count() >= 0.6 * Math.Max(1, Math.Min(uw.Count, w.Count))))) continue;
                 uniq.Add(v);
             }
             var vs = uniq
