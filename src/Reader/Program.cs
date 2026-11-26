@@ -2723,8 +2723,16 @@ async Task OnUpdate(Update update)
     // з різних каналів: саме так він підтверджує ціль. Дедуп для нього не робимо.
     var hubSrc = SourceCatalog.Get(uname);
 
+    // Лише перевірені джерела: каталог моніторів, місцеві монітори Києва/Харкова, канали з налаштувань
+    // (ua/private/launch). Акаунт Reader підписаний на сотні каналів і груп — новини, погодні чати,
+    // сімейні групи; «Загроза балістики з Брянська» там (переслане, жарт, вчорашнє) піднімало тривогу
+    // для всіх (26.11 00:22 і 14:19 — у жодному каналі моніторингу балістики тоді не було).
+    bool trustedSrc = hubSrc is not null || isUaPrivate || IsLaunchTitle(title)
+        || uname != null && (khChannels.Contains(uname) || kyChannels.Contains(uname) || uaChannels.Contains(uname) || launchChannels.Contains(uname));
+    if (!trustedSrc && BallisticAlert.Classify(m.message) != BallisticAlert.Kind.None)
+        Ui.Line(ConsoleColor.DarkGray, $"·  [{time}] {src} — про балістику, але не канал моніторингу: пропускаю");
     // ✈ Тактична авіація / загроза КАБ → зона над областю (не з нашого ж новинного каналу).
-    if (!string.Equals(uname, channelName?.TrimStart('@'), StringComparison.OrdinalIgnoreCase))
+    if (trustedSrc && !string.Equals(uname, channelName?.TrimStart('@'), StringComparison.OrdinalIgnoreCase))
     {
         var avFallback = hubSrc is { Tier: not SourceTier.Aggregator } hs ? hs.Oblasts
             : uname != null && khChannels.Contains(uname) ? new[] { "Харківська" }
