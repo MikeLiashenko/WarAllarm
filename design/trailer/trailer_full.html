@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8">
+<style>
+  @font-face{font-family:R;font-weight:400;src:url('file:///home/user/WarAllarm/src/Reader/assets/Roboto-Regular.ttf')}
+  @font-face{font-family:R;font-weight:500;src:url('file:///home/user/WarAllarm/src/Reader/assets/Roboto-Medium.ttf')}
+  @font-face{font-family:R;font-weight:700;src:url('file:///home/user/WarAllarm/src/Reader/assets/Roboto-Bold.ttf')}
+  @font-face{font-family:R;font-weight:900;src:url('file:///home/user/WarAllarm/src/Reader/assets/Roboto-Black.ttf')}
+  :root{--bg:#07090D;--ink:#ECF0F5;--mut:#9AA5B4;--blue:#4C93FF;--yel:#FFD400;--red:#FF4D4D;--green:#3DDC84;--card:#11161D;--line:#232C38;--kab:#B57BFF}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:960px;height:540px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:R,"Noto Color Emoji",sans-serif}
+  .sc{position:absolute;inset:0;opacity:0}
+  .abs{position:absolute;left:0;right:0}
+  .c{text-align:center}
+  .k{font-weight:900;letter-spacing:-.5px}
+  .y{color:var(--yel)} .r{color:var(--red)} .b{color:var(--blue)} .m{color:var(--mut)}
+  #mapwrap{position:absolute;inset:0;overflow:hidden}
+  #map{position:absolute;width:960px;height:540px;transform-origin:0 0}
+  #shade{position:absolute;inset:0}
+  .col{position:absolute;left:64px;width:380px}
+  .eyebrow{font-size:12px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--blue)}
+  .cap{font-weight:900;font-size:38px;line-height:1.1;letter-spacing:-.6px;margin-top:12px}
+  .sub{font-size:16px;line-height:1.45;color:#C4CCD7;font-weight:500;margin-top:16px;max-width:370px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .chips span{background:rgba(17,22,29,.92);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:14px;font-weight:700}
+  .bubble{position:absolute;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 18px;box-shadow:0 18px 50px rgba(0,0,0,.55)}
+  .bubble .h{font-weight:900;font-size:18px}
+  .bubble .l{font-size:15px;margin-top:6px;color:#D7DEE7;line-height:1.35}
+  .btns{display:flex;gap:8px;margin-top:12px}
+  .btns div{flex:1;background:#1B2430;border-radius:10px;padding:8px 6px;text-align:center;font-weight:700;font-size:13px;color:#BFD6FF}
+  .tile{position:absolute;height:70px;background:var(--card);border:1px solid var(--line);border-radius:16px;display:flex;align-items:center;gap:14px;padding:0 18px}
+  .tile .i{font-size:28px;width:36px;text-align:center}
+  .tile .t{font-weight:900;font-size:18px}
+  .tile .s{font-size:13px;color:var(--mut);margin-top:2px}
+  .R{left:500px;width:400px}
+  .notif{position:absolute;left:510px;width:390px;background:rgba(28,33,42,.96);border:1px solid #2C3644;border-radius:16px;padding:12px 16px;display:flex;gap:12px;align-items:center}
+  .notif .ic{width:38px;height:38px;border-radius:10px;flex:none;background:url(icon.png) center/cover}
+  .notif .a{font-size:12px;color:var(--mut)} .notif .bb{font-weight:800;font-size:15px;margin-top:2px} .notif .d{font-size:13px;color:#C4CCD7;margin-top:2px}
+  #date{font-weight:900;font-size:124px;letter-spacing:-3px;line-height:1}
+  #date span{display:inline-block}
+  .flag{height:6px;width:200px;margin:0 auto;border-radius:3px;background:linear-gradient(90deg,#1F6FE5 50%,#FFD400 50%)}
+  .stage{position:absolute;top:250px;width:92px;text-align:center;font-size:13px;font-weight:700;color:#5B6676}
+  .stage .dot{width:16px;height:16px;border-radius:50%;margin:0 auto 10px;background:#232C38;border:2px solid #39465A}
+  .bar{position:absolute;bottom:150px;width:30px;border-radius:6px 6px 0 0;background:linear-gradient(180deg,#FF6B6B,#B8323A)}
+  .bl{position:absolute;bottom:128px;width:30px;text-align:center;font-size:12px;color:var(--mut)}
+  #mont{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  #montI{font-size:70px;line-height:1} #montW{font-weight:900;font-size:58px;letter-spacing:-1px;margin-top:14px}
+  #montN{position:absolute;bottom:40px;left:0;right:0;text-align:center;font-size:13px;letter-spacing:4px;color:#566273;font-weight:700}
+</style></head><body>
+
+<!-- карта: S2, F8 (тривоги), F6 (прогноз) -->
+<div class="sc" id="sm"><div id="mapwrap"><img id="map"></div><div id="shade"></div></div>
+
+<!-- 0–16 б · ніч -->
+<section class="sc" data-a="0" data-b="16" id="s1">
+  <div id="pulse" style="position:absolute;left:50%;top:120px;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:var(--red)"></div>
+  <div class="abs c k" data-at=".3" style="top:160px;font-size:110px;letter-spacing:3px">02:14</div>
+  <div class="abs c k r" data-at="1.2" style="top:300px;font-size:40px">Повітряна тривога</div>
+  <div class="abs c" data-at="2.2" style="top:356px;font-size:22px;color:var(--mut);font-weight:500">на всю область. Знову.</div>
+  <div class="abs c" data-at="3.6" data-fx="fade" style="top:420px;font-size:16px;color:#6F7A89;font-weight:700;letter-spacing:4px">ШАХЕДИ · РАКЕТИ · БАЛІСТИКА · КАБ</div>
+</section>
+
+<!-- 16–32 б · питання (над картою) -->
+<section class="sc" data-a="16" data-b="32" id="s2">
+  <div class="abs c k" data-at=".3" style="top:44px;font-size:44px">Але що летить <span class="y">саме до тебе?</span></div>
+</section>
+
+<!-- 32–48 б · логотип -->
+<section class="sc" data-a="32" data-b="48" id="s3">
+  <div id="glow" style="position:absolute;left:50%;top:40px;width:380px;height:380px;margin-left:-190px;border-radius:50%;background:radial-gradient(circle,rgba(76,147,255,.35),rgba(76,147,255,0) 65%)"></div>
+  <img id="logo" src="icon.png" style="position:absolute;left:50%;top:90px;width:180px;height:180px;margin-left:-90px">
+  <div class="abs c k" data-at=".6" style="top:300px;font-size:66px">WarAlarm</div>
+  <div class="abs c" data-at="1.3" style="top:384px;font-size:24px;color:#C4CCD7;font-weight:500">тривога для <b class="y">твого</b> району</div>
+</section>
+
+<!-- 48–60 · F1 жива карта (справжній знімок) -->
+<section class="sc" data-a="48" data-b="60" id="f1">
+  <div id="shotwrap" data-at=".3" style="position:absolute;left:436px;top:118px;width:496px;height:279px;border-radius:14px;overflow:hidden;border:1px solid #2C3644;box-shadow:0 24px 70px rgba(0,0,0,.6),0 0 0 6px rgba(76,147,255,.08)"><img id="shot" style="width:100%;height:100%;display:block;transform-origin:65% 60%"></div>
+  <div data-at="1.2" data-fx="fade" style="position:absolute;left:436px;width:496px;top:412px;text-align:center;font-size:13px;color:var(--mut)">Жива карта WarAlarm — справжній знімок, 26.11, 16:46</div>
+  <div class="col" style="top:120px"><div class="eyebrow">01 · Жива карта</div><div class="cap">Усі цілі —<br>на одній карті</div>
+    <div class="sub">80+ каналів моніторингу — зведені, перевірені двома джерелами й показані щосекунди.</div>
+    <div class="chips"><span data-at="1.0">🛵 шахеди</span><span data-at="1.15">🚀 ракети</span><span data-at="1.3">☄️ балістика</span><span data-at="1.45">💣 КАБ</span><span data-at="1.6">🪖 FPV</span><span data-at="1.75">✈️ авіація</span></div></div>
+</section>
+
+<!-- 60–72 · F2 радіус -->
+<section class="sc" data-a="60" data-b="72" id="f2">
+  <div class="col" style="top:84px"><div class="eyebrow">02 · Твій радіус</div><div class="cap">Тривога — лише коли ціль <span class="y">біля тебе</span></div>
+    <div class="sub">Радіус обираєш сам: від 5 до 100 км. Ціль далеко — телефон мовчить.</div></div>
+  <svg width="960" height="540" style="position:absolute;inset:0">
+    <circle cx="690" cy="280" r="215" fill="none" stroke="#1B2430"/><circle cx="690" cy="280" r="120" fill="none" stroke="#1B2430"/>
+    <circle id="ring" cx="690" cy="280" r="160" fill="rgba(76,147,255,.06)" stroke="#4C93FF" stroke-width="2.5" stroke-dasharray="7 6"/>
+    <text id="ringT" x="690" y="108" text-anchor="middle" font-size="15" font-weight="800" fill="#4C93FF">25 км</text>
+    <circle cx="690" cy="280" r="7" fill="#FFD400"/><text x="690" y="310" text-anchor="middle" font-size="15" font-weight="800" fill="#ECF0F5">🏠 Теремки</text>
+    <g id="tgt"><circle r="16" fill="rgba(255,154,61,.18)"/><text y="7" text-anchor="middle" font-size="22">🛵</text></g>
+  </svg>
+  <div class="bubble" id="f2b" style="left:64px;top:330px;width:380px">
+    <div class="h">🔴 ТРИВОГА поруч — Теремки</div><div class="l">🛵 Шахед за <b>12 км</b> · підліт ~4 хв</div>
+    <div class="l" style="color:#fff"><b>➤ В укриття!</b> Подалі від вікон.</div><div class="btns"><div>🛰 Що летить</div><div>🏠 Укриття</div></div></div>
+</section>
+
+<!-- 72–84 · F3 зірки -->
+<section class="sc" data-a="72" data-b="84" id="f3">
+  <div class="col" style="top:130px"><div class="eyebrow">03 · Небезпека надворі</div><div class="cap">Можна гуляти —<br>чи вже в укриття?</div>
+    <div class="sub">Від 0 до 5 зірок: що летить, як близько й як швидко — в одній оцінці. І порада, що робити.</div></div>
+  <div id="stars" style="position:absolute;left:500px;width:400px;top:170px;text-align:center;font-size:66px;letter-spacing:6px;color:var(--yel)"></div>
+  <div id="starsT" class="k" style="position:absolute;left:500px;width:400px;top:270px;text-align:center;font-size:28px"></div>
+  <div id="starsA" style="position:absolute;left:520px;width:360px;top:320px;text-align:center;font-size:15px;color:#C4CCD7"></div>
+</section>
+
+<!-- 84–96 · F4 стадії підльоту -->
+<section class="sc" data-a="84" data-b="96" id="f4">
+  <div class="col" style="top:84px"><div class="eyebrow">04 · Стадії підльоту</div><div class="cap">Від «летить» —<br>до «пролетіла»</div>
+    <div class="sub">Відстань і час підльоту до тебе. Кожна стадія — свій звук: від тихого «пік» до гучної сирени.</div></div>
+  <div style="position:absolute;left:500px;width:400px;top:258px;height:3px;background:#232C38;border-radius:2px"><div id="stbar" style="height:3px;width:0;background:linear-gradient(90deg,#FFD400,#FF4D4D);border-radius:2px"></div></div>
+  <div class="stage" style="left:454px" id="st0"><div class="dot"></div>наближається</div>
+  <div class="stage" style="left:556px" id="st1"><div class="dot"></div>на підльоті</div>
+  <div class="stage" style="left:658px" id="st2"><div class="dot"></div>над районом</div>
+  <div class="stage" style="left:760px" id="st3"><div class="dot"></div>пролетіла</div>
+  <div id="stIcon" style="position:absolute;top:226px;font-size:30px">🛵</div>
+  <div id="stKm" class="k" style="position:absolute;left:500px;width:400px;top:140px;text-align:center;font-size:54px"></div>
+  <div id="stEta" style="position:absolute;left:500px;width:400px;top:330px;text-align:center;font-size:17px;font-weight:700;color:#C4CCD7"></div>
+</section>
+
+<!-- 96–108 · F5 балістика -->
+<section class="sc" data-a="96" data-b="108" id="f5">
+  <div class="col" style="top:130px"><div class="eyebrow">05 · Балістика</div><div class="cap">Попередження —<br>за секунди</div>
+    <div class="sub">Лише для областей, куди ракета долітає. І чесний відбій, щойно загрози вже нема.</div></div>
+  <div class="bubble R" data-at=".3" style="top:110px;border-color:rgba(255,77,77,.55)"><div class="h">☄️ ЗАГРОЗА БАЛІСТИКИ</div><div class="l">🚀 Район пуску: <b>Брянськ</b> → Київщина, Чернігівщина, Сумщина</div><div class="l">Будь ближче до укриття — ракета летить лічені хвилини.</div></div>
+  <div class="bubble R" data-at="2.6" style="top:300px"><div class="h">🛡 Працює вороже ППО</div><div class="l">Загрозу знято — це не пуски по нас.</div></div>
+</section>
+
+<!-- 108–112 · пауза -->
+<section class="sc" data-a="108" data-b="112" id="br1">
+  <div class="abs c k" data-at=".05" data-fx="pop" style="top:220px;font-size:52px">І це ще <span class="y">не все</span>.</div>
+</section>
+
+<!-- 112–124 · F6 прогноз пусків (карта) -->
+<section class="sc" data-a="112" data-b="124" id="f6">
+  <div class="col" style="top:110px"><div class="eyebrow">06 · Прогноз пусків</div><div class="cap">Знаємо про пуски<br>ще до кордону</div>
+    <div class="sub">«Пуск 20 шахедів з Приморсько-Ахтарська» — і група вже на карті, типовим маршрутом. Там, де тривоги немає, вона зупиняється.</div></div>
+</section>
+
+<!-- 124–136 · F7 коли тривога тут -->
+<section class="sc" data-a="124" data-b="136" id="f7">
+  <div class="col" style="top:130px"><div class="eyebrow">07 · Наперед</div><div class="cap">Коли тривога<br>буде <span class="y">в тебе</span></div>
+    <div class="sub">Шахеди летять знайомими коридорами — WarAlarm рахує, коли вони дійдуть до твого міста.</div></div>
+  <div class="tile R" data-at=".3" style="top:120px;height:84px"><div class="i">⏰</div><div><div class="t">Тривога тут орієнтовно о 02:31</div><div class="s">~17 хв · пуск з Курська ×10 (прогноз)</div></div></div>
+  <div class="tile R" data-at="1.2" style="top:224px;height:84px"><div class="i">🛸</div><div><div class="t">У повітрі зараз: <span id="air">0</span></div><div class="s">за оцінкою моніторів, по областях</div></div></div>
+  <div class="tile R" data-at="2.1" style="top:328px;height:84px"><div class="i">🔮</div><div><div class="t">Що чекати цієї ночі</div><div class="s">вечірня оцінка загроз від моніторів</div></div></div>
+</section>
+
+<!-- 136–148 · F8 офіційні тривоги (карта) -->
+<section class="sc" data-a="136" data-b="148" id="f8">
+  <div class="col" style="top:120px"><div class="eyebrow">08 · Офіційні тривоги</div><div class="cap">Тривога —<br>до району</div>
+    <div class="sub">Офіційні тривоги по областях, районах і громадах — на карті, у боті й у застосунку. Відбій — теж.</div>
+    <div class="chips"><span data-at="1.0" style="color:#FF8A8A">🔴 тривога</span><span data-at="1.2" style="color:#FFE066">🟡 жовтий рівень</span><span data-at="1.4">📍 по районах</span></div></div>
+</section>
+
+<!-- 148–160 · F9 стежить за тобою -->
+<section class="sc" data-a="148" data-b="160" id="f9">
+  <div class="col" style="top:130px"><div class="eyebrow">09 · Завжди поруч</div><div class="cap">Тривоги там,<br>де ти <span class="y">зараз</span></div>
+    <div class="sub">Дорога, дача, інше місто: бот бере твою геопозицію наживо, застосунок стежить у фоні — навіть закритий.</div></div>
+  <div class="bubble R" data-at=".3" style="top:130px"><div class="h">🛰 Тепер стежу біля: Бровари</div><div class="l">Тривоги — для місця, де ти зараз. Зупиниш трансляцію — знову для твого міста.</div></div>
+  <div class="bubble R" data-at="1.6" style="top:300px"><div class="h">📍 Мої місця</div><div class="l">🏠 Дім · 🏫 Школа · 👵 Бабуся — тривога для кожного.</div></div>
+</section>
+
+<!-- 160–172 · F10 укриття -->
+<section class="sc" data-a="160" data-b="172" id="f10">
+  <div class="col" style="top:140px"><div class="eyebrow">10 · Укриття</div><div class="cap">Куди бігти —<br>одним дотиком</div>
+    <div class="sub">Найближчі укриття й станції метро — з відстанню і маршрутом.</div></div>
+  <div class="tile R" data-at=".3" style="top:110px"><div class="i">🚇</div><div><div class="t">Метро «Теремки» · 350 м</div><div class="s">4 хв пішки</div></div></div>
+  <div class="tile R" data-at=".8" style="top:200px"><div class="i">🏠</div><div><div class="t">Укриття, вул. Академіка Заболотного · 420 м</div><div class="s">цілодобово</div></div></div>
+  <div class="tile R" data-at="1.3" style="top:290px"><div class="i">🧱</div><div><div class="t">Правило двох стін</div><div class="s">якщо укриття далеко</div></div></div>
+</section>
+
+<!-- 172–184 · F11 стеження за ціллю -->
+<section class="sc" data-a="172" data-b="184" id="f11">
+  <div class="col" style="top:120px"><div class="eyebrow">11 · Стеження</div><div class="cap">Одна ціль —<br>під наглядом</div>
+    <div class="sub">Натисни 👁 — і бот веде ціль: де вона, як далеко, яка стадія. А ще — ціль у 3D над справжнім містом.</div></div>
+  <div class="bubble R" data-at=".3" style="top:120px"><div class="h">👁 Стежу за ціллю · оновлюється</div>
+    <div class="l">🛵 Реактивний шахед · <b id="trkKm">18 км</b> від тебе</div><div class="l">Стадія: <b id="trkSt">на підльоті</b> · курс на Київ</div>
+    <div class="btns"><div>🏙 Ціль у 3D над містом</div><div>⏹ Не стежити</div></div></div>
+</section>
+
+<!-- 184–196 · F12 КАБ і авіація -->
+<section class="sc" data-a="184" data-b="196" id="f12">
+  <div class="col" style="top:130px"><div class="eyebrow">12 · КАБ і авіація</div><div class="cap">Літаки — <span style="color:var(--kab)">ще до пуску</span></div>
+    <div class="sub">Тактична авіація й зони, куди долітають КАБи. Зліт МіГ-31К — загроза «Кинджалів». Сів — відбій.</div></div>
+  <div class="tile R" data-at=".3" style="top:110px"><div class="i">💣</div><div><div class="t">Загроза КАБ — Харківщина</div><div class="s">зона ~60 км від літака</div></div></div>
+  <div class="tile R" data-at=".9" style="top:200px"><div class="i">✈️</div><div><div class="t">Зліт МіГ-31К</div><div class="s">загроза «Кинджалів» по всій країні</div></div></div>
+  <div class="tile R" data-at="1.5" style="top:290px"><div class="i">🛬</div><div><div class="t">МіГ-31К сів</div><div class="s">загрози від нього вже нема</div></div></div>
+</section>
+
+<!-- 196–208 · F13 FPV, висота, прифронтові -->
+<section class="sc" data-a="196" data-b="208" id="f13">
+  <div class="col" style="top:120px"><div class="eyebrow">13 · Прифронтові міста</div><div class="cap">FPV, «Молнії»<br>і висота</div>
+    <div class="sub">Для Харкова, Запоріжжя, Херсона, Нікополя — навіть FPV і розвідувальні дрони. І на якій висоті летить ціль.</div></div>
+  <div class="tile R" data-at=".3" style="top:110px"><div class="i">🪖</div><div><div class="t">FPV на Питомник</div><div class="s">Харків · 2 хв тому</div></div></div>
+  <div class="tile R" data-at=".8" style="top:200px"><div class="i">⚡</div><div><div class="t">«Молнія» на Прудянку</div><div class="s">ударний дрон-крило</div></div></div>
+  <div class="tile R" data-at="1.3" style="top:290px"><div class="i">📏</div><div><div class="t">Висота 600 м</div><div class="s">низько — чути буде скоро</div></div></div>
+</section>
+
+<!-- 208–220 · F14 сповіщення -->
+<section class="sc" data-a="208" data-b="220" id="f14">
+  <div class="col" style="top:130px"><div class="eyebrow">14 · Сповіщення</div><div class="cap">Будить уночі.<br>Мовчить, коли тихо.</div>
+    <div class="sub">Гучна тривога на весь екран на Android, повідомлення в Telegram — і 🟢 відбій, лише коли поруч справді тихо.</div></div>
+  <div class="notif" data-at=".3" data-fx="down" style="top:100px"><div class="ic"></div><div><div class="a">WarAlarm · 02:14</div><div class="bb">🔴 ТРИВОГА поруч — Теремки</div><div class="d">Шахед за 12 км · ⭐ 4/5</div></div></div>
+  <div class="notif" data-at="1.5" data-fx="down" style="top:200px"><div class="ic"></div><div><div class="a">WarAlarm · 02:19</div><div class="bb">🛰 Ціль над районом</div><div class="d">Будь в укритті</div></div></div>
+  <div class="notif" data-at="2.7" data-fx="down" style="top:300px"><div class="ic"></div><div><div class="a">WarAlarm · 02:27</div><div class="bb">🟢 Відбій — Теремки</div><div class="d">Чи було чути вибух? 💥 Чув · 🤫 Тихо</div></div></div>
+</section>
+
+<!-- 220–236 · F15 канали й поділитися -->
+<section class="sc" data-a="220" data-b="236" id="f15">
+  <div class="col" style="top:120px"><div class="eyebrow">15 · Канали</div><div class="cap">Київ, Харків —<br>і вся Україна</div>
+    <div class="sub">Живі дошки цілей біля міста, тривоги й відбої, загроза балістики. Для Києва — ще й графіки світла.</div></div>
+  <div class="bubble R" data-at=".3" style="top:90px"><div class="h">🚨 ХАРКІВ</div><div class="l">🛩 Липці · 🛩 Прудянка<br>❗ На підльоті — Питомник</div><div class="l m" style="font-size:12px">🕒 02:16 · оновлюється · 🤖 WarAlarm</div></div>
+  <div class="bubble R" data-at="3.6" style="top:290px;border-color:rgba(76,147,255,.5)"><div class="h">📣 Поділись із рідними</div><div class="l">Кожен отримає тривогу для свого міста. Одне посилання — /share.</div><div class="btns"><div>📤 Надіслати друзям</div></div></div>
+</section>
+
+<!-- 236–252 · F16 ніч: підсумок і прогноз -->
+<section class="sc" data-a="236" data-b="252" id="f16">
+  <div class="col" style="top:130px"><div class="eyebrow">16 · Після ночі</div><div class="cap">Ранок —<br>і вся ніч на одній карті</div>
+    <div class="sub">О 08:00 — підсумок ночі: що летіло, звідки, де найдовше тривожили. Увечері — що чекати цієї ночі.</div></div>
+  <div class="bubble R" data-at=".4" style="top:110px"><div class="h">🌙 Підсумок ночі · 18:00 → 08:00</div>
+    <div class="l">🛵 Шахедів — <b id="n1">0</b> · 🚀 ракет — <b id="n2">0</b></div><div class="l">⏱ Найдовша тривога: Харківщина, <b>5 год 12 хв</b></div><div class="l">🗺 Карта ночі — у каналі й боті</div></div>
+  <div class="bubble R" data-at="3.0" style="top:310px"><div class="h">🔮 Що вночі</div><div class="l">Можливий масований пуск шахедів, загроза балістики — помірна.</div></div>
+</section>
+
+<!-- 252–268 · F17 аналітика, ШІ, джерела, світло -->
+<section class="sc" data-a="252" data-b="268" id="f17">
+  <div class="col" style="top:110px"><div class="eyebrow">17 · Аналітика</div><div class="cap">Твій район —<br>за тиждень</div>
+    <div class="sub">Історія офіційних тривог для будь-якого міста й району. ШІ-аналіз ситуації. Список джерел. Світло в Києві.</div>
+    <div class="chips"><span data-at="1.4">📈 аналітика</span><span data-at="1.6">🤖 ШІ-аналіз</span><span data-at="1.8">📡 джерела</span><span data-at="2.0">💡 світло</span></div></div>
+  <div id="chart">
+    <div class="bl" style="left:528px">пн</div><div class="bl" style="left:578px">вт</div><div class="bl" style="left:628px">ср</div><div class="bl" style="left:678px">чт</div><div class="bl" style="left:728px">пт</div><div class="bl" style="left:778px">сб</div><div class="bl" style="left:828px">нд</div>
+    <div class="bar" style="left:528px" data-h="120"></div><div class="bar" style="left:578px" data-h="70"></div><div class="bar" style="left:628px" data-h="190"></div><div class="bar" style="left:678px" data-h="95"></div><div class="bar" style="left:728px" data-h="140"></div><div class="bar" style="left:778px" data-h="60"></div><div class="bar" style="left:828px" data-h="165"></div>
+    <div data-at="1.0" data-fx="fade" style="position:absolute;left:520px;width:360px;top:70px;font-size:14px;color:var(--mut);text-align:center">години під тривогою · Теремки</div>
+  </div>
+</section>
+
+<!-- 268–272 · пауза -->
+<section class="sc" data-a="268" data-b="272" id="br2">
+  <img src="icon.png" data-at=".05" data-fx="pop" style="position:absolute;left:50%;top:150px;width:120px;height:120px;margin-left:-60px">
+  <div class="abs c k" data-at=".3" style="top:300px;font-size:40px">Усе це — <span class="b">WarAlarm</span></div>
+</section>
+
+<!-- 272–288 · де -->
+<section class="sc" data-a="272" data-b="288" id="s5">
+  <div class="abs c k" data-at=".1" style="top:70px;font-size:40px">Скрізь, де тобі зручно</div>
+  <div class="tile" data-at=".4" style="left:110px;width:360px;top:160px"><div class="i">🤖</div><div><div class="t">Telegram-бот</div><div class="s">@waralarmukraine_bot</div></div></div>
+  <div class="tile" data-at=".8" style="left:490px;width:360px;top:160px"><div class="i">📱</div><div><div class="t">Застосунок для Android</div><div class="s">гучна тривога навіть уночі</div></div></div>
+  <div class="tile" data-at="1.2" style="left:110px;width:360px;top:250px"><div class="i">🗺</div><div><div class="t">Жива карта на сайті</div><div class="s">і як міні-застосунок у Telegram</div></div></div>
+  <div class="tile" data-at="1.6" style="left:490px;width:360px;top:250px"><div class="i">📢</div><div><div class="t">Канали</div><div class="s">вся Україна · Київ · Харків</div></div></div>
+  <div class="abs c" data-at="2.4" style="top:370px;font-size:18px;color:#C4CCD7;font-weight:500">Безкоштовно.</div>
+</section>
+
+<!-- 288–312 · монтаж на біт -->
+<section class="sc" data-a="288" data-b="312" id="mt">
+  <div id="mont"><div id="montI"></div><div id="montW"></div></div><div id="montN"></div>
+</section>
+
+<!-- 312–349 · реліз -->
+<section class="sc" data-a="312" data-b="400" id="s6">
+  <div class="abs c eyebrow" data-at=".1" style="top:96px;font-size:16px;letter-spacing:7px">Реліз</div>
+  <div class="abs c" id="date" style="top:126px"><span>0</span><span>6</span><span>.</span><span>1</span><span>2</span><span>.</span><span>2</span><span>0</span><span>2</span><span>6</span></div>
+  <div class="abs c k" data-at="1.4" style="top:264px;font-size:32px">неділя · 12:00</div>
+  <div class="abs" data-at="2.0" style="top:322px"><div class="flag"></div></div>
+  <div class="abs c" data-at="2.2" style="top:344px;font-size:20px;font-weight:700;color:#C4CCD7">у День Збройних Сил України</div>
+  <div class="abs c" data-at="3.4" style="top:410px;font-size:20px;font-weight:700"><span class="b">@waralarmukraine_bot</span><span style="color:var(--mut);font-weight:500">  ·  канал @radar_tryvoga</span></div>
+  <div class="abs c" data-at="4.4" data-fx="fade" style="top:500px;font-size:12px;color:#6F7A89">Допоміжний сервіс. Завжди зважай на офіційну тривогу.</div>
+</section>
+
+<script>
+const FPS = 30, TOTAL = 174.5, P = 0.49923, PH = 0.117;          // трек: 120 BPM, перша доля 0.117 с
+const B = k => PH + k * P;
+const $ = id => document.getElementById(id);
+const cl = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ease = x => { x = cl(x); return 1 - Math.pow(1 - x, 3); };
+const inout = x => { x = cl(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const scenes = [...document.querySelectorAll('section.sc')].map(el => ({ el, id: el.id, a: B(+el.dataset.a), b: Math.min(TOTAL + 1, B(+el.dataset.b)),
+  items: [...el.querySelectorAll('[data-at]')] }));
+const S = Object.fromEntries(scenes.map(s => [s.id, s]));
+function fx(el, lt){
+  const at = +el.dataset.at, f = el.dataset.fx || 'up', k = ease((lt - at) / .5);
+  el.style.opacity = k;
+  el.style.transform = f === 'fade' ? '' : f === 'pop' ? `scale(${.7 + .3 * k})` : f === 'down' ? `translateY(${(1 - k) * -26}px)` : f === 'left' ? `translateX(${(1 - k) * 40}px)` : `translateY(${(1 - k) * 22}px)`;
+}
+const frames = [], shots = [];
+for (let i = 0; i < 150; i++) { const a = new Image(); a.src = `livec/${String(i).padStart(4, '0')}.png`; frames.push(a); const s = new Image(); s.src = `live/${String(i).padStart(4, '0')}.png`; shots.push(s); }
+const ic = new Image(); ic.src = 'icon.png';
+window.ready = () => Promise.all([document.fonts.ready, ...frames.map(f => f.decode()), ...shots.map(f => f.decode()), ic.decode()]);
+const loopIdx = t => { const i = Math.floor(t * FPS) % 298; return i < 150 ? i : 297 - i; };
+function map(t, a, b, from, to){
+  $('map').src = frames[loopIdx(t)].src;
+  const p = inout((t - a) / (b - a)), L = (u, v) => u + (v - u) * p;
+  const z = L(from[0], to[0]), cx = L(from[1], to[1]), cy = L(from[2], to[2]), sx = L(from[3], to[3]), sy = L(from[4], to[4]);
+  $('map').style.transform = `translate(${sx - cx * z}px,${sy - cy * z}px) scale(${z})`;
+}
+const SH_TOP = 'linear-gradient(180deg,rgba(7,9,13,.9) 0%,rgba(7,9,13,.15) 32%,rgba(7,9,13,.15) 75%,rgba(7,9,13,.9) 100%)';
+const SH_LEFT = 'linear-gradient(90deg,rgba(7,9,13,.98) 0%,rgba(7,9,13,.95) 47%,rgba(7,9,13,.15) 66%,rgba(7,9,13,.35) 100%)';
+const vis = (t, s, f = .35) => cl((t - s.a) / f) * cl((s.b - t) / f);
+const LEVELS = ['спокійно', 'низька', 'помірна', 'висока', 'дуже висока', 'критична'];
+const LCOL = ['#3DDC84', '#A6E05A', '#FFD400', '#FF9A3D', '#FF4D4D', '#FF2D55'];
+const ADV = ['Загроз поруч немає — можна гуляти.', 'Можна виходити, але не затримуйся.', 'Скороти час надворі, знай, де укриття.',
+  'Залишайся в приміщенні, правило двох стін.', 'Не виходь надвір — іди в укриття.', 'Негайно в укриття! Подалі від вікон.'];
+const MONT = [['🗺', 'Жива карта'], ['📏', 'Твій радіус'], ['⭐', 'Небезпека надворі'], ['🛵', 'Стадії підльоту'], ['☄️', 'Балістика'], ['🛡', 'Вороже ППО'],
+  ['🚀', 'Прогноз пусків'], ['⏰', 'Тривога тут о 02:31'], ['🔴', 'Тривоги по районах'], ['🛰', 'Стежить за тобою'], ['🏠', 'Укриття'], ['👁', 'Стеження за ціллю'],
+  ['🏙', '3D над містом'], ['💣', 'КАБ'], ['✈️', 'МіГ-31К'], ['🪖', 'FPV'], ['📏', 'Висота'], ['📱', 'Будить уночі'], ['🟢', 'Чесний відбій'],
+  ['📢', 'Київ · Харків'], ['🌙', 'Підсумок ночі'], ['📈', 'Аналітика'], ['🤖', 'ШІ-аналіз'], ['📣', 'Поділись']];
+
+window.render = t => {
+  for (const s of scenes) {
+    const v = s.id === 's1' ? cl((s.b - t) / .35) * (t >= s.a ? 1 : 0) : vis(t, s);
+    s.el.style.opacity = v;
+    if (v <= 0) continue;
+    const lt = t - s.a; for (const el of s.items) fx(el, lt);
+  }
+  // карта
+  const sm = Math.max(vis(t, S.s2), vis(t, S.f6), vis(t, S.f8)); $('sm').style.opacity = sm;
+  if (sm > 0) {
+    if (t < S.s2.b + 1) { map(t, S.s2.a, S.s2.b, [1.2, 520, 320, 480, 310], [1.45, 560, 330, 480, 310]); $('shade').style.background = SH_TOP; }
+    else if (t < S.f6.b + 1) { map(t, S.f6.a, S.f6.b, [2.0, 690, 380, 730, 280], [2.35, 700, 395, 730, 280]); $('shade').style.background = SH_LEFT; }
+    else { map(t, S.f8.a, S.f8.b, [1.6, 600, 330, 700, 280], [1.9, 620, 320, 700, 280]); $('shade').style.background = SH_LEFT; }
+  }
+  // S1 пульс
+  const pu = (t * 2) % 1; $('pulse').style.boxShadow = `0 0 0 ${pu * 44}px rgba(255,77,77,${.5 * (1 - pu)})`;
+  // логотип
+  { const lk = ease((t - S.s3.a - .1) / .8); $('logo').style.transform = `scale(${.82 + .18 * lk})`; $('logo').style.opacity = lk;
+    $('glow').style.opacity = lk * (.75 + .25 * Math.sin(t * 3)); }
+  // F1 знімок
+  if (vis(t, S.f1) > 0) { $('shot').src = shots[loopIdx(t)].src; $('shot').style.transform = `scale(${1 + .06 * inout((t - S.f1.a) / 6)})`; }
+  // F2 радар
+  { const lt = t - S.f2.a, mp = inout((lt - .4) / 3.4), tx = 900 + (735 - 900) * mp, ty = 60 + (215 - 60) * mp;
+    $('tgt').setAttribute('transform', `translate(${tx},${ty})`); const inside = Math.hypot(tx - 690, ty - 280) < 160;
+    $('ring').setAttribute('stroke', inside ? '#FF4D4D' : '#4C93FF'); $('ringT').setAttribute('fill', inside ? '#FF4D4D' : '#4C93FF');
+    $('ring').setAttribute('fill', inside ? `rgba(255,77,77,${.08 + .06 * Math.sin(t * 8)})` : 'rgba(76,147,255,.06)');
+    const k = ease((lt - (.4 + 3.4 * .62)) / .5); $('f2b').style.opacity = k; $('f2b').style.transform = `translateY(${(1 - k) * 30}px)`; }
+  // F3 зірки: по одній на долю
+  { const lt = t - S.f3.a, n = cl(Math.floor((lt - .5) / P) + 1, 0, 5);
+    $('stars').textContent = '★'.repeat(n) + '☆'.repeat(5 - n); $('starsT').textContent = `${n}/5 — ${LEVELS[n]}`; $('starsT').style.color = LCOL[n]; $('starsA').textContent = ADV[n]; }
+  // F4 стадії
+  { const lt = t - S.f4.a, p = cl((lt - .4) / 4.5), st = p < .4 ? 0 : p < .68 ? 1 : p < .9 ? 2 : 3;
+    $('stbar').style.width = (p * 100) + '%'; $('stIcon').style.left = (470 + p * 340) + 'px';
+    const km = Math.max(1, Math.round(28 * (1 - p / .68))); $('stKm').textContent = st < 2 ? `${km} км` : (st === 2 ? 'над районом' : 'пролетіла');
+    $('stKm').style.color = ['#FFD400', '#FF9A3D', '#FF4D4D', '#3DDC84'][st];
+    $('stEta').textContent = ['підліт ~9 хв · тихий «пік»', 'підліт ~2 хв · сирена', 'над районом · в укриття!', 'пройшла далі · відбій скоро'][st];
+    for (let i = 0; i < 4; i++) { const on = i <= st; $('st' + i).style.color = on ? '#ECF0F5' : '#5B6676';
+      $('st' + i).firstElementChild.style.background = on ? ['#FFD400', '#FF9A3D', '#FF4D4D', '#3DDC84'][i] : '#232C38'; } }
+  // F7 лічильник
+  $('air').textContent = '~' + Math.round(40 * ease((t - S.f7.a - 1.4) / 1.5));
+  // F11 стеження
+  { const lt = t - S.f11.a, km = Math.max(3, Math.round(18 - lt * 2.2)); $('trkKm').textContent = km + ' км'; $('trkSt').textContent = km > 10 ? 'на підльоті' : 'над районом'; }
+  // F16 лічильники
+  $('n1').textContent = Math.round(64 * ease((t - S.f16.a - .8) / 2)); $('n2').textContent = Math.round(8 * ease((t - S.f16.a - .8) / 2));
+  // F17 стовпці
+  document.querySelectorAll('.bar').forEach((b, i) => { b.style.height = (+b.dataset.h * ease((t - S.f17.a - .3 - i * .12) / .7)) + 'px'; });
+  // монтаж: слово на кожну долю, «удар» на початку долі
+  { const lt = t - S.mt.a, k = Math.floor(lt / P), ph = (lt / P) - k;
+    if (k >= 0 && k < MONT.length) { const [i, w] = MONT[k]; $('montI').textContent = i; $('montW').textContent = w;
+      const sc = 1.12 - .12 * ease(ph / .35); $('mont').style.transform = `scale(${sc})`; $('mont').style.opacity = 1 - .25 * ph;
+      $('montN').textContent = `${String(k + 1).padStart(2, '0')} / ${MONT.length}`; } }
+  // дата
+  [...$('date').children].forEach((s, i) => { const k = ease((t - S.s6.a - .3 - i * .07) / .45); s.style.opacity = k; s.style.transform = `translateY(${(1 - k) * 46}px)`; });
+  // фінальне згасання разом з музикою
+  document.body.style.opacity = cl((TOTAL - t) / 4.5);
+};
+</script>
+</body></html>

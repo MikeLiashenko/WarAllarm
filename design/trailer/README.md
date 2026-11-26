@@ -1,5 +1,10 @@
 # Трейлер WarAlarm (реліз 06.12.2026)
 
+**Повний — 1920×1080, 2:54, під трек «sector_breach_1.mp3» (120 BPM, сцени зміщуються точно в долю):**
+`trailer_full.html` + `render_full.js` (кадри в `outf/`; можна рендерити шматками: `node render_full.js <тека> full 0 1745` …).
+Потрібні ті самі `live/`, `livec/`, `icon.png`. Зібрати: `ffmpeg -framerate 30 -i outf/f%05d.png -i sector_breach_1.mp3 -c:v libx264 -crf 20 -pix_fmt yuv420p -c:a aac -b:a 192k -shortest WarAlarm_trailer_full.mp4`.
+Сцени — `<section data-a data-b>` у долях треку (доля = 0.49923 с, перша — 0.117 с); елементи з'являються за `data-at` (с від початку сцени).
+
 **Основний — горизонтальний 1920×1080, 60 с** (`trailer_h.html`):
 1. Справжня жива карта: `python3 -m http.server 8765` у `site/`, далі `node liveframes.js <тека>` (знімок сайту як є → `live/`)
    і `node liveframes_c.js <тека>` (та сама карта без панелей → `livec/`). Знімати під час атаки, коли на карті є цілі.
