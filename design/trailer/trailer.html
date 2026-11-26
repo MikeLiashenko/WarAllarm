@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8">
+<style>
+  @font-face{font-family:R;font-weight:400;src:url('file:///home/user/WarAllarm/src/Reader/assets/Roboto-Regular.ttf')}
+  @font-face{font-family:R;font-weight:500;src:url('file:///home/user/WarAllarm/src/Reader/assets/Roboto-Medium.ttf')}
+  @font-face{font-family:R;font-weight:700;src:url('file:///home/user/WarAllarm/src/Reader/assets/Roboto-Bold.ttf')}
+  @font-face{font-family:R;font-weight:900;src:url('file:///home/user/WarAllarm/src/Reader/assets/Roboto-Black.ttf')}
+  :root{--bg:#07090D;--ink:#ECF0F5;--mut:#9AA5B4;--blue:#4C93FF;--yel:#FFD400;--red:#FF4D4D;--card:#11161D;--line:#232C38}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:540px;height:960px;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:R,"Noto Color Emoji",sans-serif}
+  .sc{position:absolute;inset:0;opacity:0}
+  .abs{position:absolute;left:0;right:0}
+  .c{text-align:center}
+  #mapwrap{position:absolute;inset:0;overflow:hidden}
+  #map{position:absolute;width:540px;height:960px;transform-origin:0 0}
+  .dim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(7,9,13,.92) 0%,rgba(7,9,13,.25) 38%,rgba(7,9,13,.25) 62%,rgba(7,9,13,.95) 100%)}
+  .k{font-weight:900;letter-spacing:-.5px}
+  .cap{position:absolute;left:36px;right:36px;font-weight:900;font-size:34px;line-height:1.12;letter-spacing:-.4px}
+  .sub{position:absolute;left:36px;right:36px;font-size:17px;line-height:1.4;color:#C4CCD7;font-weight:500}
+  .eyebrow{font-size:13px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--blue)}
+  .bubble{position:absolute;left:36px;right:36px;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:18px 20px;
+    box-shadow:0 18px 50px rgba(0,0,0,.55)}
+  .bubble .h{font-weight:900;font-size:21px}
+  .bubble .l{font-size:17px;margin-top:8px;color:#D7DEE7;line-height:1.35}
+  .btns{display:flex;gap:8px;margin-top:14px}
+  .btns div{flex:1;background:#1B2430;border-radius:12px;padding:10px 0;text-align:center;font-weight:700;font-size:15px;color:#BFD6FF}
+  .stars{font-size:64px;letter-spacing:6px;color:var(--yel)}
+  .tile{position:absolute;left:36px;right:36px;height:84px;background:var(--card);border:1px solid var(--line);border-radius:18px;
+    display:flex;align-items:center;gap:16px;padding:0 20px}
+  .tile .i{font-size:34px;width:44px;text-align:center}
+  .tile .t{font-weight:900;font-size:21px}
+  .tile .s{font-size:14px;color:var(--mut);margin-top:3px}
+  #date{font-weight:900;font-size:96px;letter-spacing:-2px;line-height:1}
+  #date span{display:inline-block}
+  .flag{height:6px;width:180px;margin:0 auto;border-radius:3px;background:linear-gradient(90deg,#1F6FE5 50%,#FFD400 50%)}
+</style></head><body>
+
+<!-- S1 · ніч -->
+<div class="sc" id="s1">
+  <div id="pulse" style="position:absolute;left:50%;top:300px;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:var(--red)"></div>
+  <div class="abs c k" id="s1a" style="top:350px;font-size:88px;letter-spacing:2px">02:14</div>
+  <div class="abs c k" id="s1b" style="top:470px;font-size:38px;color:var(--red)">Повітряна тривога</div>
+  <div class="abs c" id="s1c" style="top:525px;font-size:22px;color:var(--mut);font-weight:500">на всю область. Знову.</div>
+</div>
+
+<!-- карта (S2, F1) -->
+<div class="sc" id="sm"><div id="mapwrap"><img id="map"></div><div class="dim"></div></div>
+
+<!-- S2 · питання -->
+<div class="sc" id="s2">
+  <div class="abs c k" id="s2a" style="top:110px;font-size:40px">Але що летить</div>
+  <div class="abs c k" id="s2b" style="top:160px;font-size:40px;color:var(--yel)">саме до тебе?</div>
+</div>
+
+<!-- S3 · логотип -->
+<div class="sc" id="s3">
+  <div id="glow" style="position:absolute;left:50%;top:300px;width:420px;height:420px;margin-left:-210px;border-radius:50%;
+    background:radial-gradient(circle,rgba(76,147,255,.35),rgba(76,147,255,0) 65%)"></div>
+  <img id="logo" src="logo.svg" style="position:absolute;left:50%;top:330px;width:220px;height:220px;margin-left:-110px;border-radius:48px">
+  <div class="abs c k" id="s3a" style="top:590px;font-size:58px">WarAlarm</div>
+  <div class="abs c" id="s3b" style="top:665px;font-size:22px;color:#C4CCD7;font-weight:500">тривога для <b style="color:var(--yel)">твого</b> району</div>
+</div>
+
+<!-- F1 · жива карта -->
+<div class="sc" id="f1">
+  <div class="cap" style="top:96px"><div class="eyebrow">01 · Жива карта</div><div style="margin-top:10px">Усі цілі — на одній карті</div></div>
+  <div class="sub" style="top:800px">Шахеди, ракети, балістика й КАБ. Десятки каналів моніторингу — зведені й перевірені щосекунди.</div>
+</div>
+
+<!-- F2 · тривога поруч -->
+<div class="sc" id="f2">
+  <div class="cap" style="top:110px"><div class="eyebrow">02 · Радіус</div><div style="margin-top:10px">Тривога — лише коли<br>ціль <span style="color:var(--yel)">біля тебе</span></div></div>
+  <div class="bubble" id="f2b" style="top:350px">
+    <div class="h">🔴 ТРИВОГА поруч — Теремки</div>
+    <div class="l">🛵 Шахед за <b>12 км</b> · підліт ~4 хв</div>
+    <div class="l">⭐ Небезпека надворі: ★★★★☆ <b>4/5</b></div>
+    <div class="l" style="color:#fff"><b>➤ В укриття!</b> Подалі від вікон.</div>
+    <div class="btns"><div>🛰 Що летить</div><div>🏠 Укриття</div></div>
+  </div>
+  <div class="sub" style="top:610px">Радіус обираєш сам: від 5 до 100 км. Ціль далеко — телефон мовчить.</div>
+</div>
+
+<!-- F3 · зірки -->
+<div class="sc" id="f3">
+  <div class="cap" style="top:150px"><div class="eyebrow">03 · Небезпека надворі</div><div style="margin-top:10px">Можна гуляти —<br>чи вже в укриття?</div></div>
+  <div class="abs c stars" id="stars" style="top:420px"></div>
+  <div class="abs c k" id="starsT" style="top:510px;font-size:28px"></div>
+  <div class="sub c" style="top:620px">Від 0 до 5 зірок: що летить, як близько і як швидко — в одній оцінці.</div>
+</div>
+
+<!-- F4 · балістика -->
+<div class="sc" id="f4">
+  <div class="cap" style="top:110px"><div class="eyebrow">04 · Балістика</div><div style="margin-top:10px">Попередження —<br>за секунди</div></div>
+  <div class="bubble" id="f4a" style="top:330px;border-color:rgba(255,77,77,.5)">
+    <div class="h">☄️ ЗАГРОЗА БАЛІСТИКИ</div>
+    <div class="l">🚀 Район пуску: <b>Брянськ</b></div>
+    <div class="l">Будь ближче до укриття — ракета летить лічені хвилини.</div>
+  </div>
+  <div class="bubble" id="f4b" style="top:530px">
+    <div class="h">🛡 Працює вороже ППО</div>
+    <div class="l">Загрозу знято — це не пуски по нас.</div>
+  </div>
+  <div class="sub" style="top:700px">І чесний відбій, щойно загрози вже нема.</div>
+</div>
+
+<!-- F5 · стежить -->
+<div class="sc" id="f5">
+  <div class="cap" style="top:130px"><div class="eyebrow">05 · Завжди поруч</div><div style="margin-top:10px">Тривоги там,<br>де ти <span style="color:var(--yel)">зараз</span></div></div>
+  <div class="tile" id="f5a" style="top:360px"><div class="i">🛰</div><div><div class="t">Стежить за тобою</div><div class="s">дорога, дача, інше місто — у фоні</div></div></div>
+  <div class="tile" id="f5b" style="top:460px"><div class="i">⏰</div><div><div class="t">Тривога тут ~ о 02:31</div><div class="s">прогноз за маршрутами шахедів</div></div></div>
+  <div class="tile" id="f5c" style="top:560px"><div class="i">🏠</div><div><div class="t">Укриття поруч</div><div class="s">найближчі укриття й метро</div></div></div>
+</div>
+
+<!-- S5 · де -->
+<div class="sc" id="s5">
+  <div class="cap c" style="top:150px">Один WarAlarm —<br>скрізь, де тобі зручно</div>
+  <div class="tile" id="p1" style="top:330px"><div class="i">🤖</div><div><div class="t">Telegram-бот</div><div class="s">@waralarmukraine_bot</div></div></div>
+  <div class="tile" id="p2" style="top:430px"><div class="i">📱</div><div><div class="t">Застосунок для Android</div><div class="s">гучна тривога навіть уночі</div></div></div>
+  <div class="tile" id="p3" style="top:530px"><div class="i">🗺</div><div><div class="t">Жива карта на сайті</div><div class="s">і просто в Telegram</div></div></div>
+  <div class="tile" id="p4" style="top:630px"><div class="i">📢</div><div><div class="t">Канали</div><div class="s">вся Україна · Київ · Харків</div></div></div>
+</div>
+
+<!-- S6 · реліз -->
+<div class="sc" id="s6">
+  <div class="abs c eyebrow" id="r0" style="top:250px;font-size:16px;letter-spacing:6px">Реліз</div>
+  <div class="abs c" id="date" style="top:300px"><span>0</span><span>6</span><span>.</span><span>1</span><span>2</span><span>.</span><span>2</span><span>0</span><span>2</span><span>6</span></div>
+  <div class="abs c k" id="r1" style="top:425px;font-size:30px">неділя · 12:00</div>
+  <div class="abs" id="r2" style="top:495px"><div class="flag"></div></div>
+  <div class="abs c" id="r3" style="top:520px;font-size:20px;font-weight:700;color:#C4CCD7">у День Збройних Сил України</div>
+  <div class="abs c" id="r4" style="top:640px;font-size:20px;font-weight:700"><span style="color:var(--blue)">@waralarmukraine_bot</span></div>
+  <div class="abs c" id="r5" style="top:672px;font-size:18px;font-weight:500;color:var(--mut)">канал: @radar_tryvoga</div>
+  <div class="abs c" id="r6" style="top:880px;font-size:12px;color:#6F7A89">Допоміжний сервіс. Завжди зважай на офіційну тривогу.</div>
+</div>
+
+<script>
+const FPS = 30, TOTAL = 35;
+const $ = id => document.getElementById(id);
+const cl = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ease = x => { x = cl(x); return 1 - Math.pow(1 - x, 3); };
+const inout = x => { x = cl(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+// Видимість сцени: плавно з'являється за 0.35 с і зникає за 0.35 с.
+const vis = (t, a, b, f = .35) => cl((t - a) / f) * cl((b - t) / f);
+// Елемент: з'являється з [at], зсув знизу.
+function rise(el, t, at, dy = 24, d = .5){ const k = ease((t - at) / d); el.style.opacity = k; el.style.transform = `translateY(${(1 - k) * dy}px)`; }
+
+const frames = []; for (let i = 0; i < 150; i++) { const im = new Image(); im.src = `map/${String(i).padStart(4, '0')}.png`; frames.push(im); }
+window.ready = () => Promise.all([document.fonts.ready, ...frames.map(f => f.decode()), $('logo').decode()]);
+
+// Карта: кадри «туди-назад», крупний план з повільним наїздом.
+function map(t, z0, z1, cx0, cy0, cx1, cy1, a, b){
+  const i = Math.floor(t * FPS) % 298, k = i < 150 ? i : 297 - i;
+  $('map').src = frames[k].src;
+  const p = inout((t - a) / (b - a)), z = z0 + (z1 - z0) * p, cx = cx0 + (cx1 - cx0) * p, cy = cy0 + (cy1 - cy0) * p;
+  $('map').style.transform = `translate(${270 - cx * z}px,${480 - cy * z}px) scale(${z})`;
+}
+
+window.render = t => {
+  // S1
+  $('s1').style.opacity = vis(t, 0, 3.3, .01);
+  const pu = (t * 1.4) % 1; $('pulse').style.boxShadow = `0 0 0 ${pu * 40}px rgba(255,77,77,${.5 * (1 - pu)})`;
+  rise($('s1a'), t, .25); rise($('s1b'), t, 1.0); rise($('s1c'), t, 1.8);
+  // S2 + F1: карта
+  const ms = Math.max(vis(t, 3.3, 7.0), vis(t, 10.0, 13.2));
+  $('sm').style.opacity = ms;
+  if (t < 8) map(t, 1.6, 1.9, 280, 450, 300, 430, 3.3, 7.0);
+  else map(t, 1.7, 2.3, 330, 420, 420, 370, 10.0, 13.2);
+  $('s2').style.opacity = vis(t, 3.3, 7.0); rise($('s2a'), t, 3.7); rise($('s2b'), t, 4.4);
+  // S3: логотип
+  $('s3').style.opacity = vis(t, 7.0, 10.0);
+  const lk = ease((t - 7.1) / .8); $('logo').style.transform = `scale(${.82 + .18 * lk})`; $('logo').style.opacity = lk;
+  $('glow').style.opacity = lk * (.75 + .25 * Math.sin(t * 3)); rise($('s3a'), t, 7.6); rise($('s3b'), t, 8.2);
+  // F1..F5
+  $('f1').style.opacity = vis(t, 10.0, 13.2);
+  $('f2').style.opacity = vis(t, 13.2, 16.4); rise($('f2b'), t, 13.6, 40, .6);
+  $('f3').style.opacity = vis(t, 16.4, 19.6);
+  const n = Math.min(4, Math.floor(cl((t - 16.8) / 1.2) * 4.999));
+  $('stars').textContent = '★'.repeat(n) + '☆'.repeat(5 - n);
+  $('starsT').textContent = `${n}/5 — ${['спокійно', 'низька', 'помірна', 'висока', 'дуже висока'][n]}`;
+  $('starsT').style.color = ['#3DDC84', '#A6E05A', '#FFD400', '#FF9A3D', '#FF4D4D'][n];
+  $('f4').style.opacity = vis(t, 19.6, 22.8); rise($('f4a'), t, 19.9, 40, .6); rise($('f4b'), t, 21.0, 40, .6);
+  $('f5').style.opacity = vis(t, 22.8, 26.0); rise($('f5a'), t, 23.1); rise($('f5b'), t, 23.6); rise($('f5c'), t, 24.1);
+  // S5
+  $('s5').style.opacity = vis(t, 26.0, 29.4); ['p1', 'p2', 'p3', 'p4'].forEach((id, i) => rise($(id), t, 26.3 + i * .4));
+  // S6: реліз
+  $('s6').style.opacity = vis(t, 29.4, TOTAL + 1);
+  rise($('r0'), t, 29.6);
+  [...$('date').children].forEach((s, i) => { const k = ease((t - 29.9 - i * .07) / .45); s.style.opacity = k; s.style.transform = `translateY(${(1 - k) * 40}px)`; });
+  rise($('r1'), t, 30.9); rise($('r2'), t, 31.4); rise($('r3'), t, 31.6); rise($('r4'), t, 32.3); rise($('r5'), t, 32.6); rise($('r6'), t, 33.0, 8);
+};
+window.TOTAL = TOTAL; window.FPS = FPS;
+</script>
+</body></html>
