@@ -96,7 +96,29 @@ class _SheltersSheetState extends State<_SheltersSheet> {
 
   Widget _body() {
     if (_error != null) {
-      return _note('Не вдалося отримати дані зараз. Перевір інтернет і спробуй ще.');
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _note('Сервіс карти укриттів зараз не відповідає. Спробуй ще раз або відкрий пошук укриттів на карті.'),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() { _error = null; _list = null; });
+                    _load();
+                  },
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Ще раз'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: _mapSearchButton()),
+            ],
+          ),
+        ],
+      );
     }
     if (_list == null) {
       return const Padding(
@@ -105,8 +127,15 @@ class _SheltersSheetState extends State<_SheltersSheet> {
       );
     }
     if (_list!.isEmpty) {
-      return _note('Поблизу не знайшов позначених укриттів. Найнадійніше — '
-          'підземка, підвали, паркінги.');
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _note('Поблизу не знайшов позначених укриттів. Найнадійніше — '
+              'підземка, підвали, паркінги.'),
+          const SizedBox(height: 10),
+          _mapSearchButton(),
+        ],
+      );
     }
     return Column(
       children: [
@@ -162,6 +191,19 @@ class _SheltersSheetState extends State<_SheltersSheet> {
       ],
     );
   }
+
+  /// Пошук «укриття» на Google Maps навколо точки — коли OSM не відповідає або порожньо.
+  Widget _mapSearchButton() => OutlinedButton.icon(
+        onPressed: () async {
+          final uri = Uri.parse(
+              'https://www.google.com/maps/search/${Uri.encodeComponent('укриття')}/@${widget.lat},${widget.lon},16z');
+          try {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          } catch (_) {}
+        },
+        icon: const Icon(Icons.map_rounded),
+        label: const Text('На карті'),
+      );
 
   Future<void> _open(Shelter s) async {
     final uri = Uri.parse(s.mapsUrl);

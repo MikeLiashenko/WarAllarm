@@ -1083,6 +1083,7 @@ if (!string.IsNullOrWhiteSpace(botToken))
         },
         TargetsNear: TargetsNear,
         TargetInfo: TargetInfo);
+    Shelters.Warmup(); // 🏠 файл укриттів — у пам'ять заздалегідь
     var bot = new TelegramBot(botToken, features);
     _ = bot.RunAsync();                 // команди + персональні тривоги по місту
     Console.WriteLine($"🤖 Telegram-бот ВКЛ (підписників: {bot.SubscriberCount}). Напиши боту /start у Telegram.\n");
