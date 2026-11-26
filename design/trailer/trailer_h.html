@@ -34,7 +34,7 @@
   #date span{display:inline-block}
   .flag{height:6px;width:200px;margin:0 auto;border-radius:3px;background:linear-gradient(90deg,#1F6FE5 50%,#FFD400 50%)}
   .notif{position:absolute;left:520px;width:380px;background:rgba(28,33,42,.96);border:1px solid #2C3644;border-radius:16px;padding:12px 16px;display:flex;gap:12px;align-items:center}
-  .notif .ic{width:38px;height:38px;border-radius:10px;flex:none;background:url(logo.svg) center/cover}
+  .notif .ic{width:38px;height:38px;border-radius:10px;flex:none;background:url(icon.png) center/cover}
   .notif .a{font-size:12px;color:var(--mut)}
   .notif .b{font-weight:800;font-size:15px;margin-top:2px}
   .notif .d{font-size:13px;color:#C4CCD7;margin-top:2px}
@@ -61,13 +61,17 @@
 <div class="sc" id="s3">
   <div id="glow" style="position:absolute;left:50%;top:40px;width:380px;height:380px;margin-left:-190px;border-radius:50%;
     background:radial-gradient(circle,rgba(76,147,255,.35),rgba(76,147,255,0) 65%)"></div>
-  <img id="logo" src="logo.svg" style="position:absolute;left:50%;top:90px;width:180px;height:180px;margin-left:-90px;border-radius:40px">
+  <img id="logo" src="icon.png" style="position:absolute;left:50%;top:90px;width:180px;height:180px;margin-left:-90px;border-radius:40px">
   <div class="abs c k" id="s3a" style="top:300px;font-size:66px">WarAlarm</div>
   <div class="abs c" id="s3b" style="top:384px;font-size:24px;color:#C4CCD7;font-weight:500">тривога для <b style="color:var(--yel)">твого</b> району</div>
 </div>
 
 <!-- F1 · жива карта -->
-<div class="sc" id="f1"><div class="col" style="top:120px">
+<div class="sc" id="f1">
+  <div id="shotwrap" style="position:absolute;left:436px;top:118px;width:496px;height:279px;border-radius:14px;overflow:hidden;
+    border:1px solid #2C3644;box-shadow:0 24px 70px rgba(0,0,0,.6),0 0 0 6px rgba(76,147,255,.08)"><img id="shot" style="width:100%;height:100%;display:block;transform-origin:65% 60%"></div>
+  <div id="shotcap" style="position:absolute;left:436px;width:496px;top:412px;text-align:center;font-size:13px;color:var(--mut);font-weight:500">Жива карта WarAlarm — справжній знімок, 26.11, 16:46</div>
+  <div class="col" style="top:120px">
   <div class="eyebrow">01 · Жива карта</div>
   <div class="cap">Усі цілі —<br>на одній карті</div>
   <div class="sub">Десятки каналів моніторингу — зведені, перевірені й показані на карті щосекунди.</div>
@@ -131,7 +135,7 @@
 <div class="sc" id="f5"><div class="col" style="top:110px">
   <div class="eyebrow">05 · Прогноз</div>
   <div class="cap">Знаємо про пуски<br>ще до кордону</div>
-  <div class="sub">«Пуск 15 шахедів з Курська» — і група вже летить картою типовим маршрутом. Зупиняється там, де тривоги немає.</div>
+  <div class="sub">«Пуск 20 шахедів з Приморсько-Ахтарська» — і група вже летить картою типовим маршрутом, ще до кордону. Там, де тривоги немає, вона зупиняється.</div>
 </div></div>
 
 <!-- F6 · стежить -->
@@ -188,8 +192,13 @@ const inout = x => { x = cl(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 
 const vis = (t, a, b, f = .4) => cl((t - a) / f) * cl((b - t) / f);
 function rise(el, t, at, dy = 22, d = .55, dx = 0){ const k = ease((t - at) / d); el.style.opacity = k; el.style.transform = `translate(${(1 - k) * dx}px,${(1 - k) * dy}px)`; }
 
-const frames = []; for (let i = 0; i < 150; i++) { const im = new Image(); im.src = `maph/${String(i).padStart(4, '0')}.png`; frames.push(im); }
-window.ready = () => Promise.all([document.fonts.ready, ...frames.map(f => f.decode()), $('logo').decode()]);
+const frames = [], shots = [];
+for (let i = 0; i < 150; i++) {
+  const im = new Image(); im.src = `livec/${String(i).padStart(4, '0')}.png`; frames.push(im);
+  const sh = new Image(); sh.src = `live/${String(i).padStart(4, '0')}.png`; shots.push(sh);
+}
+const ic = new Image(); ic.src = 'icon.png';
+window.ready = () => Promise.all([document.fonts.ready, ...frames.map(f => f.decode()), ...shots.map(f => f.decode()), $('logo').decode(), ic.decode()]);
 
 // Карта: точку (cx, cy) кадру ставимо в (sx, sy) екрана, масштаб z; повільний наїзд між a і b.
 function map(t, a, b, from, to){
@@ -200,7 +209,7 @@ function map(t, a, b, from, to){
   $('map').style.transform = `translate(${sx - cx * z}px,${sy - cy * z}px) scale(${z})`;
 }
 const SH_TOP = 'linear-gradient(180deg,rgba(7,9,13,.9) 0%,rgba(7,9,13,.15) 32%,rgba(7,9,13,.15) 75%,rgba(7,9,13,.9) 100%)';
-const SH_LEFT = 'linear-gradient(90deg,rgba(7,9,13,.97) 0%,rgba(7,9,13,.9) 38%,rgba(7,9,13,.1) 62%,rgba(7,9,13,.35) 100%)';
+const SH_LEFT = 'linear-gradient(90deg,rgba(7,9,13,.98) 0%,rgba(7,9,13,.95) 47%,rgba(7,9,13,.15) 66%,rgba(7,9,13,.35) 100%)';
 
 window.render = t => {
   // S1
@@ -208,10 +217,11 @@ window.render = t => {
   const pu = (t * 1.2) % 1; $('pulse').style.boxShadow = `0 0 0 ${pu * 44}px rgba(255,77,77,${.5 * (1 - pu)})`;
   rise($('s1a'), t, .3); rise($('s1b'), t, 1.1); rise($('s1c'), t, 1.9); rise($('s1d'), t, 2.8, 10);
   // карта: S2 (4.5–9.5), F1 (13.5–19), F5 (34–39)
-  $('sm').style.opacity = Math.max(vis(t, 4.5, 9.5), vis(t, 13.5, 19), vis(t, 34, 39));
-  if (t < 11) { map(t, 4.5, 9.5, [1.35, 480, 300, 480, 300], [1.55, 520, 280, 480, 300]); $('shade').style.background = SH_TOP; }
-  else if (t < 26) { map(t, 13.5, 19, [1.8, 600, 255, 680, 280], [2.15, 650, 240, 690, 280]); $('shade').style.background = SH_LEFT; }
-  else { map(t, 34, 39, [2.2, 560, 165, 690, 260], [2.4, 540, 160, 690, 260]); $('shade').style.background = SH_LEFT; }
+  $('sm').style.opacity = Math.max(vis(t, 4.5, 9.5), vis(t, 34, 39));
+  if (t < 20) { map(t, 4.5, 9.5, [1.2, 520, 320, 480, 310], [1.4, 560, 330, 480, 310]); $('shade').style.background = SH_TOP; }
+  else { map(t, 34, 39, [2.0, 690, 380, 730, 280], [2.3, 700, 395, 730, 280]); $('shade').style.background = SH_LEFT; }
+  { const i = Math.floor(t * FPS) % 298, k = i < 150 ? i : 297 - i; $('shot').src = shots[k].src;
+    $('shot').style.transform = `scale(${1 + .06 * inout((t - 13.5) / 5.5)})`; rise($('shotwrap'), t, 13.8, 30, .7); rise($('shotcap'), t, 14.6, 8); }
   $('s2').style.opacity = vis(t, 4.5, 9.5); rise($('s2a'), t, 5.0);
   // S3
   $('s3').style.opacity = vis(t, 9.5, 13.5);

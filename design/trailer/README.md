@@ -1,6 +1,14 @@
 # Трейлер WarAlarm (реліз 06.12.2026)
 
-**Основний — горизонтальний 1920×1080, 60 с:** `trailer_h.html`, `mapframes_h.js` (кадри карти в `maph/`), `render_h.js` (кадри в `outh/`). Кроки ті самі, що нижче.
+**Основний — горизонтальний 1920×1080, 60 с** (`trailer_h.html`):
+1. Справжня жива карта: `python3 -m http.server 8765` у `site/`, далі `node liveframes.js <тека>` (знімок сайту як є → `live/`)
+   і `node liveframes_c.js <тека>` (та сама карта без панелей → `livec/`). Знімати під час атаки, коли на карті є цілі.
+2. У ту саму теку: `trailer_h.html`, `render_h.js`, іконка `icon.png` (= `app/assets/icon/waralarm_1024.png`).
+   `node render_h.js <тека> preview` — 12 ключових кадрів, `full` — 1800 кадрів у `outh/`.
+3. Музика: `python3 music.py music.wav` (спокійна електроніка 100 BPM, Am–F–C–G, синтезована — без авторських прав).
+4. `ffmpeg -framerate 30 -i outh/f%05d.png -i music.wav -c:v libx264 -crf 19 -pix_fmt yuv420p -c:a aac -b:a 192k -shortest WarAlarm_trailer_1080p.mp4`
+
+Дата, час, назви — сцена S6 у `trailer_h.html`; підпис під знімком карти — `#shotcap`.
 
 ## Вертикальний 1080×1920, 35 с
 
