@@ -69,6 +69,11 @@ public static class BallisticAlert
         + @"|увага\s+таким|ворог\s+планує|планує\s+(?:завдати|удар)|готу[єю]т?ься|підготува\w*|готові\s+до|в\s+наявності"
         + @"|(?:^|\n)\s*до\s+\d+\s+(?:\p{L}+\s+)?(?:балістичн|ракет)", O);
 
+    /// Новина постфактум, а не пуск зараз (26.11 08:59: «🗞 У Києві внаслідок російської атаки балістичними
+    /// ракетами постраждали 7 людей» вмикало «☄ Загроза балістики» по Києву).
+    static readonly Regex AfterNews = new(@"^\W*🗞|внаслідок|в\s+результаті|постраждал|загинул|поранен|травмован|наслідк|зруйнован|пошкоджен"
+        + @"|пострадал|погиб|ранен|последстви", O);
+
     public static Kind Classify(string text)
     {
         if (Slang.EnemyPpo(text)) return Kind.EnemyPpo;
@@ -76,7 +81,7 @@ public static class BallisticAlert
         if (PpoOfBallistic.IsMatch(text) && text.Length <= 220 && !text.Contains('?')) return Kind.EnemyPpo;
         if (ThreatTracker.BallisticClearNow(text) || ClearMore.IsMatch(text)) return Kind.Clear;
         if (ThreatTracker.BallisticClear.IsMatch(text)) return Kind.None; // «буде відбій, якщо…» — ще ні те, ні те
-        return text.Length <= 400 && Slang.BallisticThreat(text) && !NotLive.IsMatch(text) && !Forecast.IsMatch(text) ? Kind.Threat : Kind.None;
+        return text.Length <= 400 && Slang.BallisticThreat(text) && !NotLive.IsMatch(text) && !Forecast.IsMatch(text) && !AfterNews.IsMatch(text) ? Kind.Threat : Kind.None;
     }
 
     /// Район пуску з поста («з Таганрогу», «з району Брянської області»).
