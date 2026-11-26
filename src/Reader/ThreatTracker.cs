@@ -184,7 +184,7 @@ public sealed class ThreatTracker
             t = new Threat { Id = key, Zone = zone, Kind = e.Kind, FirstSeen = now };
             _active[key] = t;
         }
-        t!.Ammo ??= e.Extra;
+        t!.Ammo ??= FitAmmo(t.Kind, e.Extra);
         // Розвідка/дорозвідка — низький пріоритет (не виє, не будить). Якщо в апдейті
         // з'явилось слово удару — знімаємо позначку (ціль ескалювала з розвідки в удар).
         t.Recon = Regex.IsMatch(low, @"розвід|дорозвід")
@@ -358,7 +358,7 @@ public sealed class ThreatTracker
             // Прямо сказано «реактивний» — швидкість уточнюємо навіть для вже відомої цілі.
             // Тип засобу — лише з посту про той самий вид: «Вишгород» від каналу, що пише про ракети,
             // злився з балістикою й дописав їй «крилата» (17.11 05:38 — «Балістика (крилата)»).
-            t!.Ammo = IsJet(ev.Extra) ? ev.Extra : t.Ammo ?? (ev.Kind == t.Kind ? ev.Extra : null);
+            t!.Ammo = IsJet(ev.Extra) ? ev.Extra : t.Ammo ?? (ev.Kind == t.Kind ? FitAmmo(t.Kind, ev.Extra) : null);
             t.Oblast = ev.Oblast ?? t.Oblast;
             t.Recon = ((ev.Extra ?? "") + " " + ev.Raw).ToLowerInvariant().Contains("розвід");
             // Новий пост про ціль, яку вважали збитою, — отже, вона ще летить.
@@ -803,7 +803,7 @@ public sealed class ThreatTracker
             var key = $"LAUNCH:{f.name}:{ev.Kind}";
             bool isNew = !_active.TryGetValue(key, out var t);
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now, LaunchAt = now }; _active[key] = t; }
-            t!.Ammo ??= ev.Extra;
+            t!.Ammo ??= FitAmmo(t.Kind, ev.Extra);
             t.Launch = true;
             t.LastUpdate = now;
             t.Count = Math.Max(t.Count, Math.Max(1, ev.Count));
@@ -1082,6 +1082,14 @@ public sealed class ThreatTracker
         _ => TrackSound.None,
     };
 
+    /// Засіб, що суперечить виду цілі («крилата» у балістики, «Іскандер-М» у крилатої), не беремо:
+    /// інакше балістика з «Ціль на Тернову» (22.11) летіла на карті 800 км/год — «крилата балістика».
+    public static string? FitAmmo(ThreatKind kind, string? ammo) =>
+        ammo is { Length: > 0 } && kind is ThreatKind.Ballistic or ThreatKind.Missile
+            && WeaponCatalog.Match(ammo) is { Kind: ThreatKind.Ballistic or ThreatKind.Missile } w && w.Kind != kind
+            && !ammo.StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase) && !ammo.Contains("бандерол", StringComparison.OrdinalIgnoreCase)
+            ? null : ammo;
+
     public static string Label(Threat t)
     {
         var name = t.Kind switch
@@ -1103,6 +1111,7 @@ public sealed class ThreatTracker
         if (t.Kind == ThreatKind.Ballistic && t.Ammo is { } b1 && (b1.Contains("крилат", StringComparison.OrdinalIgnoreCase)
             || b1.Contains("швидкісн", StringComparison.OrdinalIgnoreCase) || b1.Contains("ціль", StringComparison.OrdinalIgnoreCase)))
             return name;
+        if (FitAmmo(t.Kind, t.Ammo) is null) return name; // «Ракета (Іскандер-М)» — засіб іншого виду
         return t.Ammo is { Length: > 0 } a ? $"{name} ({a})" : name;
     }
 

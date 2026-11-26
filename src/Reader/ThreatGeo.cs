@@ -313,7 +313,8 @@ public static class ThreatGeo
     public static double SpeedKmh(ThreatKind kind, string? ammo)
     {
         // Конкретний засіб зі словника (Х-101 750, Іскандер-М 7000, Кинджал 4500…).
-        if (WeaponCatalog.SpeedFor(ammo) is { } known) return known;
+        // Засіб іншого виду («крилата» у балістики) — швидкість за видом цілі, не за ним.
+        if (ThreatTracker.FitAmmo(kind, ammo) is not null && WeaponCatalog.SpeedFor(ammo) is { } known) return known;
         var a = ammo?.ToLowerInvariant() ?? "";
         return kind switch
         {
