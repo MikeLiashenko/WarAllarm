@@ -273,6 +273,15 @@ public sealed class ThreatTracker
             // ставало новою міткою, а стара висіла «примарою» 15 хв без оновлень (і курсу
             // не було — лише здогадка «вглиб країни»). Тепер шукаємо попередника.
             bool movedGroup = false;
+            // Та сама точка під іншою назвою («Холодна Гора» / «Холодногірський», 0 км) або «Ціль» там,
+            // де щойно був шахед («Ціль Городня» + «Реактивний шахед Городня») — це не друга мітка (26.11).
+            if (isNew && !approx && SameSpot(ev, pos, now) is { } twin)
+            {
+                t = twin;
+                _alias[placeKey] = twin.Id;
+                isNew = false;
+                if (twin.Kind == ThreatKind.Target && ev.Kind is not ThreatKind.Target) twin.Kind = ev.Kind;
+            }
             if (isNew && !approx && Predecessor(ev, pos, now) is { } pred)
             {
                 _active.Remove(key);
@@ -580,6 +589,28 @@ public sealed class ThreatTracker
                         && rszv == (c.Ammo ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase)
                         && now - c.LastUpdate <= TimeSpan.FromMinutes(4) && ThreatGeo.Km(c.Pos!.Value, pos) <= 12)
             .OrderBy(c => ThreatGeo.Km(c.Pos!.Value, pos)).FirstOrDefault();
+    }
+
+    // Свіжа (≤10 хв) ціль у тій самій точці: того ж типу — до 0.6 км (дві назви одного місця), «ціль» і
+    // дрон — до 1.5 км. Не з того самого поста (перелік місць) і не «новий/ще один» (канал каже — інша).
+    Threat? SameSpot(ThreatEvent ev, (double lat, double lon) pos, DateTime now)
+    {
+        if (Slang.NewTarget(ev.Raw) || ev.Kind is ThreatKind.Ballistic) return null;
+        Threat? best = null; double bestKm = double.MaxValue;
+        foreach (var c in _active.Values)
+        {
+            if (c.Zone != "UA" || c.Launch || c.Approx || c.Down || c.Pos is not { } cp) continue;
+            var age = now - c.LastUpdate;
+            if (age <= TimeSpan.Zero || age > TimeSpan.FromMinutes(10)) continue;
+            bool airPair = c.Kind is ThreatKind.Drone or ThreatKind.Target && ev.Kind is ThreatKind.Drone or ThreatKind.Target;
+            bool targetPair = airPair && (c.Kind == ThreatKind.Target || ev.Kind == ThreatKind.Target);
+            double lim = c.Kind == ev.Kind ? .6 : targetPair ? 1.5 : 0;
+            if (lim == 0) continue;
+            if (ev.Count > Math.Max(1, c.Count) && c.Kind == ev.Kind) continue; // «4 на X», а там одна — це більше цілей
+            double km = ThreatGeo.Km(cp, pos);
+            if (km <= lim && km < bestKm) { bestKm = km; best = c; }
+        }
+        return best;
     }
 
     Threat? Predecessor(ThreatEvent ev, (double lat, double lon) pos, DateTime now)

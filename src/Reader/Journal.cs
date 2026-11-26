@@ -75,7 +75,7 @@ public static class Journal
                     Console.WriteLine($"{at:HH:mm:ss} @{ch} [монітор]: {Describe(ku.Threat, at)}");
                 continue;
             }
-            if (SourceCatalog.Get(ch) is not { } si || !inHub.Contains((ch, int.Parse(key[(key.LastIndexOf('#') + 1)..])))) continue;
+            if (SourceCatalog.Get(ch) is not { } si || inHub.Count > 0 && !inHub.Contains((ch, int.Parse(key[(key.LastIndexOf('#') + 1)..])))) continue;
             var r = hub.Process(si, text, at);
             bool show = at.TimeOfDay >= from && at.TimeOfDay <= to;
             foreach (var s in r.Statuses)
