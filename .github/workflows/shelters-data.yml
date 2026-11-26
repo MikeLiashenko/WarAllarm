@@ -1,0 +1,58 @@
+# Укриття з OpenStreetMap — один файл для застосунку й бота (реліз «shelters-latest»).
+# Живий Overpass під час тривоги ненадійний (26.11 усі дзеркала «at capacity» / таймаут), тож раз на
+# тиждень беремо карту України з Geofabrik, витягуємо укриття, метро й підземні паркінги і кладемо
+# компактний shelters.json: застосунок і бот шукають найближчі в себе, миттєво й без зовнішніх серверів.
+# Завантажити: https://github.com/MikeLiashenko/WarAllarm/releases/download/shelters-latest/shelters.json
+name: Shelters data
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'   # щопонеділка вночі
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shelters-data
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install osmium
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+
+      - name: Download Ukraine extract
+        run: |
+          for i in 1 2 3; do
+            curl -fsSL -o ukraine.osm.pbf https://download.geofabrik.de/europe/ukraine-latest.osm.pbf && break
+            sleep 30
+          done
+          ls -la ukraine.osm.pbf
+
+      - name: Extract shelters
+        run: |
+          osmium tags-filter ukraine.osm.pbf \
+            nw/amenity=shelter nw/building=bunker nw/bunker_type n/railway=subway_entrance \
+            nw/amenity=parking nw/emergency=shelter nw/shelter_type=bomb_shelter \
+            -o sh.osm.pbf --overwrite
+          osmium export sh.osm.pbf -f geojsonseq -o sh.geojsonseq --overwrite \
+            --geometry-types=point,linestring,polygon -a type,id
+          python3 tools/shelters_build.py sh.geojsonseq shelters.json
+          ls -la shelters.json
+
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view shelters-latest >/dev/null 2>&1 || \
+            gh release create shelters-latest --title "Укриття (OpenStreetMap)" \
+              --notes "Укриття, метро й підземні паркінги України з OpenStreetMap (© OpenStreetMap contributors, ODbL). Оновлюється щотижня."
+          for i in 1 2 3 4; do
+            gh release upload shelters-latest shelters.json --clobber && break
+            sleep $((i * 10))
+          done
