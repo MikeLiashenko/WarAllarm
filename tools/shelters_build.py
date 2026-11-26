@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """OSM (osmium export geojsonseq) -> shelters.json for the app and the bot.
 
-Output: {"v": "YYYY-MM-DD", "n": N, "p": [[lat, lon, kind, name], ...]}
+Output: {"v": "YYYY-MM-DD", "n": N, "p": [[lat, lon, kind, label], ...]}
 kind: s — shelter (укриття / сховище), m — metro entrance, p — underground parking.
 Same filter as the live Overpass query: bus-stop canopies, gazebos, picnic shelters and
 old military pillboxes are not shelters from air strikes.
@@ -49,14 +49,17 @@ def kind(p, stats):
     return None
 
 
-def name(p, k):
+def label(p, k):
+    """Ready-to-show label (the app and the bot only display it)."""
     n = (p.get("name") or "").strip()
+    if k == "m":
+        return f"Метро «{n}» (вхід)" if n else f"Вхід у метро №{p['ref']}" if p.get("ref") else "Вхід у метро"
+    if k == "p":
+        return f"Підземний паркінг «{n}»" if n else "Підземний паркінг"
     if n:
         return n
-    if k == "m" and p.get("ref"):
-        return "№" + p["ref"]
     addr = ", ".join(x for x in (p.get("addr:street"), p.get("addr:housenumber")) if x)
-    return addr
+    return f"Укриття · {addr}" if addr else "Укриття"
 
 
 def main(src, dst):
@@ -80,7 +83,7 @@ def main(src, dst):
             continue
         seen.add(key)
         stats["kind:" + k] += 1
-        out.append([round(lat, 5), round(lon, 5), k, name(p, k)])
+        out.append([round(lat, 5), round(lon, 5), k, label(p, k)])
     json.dump({"v": datetime.date.today().isoformat(), "n": len(out), "p": out}, open(dst, "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"))
     for s, n in stats.most_common(40):
