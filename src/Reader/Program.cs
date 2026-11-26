@@ -410,6 +410,29 @@ if (args.Length >= 2 && args[0].Equals("nightball", StringComparison.OrdinalIgno
 }
 
 // ── 🌙 Вечірній прогноз на файлі постів (оффлайн): пости через «---».   dotnet run -- outlook posts.txt
+if (args.Length >= 2 && args[0].Equals("outlook", StringComparison.OrdinalIgnoreCase) && args[1].EndsWith(".jsonl"))
+{
+    // Журнал: усі канали, як живий Reader; підсумок — на кінець кожного вечора (або на [HH:mm]).
+    foreach (var file in args.Skip(1).Where(a => a.EndsWith(".jsonl")).OrderBy(f => f))
+    {
+        var day = DateTime.TryParse(Path.GetFileNameWithoutExtension(file), out var dd) ? dd : DateTime.Today;
+        var until = args.FirstOrDefault(a => Regex.IsMatch(a, @"^\d{1,2}:\d{2}$")) is { } u ? day + TimeSpan.Parse(u) : day.AddDays(1);
+        foreach (var line in File.ReadLines(file))
+        {
+            if (!line.Contains("\"kind\":\"post\"")) continue;
+            using var doc = System.Text.Json.JsonDocument.Parse(line);
+            var r = doc.RootElement;
+            var at = day + TimeSpan.Parse(r.GetProperty("t").GetString()!);
+            if (at > until) break;
+            var ch = r.GetProperty("ch").GetString() ?? "";
+            var txt = r.GetProperty("text").GetString() ?? "";
+            if (EveningOutlook.Feed(ch, txt, at)) Console.WriteLine($"🌙 {at:HH:mm} @{ch}: {txt.Replace("\n", " ")[..Math.Min(110, txt.Replace("\n", " ").Length)]}");
+        }
+        var ev = EveningOutlook.EveningOf(until.AddSeconds(-1));
+        Console.WriteLine($"\n{EveningOutlook.Title(ev)}\n{string.Join("\n", EveningOutlook.Lines(null))}\n");
+    }
+    return;
+}
 if (args.Length >= 2 && args[0].Equals("outlook", StringComparison.OrdinalIgnoreCase))
 {
     var at0 = DateTime.Today.AddHours(21);
@@ -2741,6 +2764,13 @@ async Task OnUpdate(Update update)
             : uname != null && khChannels.Contains(uname) ? new[] { "Харківська" }
             : uname != null && kyChannels.Contains(uname) ? new[] { "Київська" }
             : Array.Empty<string>();
+        // 🌙 «Що вночі»: оцінка й прогнози на ніч від УСІХ моніторів, не лише від каналу пусків.
+        if (!cityChannels.Any(c => string.Equals(c.Handle.TrimStart('@'), uname, StringComparison.OrdinalIgnoreCase))
+            && EveningOutlook.Feed(uname ?? title, m.message, DateTime.Now, avFallback))
+        {
+            MapWriter.OutlookJson = EveningOutlook.Json(LaunchedTonight(DateTime.Now));
+            Ui.Line(ConsoleColor.Magenta, $"🌙 [{time}] {src} · прогноз на ніч");
+        }
         if (AviationFeed.Ingest(m.message, avFallback, src, DateTime.Now))
             Ui.Line(ConsoleColor.DarkYellow, $"✈  [{time}] {src} · авіація/КАБ — {string.Join(", ", AviationFeed.Active.Select(z => z.Canon + (z.Kab ? " (КАБ)" : "")))}");
 
@@ -3421,6 +3451,33 @@ async Task WarmStart()
         }
         catch { /* приватні недоступні — старт не роняем */ }
     }
+
+    // 🌙 Прогнози на ніч від усіх моніторів — із власного журналу (після оновлення сервера ввечері
+    // картка «Що вночі» інакше лишалась би з одним каналом).
+    try
+    {
+        var evn = EveningOutlook.EveningOf(DateTime.Now);
+        foreach (var day in new[] { evn, evn.AddDays(1) }.Where(d => d <= DateTime.Today))
+        {
+            var jf = Path.Combine("journal", $"{day:yyyy-MM-dd}.jsonl");
+            if (!File.Exists(jf)) continue;
+            foreach (var line in File.ReadLines(jf))
+            {
+                if (!line.Contains("\"kind\":\"post\"")) continue;
+                using var jd = System.Text.Json.JsonDocument.Parse(line);
+                var jr = jd.RootElement;
+                var when = day + TimeSpan.Parse(jr.GetProperty("t").GetString()!);
+                if (when < evn.AddHours(17) || when > DateTime.Now) continue;
+                var jch = jr.GetProperty("ch").GetString() ?? "";
+                bool trusted = SourceCatalog.Get(jch) is not null || khChannels.Contains(jch) || kyChannels.Contains(jch)
+                    || uaChannels.Contains(jch) || launchChannels.Contains(jch);
+                if (!trusted || cityChannels.Any(c => string.Equals(c.Handle.TrimStart('@'), jch, StringComparison.OrdinalIgnoreCase))) continue;
+                EveningOutlook.Feed(jch, jr.GetProperty("text").GetString() ?? "", when);
+            }
+        }
+        if (EveningOutlook.Has(evn)) MapWriter.OutlookJson = EveningOutlook.Json(null);
+    }
+    catch (Exception ex) { Console.Error.WriteLine("⚠ outlook з журналу: " + ex.Message); }
 
     // 🚀 Канали пусків: відновити останню хвилю й оцінку «у повітрі» (без пушів).
     foreach (var lu in launchChannels)
