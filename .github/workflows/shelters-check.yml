@@ -1,0 +1,46 @@
+# Перевірка пошуку укриттів (OpenStreetMap / Overpass): чи відповідають дзеркала і що знаходить
+# запит застосунку й бота біля точки. Запуск вручну: Actions → Shelters check → Run workflow.
+name: Shelters check
+
+on:
+  workflow_dispatch:
+    inputs:
+      lat: { description: 'Широта', default: '50.4501' }
+      lon: { description: 'Довгота', default: '30.5234' }
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query Overpass mirrors
+        env:
+          LAT: ${{ inputs.lat }}
+          LON: ${{ inputs.lon }}
+        run: |
+          A="(around:2500,$LAT,$LON)"
+          Q="[out:json][timeout:15];(nwr$A[\"amenity\"=\"shelter\"][\"shelter_type\"!~\"^(public_transport|picnic_shelter|weather_shelter|lean_to|basic_hut|field_shelter|rock_shelter|sun_shelter|gazebo|changing_rooms)$\"][\"public_transport\"!~\".\"][\"bus\"!=\"yes\"];nwr$A[\"building\"=\"bunker\"];nwr$A[\"bunker_type\"];node$A[\"railway\"=\"subway_entrance\"];nwr$A[\"station\"=\"subway\"];nwr$A[\"amenity\"=\"parking\"][\"parking\"=\"underground\"];);out center tags 80;"
+          OLD="[out:json][timeout:20];(node$A[\"amenity\"=\"shelter\"];way$A[\"amenity\"=\"shelter\"];node$A[\"railway\"=\"subway_entrance\"];node$A[\"station\"=\"subway\"];);out center 60;"
+          for h in overpass-api.de overpass.private.coffee overpass.kumi.systems; do
+            for ua in "" "Dart/3.9 (dart:io)" "WarAlarm/1.0 (shelter search)"; do
+              code=$(curl -s -o r.json -w "%{http_code} %{time_total}s" -m 30 -A "$ua" --data-urlencode "data=$Q" "https://$h/api/interpreter" || echo "fail")
+              echo "== $h · UA='$ua' → $code"
+            done
+          done
+          curl -s -m 30 -A "WarAlarm/1.0 (shelter search)" --data-urlencode "data=$Q" https://overpass-api.de/api/interpreter -o new.json || true
+          curl -s -m 30 -A "WarAlarm/1.0 (shelter search)" --data-urlencode "data=$OLD" https://overpass-api.de/api/interpreter -o old.json || true
+          python3 - <<'EOF'
+          import json, collections
+          for f in ("old.json", "new.json"):
+              try: els = json.load(open(f))["elements"]
+              except Exception as e: print(f, "error", e, open(f).read()[:300]); continue
+              c = collections.Counter()
+              for e in els:
+                  t = e.get("tags", {})
+                  k = ("shelter:" + t.get("shelter_type", "-") if t.get("amenity") == "shelter" else
+                       "bunker" if t.get("building") == "bunker" or "bunker_type" in t else
+                       "parking" if t.get("amenity") == "parking" else
+                       "metro_entrance" if t.get("railway") == "subway_entrance" else "metro")
+                  c[k] += 1
+              print(f, len(els), dict(c.most_common()))
+              for e in els[:12]: print("   ", e.get("tags", {}))
+          EOF
