@@ -239,10 +239,11 @@ window.render = t => {
   const cross = 19.4 + 3.2 * .62; rise($('f2b'), t, cross, 30, .5);
   // F3
   $('f3').style.opacity = vis(t, 24.5, 29);
-  const n = Math.min(4, Math.floor(cl((t - 25.0) / 1.6) * 4.999));
+  const n = Math.min(5, Math.floor(cl((t - 25.0) / 2.0) * 5.999));
   $('stars').textContent = '★'.repeat(n) + '☆'.repeat(5 - n);
-  $('starsT').textContent = `${n}/5 — ${['спокійно', 'низька', 'помірна', 'висока', 'дуже висока'][n]}`;
-  $('starsT').style.color = ['#3DDC84', '#A6E05A', '#FFD400', '#FF9A3D', '#FF4D4D'][n];
+  // Ті самі рівні, що в боті й застосунку (DangerStars).
+  $('starsT').textContent = `${n}/5 — ${['спокійно', 'низька', 'помірна', 'висока', 'дуже висока', 'критична'][n]}`;
+  $('starsT').style.color = ['#3DDC84', '#A6E05A', '#FFD400', '#FF9A3D', '#FF4D4D', '#FF2D55'][n];
   // F4
   $('f4').style.opacity = vis(t, 29, 34); rise($('f4a'), t, 29.4, 30, .6); rise($('f4b'), t, 31.2, 30, .6);
   // F5
