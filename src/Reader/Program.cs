@@ -445,6 +445,18 @@ if (args.Length >= 2 && args[0].Equals("fcast", StringComparison.OrdinalIgnoreCa
     return;
 }
 
+// ── 📢 Дошка основного каналу на момент [HH:mm] по журналу:   dotnet run -- boardsim journal/2026-11-26.jsonl 19:22
+if (args.Length >= 3 && args[0].Equals("boardsim", StringComparison.OrdinalIgnoreCase))
+{
+    var day = DateTime.Parse(Path.GetFileNameWithoutExtension(args[1]));
+    var tr = new ThreatTracker((HomeLat, HomeLon));
+    var until = TimeSpan.Parse(args[2]);
+    Journal.Drive(args[1], tr, until);
+    var act = tr.Active.Where(t => !t.Down && !t.Launch && t.Zone == "UA" && t.Pos is not null).ToList();
+    Console.WriteLine(Regex.Replace(BuildOblastPost(act), "<[^>]+>", ""));
+    return;
+}
+
 // ── 🔁 Прогін журналу через теперішній хаб:   dotnet run -- replay [РРРР-ММ-ДД|файл] [вихід.txt]
 if (args.Length >= 1 && args[0].Equals("replay", StringComparison.OrdinalIgnoreCase))
 {
@@ -1904,28 +1916,37 @@ static string BuildOblastPost(List<Threat> active, int airborne = -1)
 {
     var sb = new StringBuilder();
     var byRegion = active.Where(t => t.Pos is not null)
-        .GroupBy(t => OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon))
+        .GroupBy(t => OblastGeo.RegionNear(t.Pos!.Value.lat, t.Pos!.Value.lon))
         .OrderByDescending(g => g.Sum(t => t.Amount))
         .ToList();
     int total = airborne >= 0 ? airborne : active.Where(t => t.Pos is not null).Sum(t => t.Amount);
     sb.Append("🛸 <b>У повітрі ~").Append(total).AppendLine("</b> · рух по областях");
     sb.AppendLine();
-    foreach (var g in byRegion.Take(10))
+    // Усі області, поки пост вміщається в Telegram (4096; з запасом на підпис). Раніше — лише 10 і
+    // «…і ще 4 обл.» без назв, хоч пост був на 800 символів (26.11).
+    const int MaxLen = 3300;
+    var rest = new List<string>();
+    foreach (var g in byRegion)
     {
-        sb.Append("📍 <b>").Append(H(g.Key)).AppendLine("</b>");
-        var seen = new HashSet<string>();
-        int lines = 0;
-        foreach (var t in g.OrderByDescending(t => t.Amount))
-        {
-            var place = t.LastPlace.Length > 0 ? t.LastPlace : g.Key;
-            if (!seen.Add($"{t.Kind}|{place}")) continue;
-            if (lines++ >= 6) { sb.AppendLine("…"); break; }
-            sb.Append(ThreatParser.Icon(t.Kind)).Append(' ').Append(KindShort(t.Kind))
-              .Append(t.Amount > 1 ? $" ×{t.Amount}" : "").Append(" → ").AppendLine(H(place));
-        }
-        sb.AppendLine();
+        var part = new StringBuilder();
+        part.Append("📍 <b>").Append(H(g.Key)).AppendLine("</b>");
+        // Одна ціль, яку один канал назвав «ціль», а інший «БпЛА», — один рядок (26.11: «🎯 Ціль → Путивль»
+        // і одразу «🛩 БпЛА → Путивль»). «Ціль» лишається, лише коли в цьому місці нічого точнішого.
+        var specific = new HashSet<string>(g.Where(t => t.Kind != ThreatKind.Target).Select(t => t.LastPlace.Length > 0 ? t.LastPlace : g.Key));
+        var items = g.OrderByDescending(t => t.Amount)
+            .Select(t => (t, place: t.LastPlace.Length > 0 ? t.LastPlace : g.Key))
+            .Where(x => !(x.t.Kind == ThreatKind.Target && specific.Contains(x.place)))
+            .GroupBy(x => (x.t.Kind, x.place)).Select(x => x.First()).ToList();
+        foreach (var (t, place) in items.Take(6))
+            part.Append(ThreatParser.Icon(t.Kind)).Append(' ').Append(KindShort(t.Kind))
+                .Append(t.Amount > 1 ? $" ×{t.Amount}" : "").Append(" → ").AppendLine(H(place));
+        if (items.Count > 6) part.AppendLine($"…і ще {items.Count - 6}");
+        part.AppendLine();
+        if (rest.Count == 0 && sb.Length + part.Length <= MaxLen) sb.Append(part);
+        else rest.Add($"{g.Key} ({g.Sum(t => t.Amount)})");
     }
-    if (byRegion.Count > 10) sb.AppendLine($"…і ще {byRegion.Count - 10} обл.\n");
+    // Не влізло — хоч назви областей і скільки там.
+    if (rest.Count > 0) sb.Append("…і ще: ").AppendLine(H(string.Join(", ", rest))).AppendLine();
     return sb.ToString();
 }
 

@@ -48,6 +48,22 @@ public static class OblastGeo
         return en != null && ShortUa.TryGetValue(en, out var s) ? s : "Україна";
     }
 
+    /// Як Region, але точка трохи за спрощеним контуром (узбережжя, кордон: Затока, Вилкове) — до
+    /// найближчої області в межах [km]. Для дошки каналу, щоб не було групи «📍 Україна».
+    public static string RegionNear(double lat, double lon, double km = 25)
+    {
+        var r = Region(lat, lon);
+        if (r != "Україна") return r;
+        for (double d = 5; d <= km; d += 5)
+            for (int a = 0; a < 360; a += 30)
+            {
+                double rad = a * Math.PI / 180, la = lat + d * Math.Cos(rad) / 111, lo = lon + d * Math.Sin(rad) / (111 * Math.Cos(lat * Math.PI / 180));
+                var rr = Region(la, lo);
+                if (rr != "Україна") return rr;
+            }
+        return r;
+    }
+
     // Канонічна назва з ThreatParser («Сумська») → полігон.
     static readonly Dictionary<string, string> CanonToEn = new(StringComparer.OrdinalIgnoreCase)
     {

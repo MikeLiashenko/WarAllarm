@@ -98,7 +98,7 @@ public static class Journal
     }
 
     /// Прогнати весь журнал через хаб і [tr] мовчки, як наживо (для навчання потоків).
-    public static void Drive(string file, ThreatTracker tr)
+    public static void Drive(string file, ThreatTracker tr, TimeSpan? until = null)
     {
         var day = DateTime.TryParse(Path.GetFileNameWithoutExtension(file), out var dd) ? dd : DateTime.Today;
         var posts = new List<(string ch, int id, DateTime at, string text)>();
@@ -121,6 +121,7 @@ public static class Journal
         {
             // Пости попереднього дня в кінці журналу (23:59) — не стрибаємо в часі назад/вперед.
             if (last != default && at - last > TimeSpan.FromHours(3)) break;
+            if (until is { } u && at.TimeOfDay > u) break;
             last = at;
             tr.Tick(at, hub.ListCaps(at), hub.LastListAt);
             if (ch is "nebo_raketa" or "chyste_neboo")
@@ -130,7 +131,7 @@ public static class Journal
                     tr.Ingest(ke, "Київ", at);
                 continue;
             }
-            if (SourceCatalog.Get(ch) is not { } si || !inHub.Contains((ch, id))) continue;
+            if (SourceCatalog.Get(ch) is not { } si || inHub.Count > 0 && !inHub.Contains((ch, id))) continue; // журнал з публічних стрічок — без рядків хабу
             var r = hub.Process(si, text, at);
             foreach (var s in r.Statuses)
                 _ = s.Circling ? tr.MarkCircling(s.Pos, s.Kind, at) : tr.MarkShot(s.Pos, s.Kind, s.Shot, at, ch);
