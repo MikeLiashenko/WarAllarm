@@ -9,9 +9,11 @@ old military pillboxes are not shelters from air strikes.
 import json, sys, datetime, collections
 
 NOT_SHELTER = {"public_transport", "picnic_shelter", "weather_shelter", "lean_to", "basic_hut",
-               "field_shelter", "rock_shelter", "sun_shelter", "gazebo", "changing_rooms"}
+               "field_shelter", "rock_shelter", "sun_shelter", "gazebo", "changing_rooms", "pavilion", "pergola",
+               "roof", "bicycle_parking", "parking", "tent", "picnic", "picnic_shelters", "wildlife_hide",
+               "cat_shelter", "military", "smoking_shelter"}
 NOT_BUNKER = {"pillbox", "gun_emplacement", "munitions", "technical", "hardened_aircraft_shelter",
-              "missile_silo", "observation"}
+              "missile_silo", "observation", "mg_nest"}
 
 
 def coords(g):

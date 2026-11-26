@@ -480,6 +480,15 @@ if (args.Length >= 3 && args[0].Equals("boardsim", StringComparison.OrdinalIgnor
     return;
 }
 
+// ── 🏠 Укриття поруч (як у бота):   dotnet run -- shelters 50.39 30.51
+if (args.Length >= 3 && args[0].Equals("shelters", StringComparison.OrdinalIgnoreCase))
+{
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var txt = await Shelters.Near(double.Parse(args[1], CultureInfo.InvariantCulture), double.Parse(args[2], CultureInfo.InvariantCulture));
+    Console.WriteLine(Regex.Replace(txt, "<[^>]+>", "") + $"\n({sw.ElapsedMilliseconds} мс)");
+    return;
+}
+
 // ── 🔁 Прогін журналу через теперішній хаб:   dotnet run -- replay [РРРР-ММ-ДД|файл] [вихід.txt]
 if (args.Length >= 1 && args[0].Equals("replay", StringComparison.OrdinalIgnoreCase))
 {

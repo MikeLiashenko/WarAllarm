@@ -160,8 +160,10 @@ public static class Shelters
         var outp = new List<(string name, double lat, double lon, double km)>();
         foreach (var s in all.OrderBy(x => x.km))
         {
-            if (outp.Any(o => ThreatGeo.Km((o.lat, o.lon), (s.lat, s.lon)) < 0.12
-                    && (o.name == s.name || o.name.Contains("метро") && s.name.Contains("метро")))) continue;
+            // Та сама назва (інший вхід станції «Майдан Незалежності») — до 500 м; різні входи метро — до 120 м.
+            if (outp.Any(o => ThreatGeo.Km((o.lat, o.lon), (s.lat, s.lon)) is var d
+                    && (o.name == s.name && d < 0.5
+                        || d < 0.12 && o.name.Contains("метро", StringComparison.OrdinalIgnoreCase) && s.name.Contains("метро", StringComparison.OrdinalIgnoreCase)))) continue;
             outp.Add(s);
             if (outp.Count >= 8) break;
         }

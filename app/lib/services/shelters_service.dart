@@ -170,8 +170,12 @@ class SheltersService {
     // entrance, a shelter drawn as both a node and a building — within 120 m.
     final out = <Shelter>[];
     for (final s in all) {
-      if (out.any((o) => _km(o.lat, o.lon, s.lat, s.lon) < 0.12 &&
-          (o.name == s.name || o.name.contains('метро') && s.name.contains('метро')))) {
+      // Same name (another entrance of «Майдан Незалежності») — within 500 m; metro entrances — 120 m.
+      if (out.any((o) {
+        final d = _km(o.lat, o.lon, s.lat, s.lon);
+        return o.name == s.name && d < 0.5 ||
+            d < 0.12 && o.name.toLowerCase().contains('метро') && s.name.toLowerCase().contains('метро');
+      })) {
         continue;
       }
       out.add(s);
