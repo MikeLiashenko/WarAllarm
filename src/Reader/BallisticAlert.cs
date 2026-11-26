@@ -79,6 +79,9 @@ public static class BallisticAlert
     static readonly Regex AfterNews = new(@"^\W*🗞|внаслідок|в\s+результаті|постраждал|загинул|поранен|травмован|наслідк|зруйнован|пошкоджен"
         + @"|пострадал|погиб|ранен|последстви", O);
 
+    static readonly Regex Chatty = new(@"добр\w*\s+(?:вечір|вечора|ранку|ранок|день|дня|ніч)|добраніч|на\s+добраніч|шановн|друзі|панство|нагада\w*\s+(?:за|про)\s+збір"
+        + @"|(?:^|\s)збір|донат|дякую|дякуємо|підтримк|без\s+кота|бажаю|спокійної|тихої|добрый\s+вечер|друзья|спасибо", O);
+
     public static Kind Classify(string text)
     {
         if (Slang.EnemyPpo(text)) return Kind.EnemyPpo;
@@ -86,9 +89,16 @@ public static class BallisticAlert
         if (PpoOfBallistic.IsMatch(text) && text.Length <= 220 && !text.Contains('?')) return Kind.EnemyPpo;
         // «Загроза зберігається. Локаційно всюди чисто по балістиці» (26.11) — не відбій і не нова загроза:
         // що діє — хай діє, нового не вмикаємо.
-        if (Regex.IsMatch(text, @"загроз\w*\s+(?:\w+\s+){0,2}?зберіга|угроз\w*\s+(?:\w+\s+){0,2}?сохраня", O)) return Kind.None;
+        if (Regex.IsMatch(text, @"загроз\w*\s+(?:\w+\s+){0,2}?зберіга|угроз\w*\s+(?:\w+\s+){0,2}?сохраня|зберіга\w*\s+(?:\w+\s+){0,1}?загроз|сохраня\w*\s+(?:\w+\s+){0,1}?угроз", O)) return Kind.None;
+        // Вечірній допис монітора (26.11 22:49 @monitoring_kyiv: «Добрий вечір… На ніч зберігається загроза
+        // балістики, тому поки без кота… нагадаю за збір») — розмова, а не сигнал. Живий сигнал — коротко й по суті.
+        if (Chatty.IsMatch(text) && (text.Length > 160 || text.Count(c => c == '\n') >= 3)) return Kind.None;
         if (ThreatTracker.BallisticClearNow(text) || ClearMore.IsMatch(text)) return Kind.Clear;
         if (ThreatTracker.BallisticClear.IsMatch(text)) return Kind.None; // «буде відбій, якщо…» — ще ні те, ні те
+        // «На ніч зберігається загроза балістики» — прогноз; але «загроза балістики лишається… а от на ніч
+        // ховаємся» (25.11 22:51, одразу після удару) — живе: дивимось лише перший абзац.
+        var head = text.Replace("\r", "").Split("\n\n")[0];
+        if (Regex.IsMatch(head, @"на\s+(?:всю\s+)?ніч(?!\p{L})", O)) return Kind.None;
         return text.Length <= 400 && Slang.BallisticThreat(text) && !NotLive.IsMatch(text) && !Forecast.IsMatch(text) && !AfterNews.IsMatch(text) ? Kind.Threat : Kind.None;
     }
 
