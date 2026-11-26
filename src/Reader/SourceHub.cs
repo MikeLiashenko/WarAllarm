@@ -634,7 +634,10 @@ public sealed class SourceHub
             if (part.Contains(stem, StringComparison.OrdinalIgnoreCase)) return NotLive.IsMatch(part.Trim());
         return false;
     }
-    static readonly Regex Impact = new(@"удар(?:и|ів|ом|ами)? по|приліт|прилет|влучанн|загибл|загинул|поранен|за попередньою інформацією|—\s*терехов", RegexOptions.IgnoreCase);
+    // «Повний пакет 8 ракет прийшов в районі ТЕЦ-4», «Було 8 балістичних ракет» — звіт після удару, а не ціль
+    // (25.11: нова група «Балістика ×8» на карті вже після вибухів).
+    static readonly Regex Impact = new(@"удар(?:и|ів|ом|ами)? по|приліт|прилет|влучанн|загибл|загинул|поранен|за попередньою інформацією|—\s*терехов"
+        + @"|(?<!\p{L})прийш(?:ов|ла|ли)\s+(?:в|у|на|по)(?!\p{L})|(?<!\p{L})було\s+(?:~|близько\s+|щонайменше\s+|до\s+)?\d+(?:-\d+)?\s*(?:х\s*)?(?:балістичн|ракет)", RegexOptions.IgnoreCase);
     static readonly Regex Clear = new(
         @"^(?:✅|⚪️|❎|🟢)?\s*(?:відбій|отбой)|(?:область|київ|харків|місто|небо)\s*[—:-]?\s*чисто|наразі чисто|локаційно чисто|^\W*\p{L}+(?:щина|ччина)\s*[—:-]\s*чисто|над \w+ наразі чисто|^чисто\b|^[А-ЯІЇЄҐ][\w'ʼ’-]*\s+чисто\W*$|\s[—–-]\s*чисто\W*$",
         RegexOptions.IgnoreCase);
@@ -1311,6 +1314,8 @@ public sealed class SourceHub
     (string name, double lat, double lon)? Locate(string phrase, string? oblast, SourceInfo src, bool bare, out bool hadName)
     {
         hadName = true;
+        // «4 цілі на столицю» — Київ, звідки б не писав канал (25.11: запорізький канал → село Стила на Донеччині).
+        if (Regex.IsMatch(phrase, @"^\W*(?:на\s+|над\s+|по\s+)?столиц\p{L}*(?:\W*$|\s*:)", RegexOptions.IgnoreCase)) return ("Київ", 50.4547, 30.5238);
         // «на схід Кіровоградщини з Дніпропетровщини», «північ Чернігівщини» — частина області.
         var pm = Regex.Match(phrase, @"^\W*(?:на\s+)?(півн\w*|півд\w*|сх[іо]д\w*|зах[іо]д\w*|центр\w*)(?:[\s-]+(сх\w*|зах\w*))?\s+([\p{L}'\-]+(?:щин|ччин)\w*)", RegexOptions.IgnoreCase);
         if (pm.Success && Geo.Canonical(pm.Groups[3].Value) is { } po

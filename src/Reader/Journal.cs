@@ -66,6 +66,7 @@ public static class Journal
             var ch = key[..key.LastIndexOf('#')];
             tr.Tick(at, hub.ListCaps(at), hub.LastListAt);
             if (at.TimeOfDay > to) break;
+            BallisticStatus(tr, ch, text, at);
             // Два київські канали йдуть не в хаб, а через місцевий монітор.
             if (ch is "nebo_raketa" or "chyste_neboo")
             {
@@ -97,6 +98,19 @@ public static class Journal
             Console.WriteLine("   " + Describe(t, day + to));
     }
 
+    // Як наживо (Program.OnUpdate): «чисто по балістиці» знімає балістику, «вибухи у Києві» — вона долетіла.
+    static void BallisticStatus(ThreatTracker tr, string ch, string text, DateTime at)
+    {
+        var si = SourceCatalog.Get(ch);
+        var local = si is { Oblasts.Length: > 0 and <= 4 } ? si.Oblasts : null;
+        if (ThreatTracker.BallisticClearNow(text)) tr.ClearBallistic(local);
+        else if (System.Text.RegularExpressions.Regex.Match(text, @"вибух\w*\s+(?:у|в|на)\s+([А-ЯІЇЄҐ][\p{L}'’ʼ\-]+)") is { Success: true } vm
+                 && ThreatGeo.ResolveLocative(vm.Groups[1].Value) is { } vp)
+            tr.LandBallistic((vp.lat, vp.lon), at);
+        else if (System.Text.RegularExpressions.Regex.IsMatch(text, @"вибух\w*\s+(?:у|в)\s+столиц", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            tr.LandBallistic(TypicalRoutes.Kyiv, at);
+    }
+
     /// Прогнати весь журнал через хаб і [tr] мовчки, як наживо (для навчання потоків).
     public static void Drive(string file, ThreatTracker tr, TimeSpan? until = null)
     {
@@ -124,6 +138,7 @@ public static class Journal
             if (until is { } u && at.TimeOfDay > u) break;
             last = at;
             tr.Tick(at, hub.ListCaps(at), hub.LastListAt);
+            BallisticStatus(tr, ch, text, at);
             if (ch is "nebo_raketa" or "chyste_neboo")
             {
                 var ke = KyivMonitor.Analyze(text);

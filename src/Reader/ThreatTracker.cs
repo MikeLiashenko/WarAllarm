@@ -169,6 +169,16 @@ public sealed class ThreatTracker
             ua.MyArea |= e.Tier == KhTier.MyArea;
             return new TrackUpdate(ua, false, TrackSound.None, Note(ua));
         }
+        // Ракети/балістика: місцевий монітор («Ціль 🚀», «4 цілі») пише про ту саму атаку, що й усі
+        // («Балістика на Київ ×6») — одна група, а не дві (25.11: на карті «×6» і «×8» одних і тих самих).
+        if (isNew && e.Kind is ThreatKind.Missile or ThreatKind.Ballistic
+            && NearRocketUa(pos ?? ZoneCenter(zone), now) is { } uaR)
+        {
+            var cm0 = Regex.Match(e.Raw, @"(\d+)\s*(?:ракет|ціл|балістик)", RegexOptions.IgnoreCase);
+            if (cm0.Success && int.TryParse(cm0.Groups[1].Value, out var c0) && c0 <= 30) uaR.Count = Math.Max(uaR.Count, c0);
+            uaR.MyArea |= e.Tier == KhTier.MyArea;
+            return new TrackUpdate(uaR, false, TrackSound.None, Note(uaR));
+        }
         if (isNew)
         {
             t = new Threat { Id = key, Zone = zone, Kind = e.Kind, FirstSeen = now };
@@ -298,7 +308,23 @@ public sealed class ThreatTracker
                 _alias.Remove(placeKey);
                 return null;
             }
+            // Балістика щойно впала тут: перепост чи звіт «прийшов / було 8» — не нова ракета (крім «новий пуск», «ще»).
+            if (isNew && !approx && ev.Kind is ThreatKind.Ballistic or ThreatKind.Missile && BallJustLanded(pos, now)
+                && !Slang.NewTarget(ev.Raw) && !Regex.IsMatch(ev.Raw, @"пуск|ще\s+(?:одн|\d)|повторн", RegexOptions.IgnoreCase))
+            {
+                _alias.Remove(placeKey);
+                return null;
+            }
             if (isNew) { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
+            // Ракети/балістика, які місцевий монітор («4 цілі») уже намалював у своїй зоні, — та сама група.
+            if (!approx && ev.Kind is ThreatKind.Missile or ThreatKind.Ballistic)
+                foreach (var z in _active.Where(a => a.Value.Zone != "UA" && a.Value.Kind is ThreatKind.Missile or ThreatKind.Ballistic
+                                                     && (a.Value.Pos ?? ZoneCenter(a.Value.Zone)) is var zp && ThreatGeo.Km(zp, pos) <= 30).ToList())
+                {
+                    t!.Count = Math.Max(Math.Max(1, t.Count), z.Value.Count);
+                    t.MyArea |= z.Value.MyArea;
+                    _active.Remove(z.Key);
+                }
             // Місцевий монітор уже намалював цей дрон: лишається одна мітка.
             if (!approx && ev.Kind is ThreatKind.Drone or ThreatKind.Target)
                 foreach (var z in _active.Where(a => a.Value.Zone != "UA" && a.Value.Kind is ThreatKind.Drone or ThreatKind.Target
@@ -593,6 +619,25 @@ public sealed class ThreatTracker
 
     // Свіжа (≤10 хв) ціль у тій самій точці: того ж типу — до 0.6 км (дві назви одного місця), «ціль» і
     // дрон — до 1.5 км. Не з того самого поста (перелік місць) і не «новий/ще один» (канал каже — інша).
+    static (double lat, double lon) ZoneCenter(string zone) => zone switch
+    {
+        "Київ" => (50.4501, 30.5234), "Харків" => (49.9935, 36.2304), "Дніпро" => (48.4647, 35.0462), _ => (50.45, 30.52),
+    };
+    // Свіжа (≤5 хв) всеукраїнська ракета/балістика ≤30 км.
+    Threat? NearRocketUa((double lat, double lon) p, DateTime now) =>
+        _active.Values.Where(a => a.Zone == "UA" && a.Kind is ThreatKind.Missile or ThreatKind.Ballistic && !a.Down && !a.Launch
+                                  && a.Pos is { } ap && ThreatGeo.Km(ap, p) <= 30 && now - a.LastUpdate <= TimeSpan.FromMinutes(5))
+                      .OrderBy(a => ThreatGeo.Km(a.Pos!.Value, p)).FirstOrDefault();
+    // Де й коли балістика вже впала: запізнілі перепости «Балістика на Київ», «Близько 6 ракет на Київ!»
+    // не повертають її на карту (25.11: після вибухів о 22:47 знову «×6», ще й «×8» біля ТЕЦ).
+    readonly List<((double lat, double lon) at, DateTime when)> _ballLanded = new();
+    static readonly TimeSpan BallQuiet = TimeSpan.FromMinutes(5);
+    bool BallJustLanded((double lat, double lon) p, DateTime now)
+    {
+        _ballLanded.RemoveAll(x => now - x.when > BallQuiet);
+        return _ballLanded.Any(x => ThreatGeo.Km(x.at, p) <= 40);
+    }
+
     Threat? SameSpot(ThreatEvent ev, (double lat, double lon) pos, DateTime now)
     {
         if (Slang.NewTarget(ev.Raw) || ev.Kind is ThreatKind.Ballistic) return null;
@@ -832,6 +877,8 @@ public sealed class ThreatTracker
             var goneAfter = t.Kind == ThreatKind.Fpv ? TimeSpan.FromMinutes(12) // ФПВ-загроза громаді — коротка, канали повторюють
                           : t.Orbit ? TimeSpan.FromMinutes(15)                  // кружляє годинами, а пишуть не щохвилини
                           : t.LastPlace.EndsWith("(обл.)") ? TimeSpan.FromMinutes(15)
+                          // Балістика летить 1–5 хв: без нових постів 4 хв — уже долетіла (раніше висіла 10).
+                          : t.Kind == ThreatKind.Ballistic && !t.Launch ? TimeSpan.FromMinutes(4)
                           : t.Zone == "UA" ? TimeSpan.FromMinutes(10)
                           : TimeSpan.FromMinutes(4);
             // Зведення виходять раз на 5–10 хв, але бувають паузи на 15+ (1.11: 17:13→17:29), і карта
@@ -869,6 +916,7 @@ public sealed class ThreatTracker
             {
                 t.Stage = TrackStage.Gone;
                 _active.Remove(t.Id);
+                if (landed && t.Kind == ThreatKind.Ballistic && (t.To ?? t.Pos) is { } la) _ballLanded.Add((la, now));
                 outp.Add(new TrackUpdate(t, true, TrackSound.None, $"{Label(t)} — знято (тиша {age.TotalMinutes:0} хв)"));
                 continue;
             }
@@ -960,9 +1008,14 @@ public sealed class ThreatTracker
             || (t.To ?? t.Pos) is { } p && oblasts.Any(o => PlaceFinder.InOblast(p, o)))).Count;
 
     // «Вибухи у Києві» — балістика, що летіла туди (ціль ≤ 40 км), уже долетіла.
-    public int LandBallistic((double lat, double lon) at, DateTime now) =>
-        SweepWhere(t => t.Kind == ThreatKind.Ballistic && !t.Launch && t.To is { } to && ThreatGeo.Km(to, at) <= 40
-                        && now - t.FirstSeen > TimeSpan.FromSeconds(20)).Count;
+    public int LandBallistic((double lat, double lon) at, DateTime now)
+    {
+        lock (_gate) _ballLanded.Add((at, now));
+        return SweepWhere(t => t.Kind is ThreatKind.Ballistic or ThreatKind.Missile && !t.Launch
+                               && (t.To ?? t.Pos) is { } to && ThreatGeo.Km(to, at) <= 40
+                               && (t.Kind == ThreatKind.Ballistic || now - t.LastUpdate < TimeSpan.FromMinutes(6))
+                               && now - t.FirstSeen > TimeSpan.FromSeconds(20)).Count;
+    }
 
     // Погасить цели по произвольному условию (например, все цели в области, где офиц. отбой).
     public List<Threat> SweepWhere(Func<Threat, bool> pred)

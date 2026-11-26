@@ -228,6 +228,24 @@ public static class ThreatGeo
         lock (P) P.TryAdd(name, (lat, lon));
     }
 
+    // Місцевий відмінок великих міст: «вибухи у Києві», «у Харкові», «в Дніпрі» — Resolve їх не знаходив
+    // (25.11: «Вибухи в Києві» не знімали балістику з карти).
+    static readonly (string re, string city)[] Locative =
+    {
+        (@"^києв", "Київ"), (@"^харков", "Харків"), (@"^дніпр", "Дніпро"), (@"^одес", "Одеса"), (@"^запоріжж", "Запоріжжя"),
+        (@"^львов", "Львів"), (@"^сума(?:х)?$", "Суми"), (@"^полтав", "Полтава"), (@"^черніго", "Чернігів"), (@"^миколає", "Миколаїв"),
+        (@"^житомир", "Житомир"), (@"^вінниц", "Вінниця"), (@"^черкас", "Черкаси"), (@"^херсон", "Херсон"), (@"^кременчу", "Кременчук"),
+        (@"^кривому\s+роз", "Кривий Ріг"), (@"^біл\p{L}*\s+церкв", "Біла Церква"), (@"^броварах", "Бровари"),
+    };
+    public static (string name, double lat, double lon)? ResolveLocative(string? word)
+    {
+        if (string.IsNullOrWhiteSpace(word)) return null;
+        var w = word.Trim().ToLowerInvariant();
+        foreach (var (re, city) in Locative)
+            if (System.Text.RegularExpressions.Regex.IsMatch(w, re) && Of(city) is { } c) return (city, c.lat, c.lon);
+        return Resolve(word);
+    }
+
     // Ищет координаты по названию из поста (винительный падеж: «на Полтаву», «на Українку»).
     // Сначала точное имя, затем по основе (учёт -а→-у и т.п.). Берём самое длинное совпадение.
     public static (string name, double lat, double lon)? Resolve(string? city)

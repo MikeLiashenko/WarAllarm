@@ -133,7 +133,10 @@ public static class BallisticAlert
     // уже без нього (25.11 22:44: пуск з Брянська по Києву, а тривога загорілась і в Запоріжжі,
     // Дніпрі, Житомирі, на Донеччині — «Загроза балістики!», «Ⓜ️ Північна загроза балістики»).
     static (string name, double lat, double lon, DateTime at)? _lastSite;
-    static readonly TimeSpan SiteMemory = TimeSpan.FromMinutes(6);
+    // Хвиля перепостів — 1–3 хв (25.11: 1.5–2.8 хв); довше — уже може бути інший пуск.
+    static readonly TimeSpan SiteMemory = TimeSpan.FromMinutes(3);
+    /// Забути район пуску (офлайн-тести: кожен рядок — окрема ситуація).
+    public static void ForgetSite() { lock (Gate) _lastSite = null; }
 
     public static string[] ScopeOf(IEnumerable<string> localCanon, string text, DateTime? at = null)
     {

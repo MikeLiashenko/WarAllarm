@@ -609,7 +609,10 @@ if (args.Length >= 1 && args[0].Equals("slang", StringComparison.OrdinalIgnoreCa
     Console.WriteLine("\n── Загроза балістики: яких областей ──");
     foreach (var (post, loc) in new[] { ("🟣 Загроза балістики з Брянська. Увага.", Array.Empty<string>()), ("Загроза балістики з Бєлгорода", Array.Empty<string>()), ("Загроза балістики з Криму", Array.Empty<string>()),
         ("Угроза баллистики!", new[] { "Харківська" }), ("Загроза балістики", new[] { "Київська" }), ("❗️Загроза балістики", Array.Empty<string>()) })
+    {
+        BallisticAlert.ForgetSite(); // кожен рядок — окрема ситуація (район пуску не «перетікає»)
         Console.WriteLine($"{post,-40} [{string.Join(",", loc)}] → {BallisticAlert.Names(BallisticAlert.ScopeOf(loc, post))}");
+    }
     Console.WriteLine("\n── Зникла ──");
     foreach (var post in new[] { "Більше не фіксується", "Не фіксуються⚠️", "✅ Не фіксується", "без подальшої фіксації.", "Цей не фіксується.", "Локаційно не спостерігається", "Також не спостерігається.", "Припинив існування!", "втопили мразоту", "💥 По ній мінус", "Не фіксується по Харкову" })
         Console.WriteLine($"{post,-58} → зникла {Slang.LostCount(post)?.ToString() ?? "—"}, збито {Slang.ShotCount(post)?.ToString() ?? "—"}");
@@ -2748,7 +2751,7 @@ async Task OnUpdate(Update update)
         int ballGone = 0;
         if (ThreatTracker.BallisticClearNow(m.message)) ballGone = tracker.ClearBallistic(ballLocal);
         else if (Regex.Match(m.message, @"вибух\w*\s+(?:у|в|на)\s+([А-ЯІЇЄҐ][\p{L}'’ʼ\-]+)") is { Success: true } vm
-                 && ThreatGeo.Resolve(vm.Groups[1].Value) is { } vp)
+                 && ThreatGeo.ResolveLocative(vm.Groups[1].Value) is { } vp)
             ballGone = tracker.LandBallistic((vp.lat, vp.lon), DateTime.Now);
         else if (Regex.IsMatch(m.message, @"вибух\w*\s+(?:у|в)\s+столиц", RegexOptions.IgnoreCase))
             ballGone = tracker.LandBallistic(TypicalRoutes.Kyiv, DateTime.Now);
