@@ -65,7 +65,7 @@ public static class BallisticAlert
     // 25.11: «Розвідка США попереджає про високу загрозу масованого удару балістикою по Києву та області
     // протягом найближчих 48 годин» — теж прогноз.
     public static readonly Regex Forecast = new(@"протягом\s+(?:найближч\w*\s+)?(?:\d+\s+)?(?:ночі|ноч|годин|доби|діб|дня|днів|тижн)"
-        + @"|найближч\w*\s+(?:\d+\s+)?(?:годин|ноч|дн|доб|тижн)|найближч\w*\s+(?:\w+\s+)?(?:ноч|дн|доб|тижн)|розвідк\w*\s+(?:сша|британ)|загроз\w*\s+масованого|на\s+(?:цю|найближчу)\s+ніч|сьогодні\s+вночі|до\s+ранку"
+        + @"|(?:по\s+)?балісти\w*\s+тиша|найближч\w*\s+(?:\d+\s+)?(?:годин|ноч|дн|доб|тижн)|найближч\w*\s+(?:\w+\s+)?(?:ноч|дн|доб|тижн)|розвідк\w*\s+(?:сша|британ)|загроз\w*\s+масованого|на\s+(?:цю|найближчу)\s+ніч|сьогодні\s+вночі|до\s+ранку"
         + @"|увага\s+таким|ворог\s+планує|планує\s+(?:завдати|удар)|готу[єю]т?ься|підготува\w*|готові\s+до|в\s+наявності"
         + @"|(?:^|\n)\s*до\s+\d+\s+(?:\p{L}+\s+)?(?:балістичн|ракет)", O);
 
@@ -79,6 +79,9 @@ public static class BallisticAlert
         if (Slang.EnemyPpo(text)) return Kind.EnemyPpo;
         if (!Slang.BallisticMention(text)) return Kind.None;
         if (PpoOfBallistic.IsMatch(text) && text.Length <= 220 && !text.Contains('?')) return Kind.EnemyPpo;
+        // «Загроза зберігається. Локаційно всюди чисто по балістиці» (26.11) — не відбій і не нова загроза:
+        // що діє — хай діє, нового не вмикаємо.
+        if (Regex.IsMatch(text, @"загроз\w*\s+(?:\w+\s+){0,2}?зберіга|угроз\w*\s+(?:\w+\s+){0,2}?сохраня", O)) return Kind.None;
         if (ThreatTracker.BallisticClearNow(text) || ClearMore.IsMatch(text)) return Kind.Clear;
         if (ThreatTracker.BallisticClear.IsMatch(text)) return Kind.None; // «буде відбій, якщо…» — ще ні те, ні те
         return text.Length <= 400 && Slang.BallisticThreat(text) && !NotLive.IsMatch(text) && !Forecast.IsMatch(text) && !AfterNews.IsMatch(text) ? Kind.Threat : Kind.None;
