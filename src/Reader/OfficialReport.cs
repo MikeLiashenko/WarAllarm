@@ -31,6 +31,10 @@ public static class OfficialReports
             missiles = Num(t, @"-\s*(\d+)\s+(?:балістичн\w*\s+|крилат\w*\s+)?ракет");
             drones = Num(t, @"-\s*(\d+)\s+ударних\s+БпЛА");
         }
+        // Інший формат (27.11): «противник атакував 155 ударними БпЛА типу Shahed (83 із них – реактивні)…
+        // із напрямків: Орел, Міллерово…» — без «засобів … – N ракет і M БпЛА» і без дужок.
+        if (drones == 0) drones = Num(t, @"атакував\w*\s+(?:\d+\s+ракет\w*[^.]{0,80}?(?:і|та)\s+)?(\d+)\s+(?:ударн\w*\s+)?БпЛА");
+        if (missiles == 0) missiles = Num(t, @"атакував\w*\s+(\d+)\s+(?:балістичн\w*\s+|крилат\w*\s+|керован\w*\s+авіаційн\w*\s+)?ракет");
 
         // «(райони пуску – Курська, Брянська …)» — для ракет; «(із напрямків: …)» — для БпЛА.
         var mSites = new List<string>(); var dSites = new List<string>();
@@ -38,6 +42,8 @@ public static class OfficialReports
             mSites.AddRange(LaunchFeed.OriginsIn(m.Groups[1].Value));
         foreach (Match m in Regex.Matches(t, @"\(із\s+напрямк\w*\s*[–\-:]?\s*([^)]*)\)", RegexOptions.IgnoreCase))
             dSites.AddRange(LaunchFeed.OriginsIn(m.Groups[1].Value));
+        if (dSites.Count == 0 && Regex.Match(t, @"із\s+напрямк\w*\s*[–\-:]?\s*([^.]*)", RegexOptions.IgnoreCase) is { Success: true } dm)
+            dSites.AddRange(LaunchFeed.OriginsIn(dm.Groups[1].Value));
         // «ТОТ АР Крим - Гвардійське» дає і «Крим», і «Гвардійське» — лишаємо конкретне.
         if (dSites.Contains("Гвардійське")) dSites.Remove("Крим");
         if (mSites.Contains("Гвардійське")) mSites.Remove("Крим");
@@ -46,7 +52,7 @@ public static class OfficialReports
             ? tm.Groups[1].Value.Trim() : "";
 
         return new(missiles, drones,
-            Reactive: Num(t, @"в\s+т\.\s*ч\.\s*(\d+)\s+реактивн"),
+            Reactive: Num(t, @"в\s+т\.\s*ч\.\s*(\d+)\s+реактивн") is > 0 and var rv ? rv : Num(t, @"\((\d+)\s+із\s+них\s*[–\-]\s*реактивн"),
             Down: Num(t, @"збито\s*/?\s*(?:подавлено)?\s+(\d+)\s+(?:цілей|ворож)"),
             Hits: Num(t, @"на\s+(\d+)\s+локаці"),
             MissileSites: mSites.Where(s => LaunchFeed.SiteCoords(s) is not null).Distinct().ToList(),

@@ -38,7 +38,7 @@ public static class WeaponCatalog
         W("С-400", ThreatKind.Ballistic, 7000, @"(?<![a-zа-яіїєґ0-9])[сc][\s-]?400(?!\d)|" + Idx("48[нh]", "6")),
         W("РСЗВ «Торнадо-С»", ThreatKind.Missile, 3500, @"торнадо|tornado|смерч|" + Idx("9[мm]", "542")),
         W("РСЗВ «Ураган»", ThreatKind.Missile, 3000, @"\bураган|" + Idx("9[мm]", "27")),
-        W("РСЗВ «Град»", ThreatKind.Missile, 2500, @"\bрсз[вo]\b|(?<![a-zа-яіїєґ])град(?:ом|у|а|и)?\b|" + Idx("9[мm]", "22")),
+        W("РСЗВ «Град»", ThreatKind.Missile, 2500, @"\bрсз[воo]\b|(?<![a-zа-яіїєґ])град(?:ом|у|а|и)?\b|" + Idx("9[мm]", "22")),
         W("Швидкісна ціль", ThreatKind.Ballistic, 4000, @"швидкісн\w*\s+ціл\w*|скоростн\w*\s+цел\w*"),
         W("Іскандер", ThreatKind.Ballistic, 7000, @"іскандер|искандер|iskander"),
 

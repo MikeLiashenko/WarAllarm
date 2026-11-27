@@ -480,6 +480,18 @@ if (args.Length >= 3 && args[0].Equals("boardsim", StringComparison.OrdinalIgnor
     return;
 }
 
+// ── Як розібрано один пост (мінус / зникла / балістика / пуск):   dotnet run -- why "текст" ["текст2" …]
+if (args.Length >= 2 && args[0].Equals("why", StringComparison.OrdinalIgnoreCase))
+{
+    foreach (var t in args.Skip(1))
+    {
+        Console.WriteLine($"{t.Replace("\n", " ⏎ "),-60} → shot={Slang.ShotCount(t)?.ToString() ?? "-"} lost={Slang.LostCount(t)?.ToString() ?? "-"} ball={BallisticAlert.Classify(t)}"
+            + $" launch={(LaunchMention(t) ? "так" : "-")} kinds={string.Join(",", ThreatParser.Parse(t).Select(e => e.Kind + ":" + (e.City ?? e.Oblast ?? "?")))}");
+        if (OfficialReports.Parse(t) is { } rep) Console.WriteLine("   звіт ПС: " + rep);
+    }
+    return;
+}
+
 // ── 🏠 Укриття поруч (як у бота):   dotnet run -- shelters 50.39 30.51
 if (args.Length >= 3 && args[0].Equals("shelters", StringComparison.OrdinalIgnoreCase))
 {
@@ -1141,6 +1153,11 @@ var ppoSeen = new Dictionary<string, DateTime>(); // зона → коли во�
 DateTime? nuclearUntil = null; // ☢️ доки активна радіаційна/ядерна небезпека (30 хв від згадки)
 DateTime? lastLaunch = null;   // 🚀 коли востаннє попереджали про пуски (щоб не спамити)
 DateTime lastBallNews = DateTime.MinValue; // ☄ новинний канал: загроза балістики не частіше разу на 5 хв
+// ☄ Основний канал: одна загроза — один пост (нові області дописуємо правкою), а «вороже ППО» / відбій
+// за кілька хвилин — теж один пост, а не п'ять (27.11 00:07–00:13: ППО Київщина, ППО Чернігівщина,
+// відбій Харківщина, ППО Сумщина, відбій Полтавщина/Черкащина — окремими постами).
+long? ballPostId = null; string? ballPostFrom = null; var ballPostObl = new List<string>();
+long? ballEndId = null; DateTime ballEndAt = DateTime.MinValue; var ballEndPpo = new List<string>(); var ballEndClear = new List<string>();
 DateTime? lastBallistic = null; // ☄ коли востаннє будили через балістику (хаб джерел)
 var kyivOff = new SortedSet<int>(); // 🔌 черги Києва, які ЗАРАЗ без світла (з постів єСвітло)
 string? kyivOffAt = null;           // час останнього перемикання черг («11:30»)
@@ -1733,7 +1750,11 @@ static bool LaunchMention(string s)
         + @"|заход\w*\s+на\s+пуск"
         + @"|(\d{1,3})\s*[^.\n]{0,15}(шахед|шахід|ударн\w*\s+бпла)[^.\n]{0,25}(запуст|пуск|курс на україн|на україн|стартув)");
     bool newsy = Regex.IsMatch(l, @"можлив|ймовірн|імовірн|ризик|погроз|навчанн|аналіт|сценарі|минул|вчора|за добу|за ніч.{0,10}(підсум|збит)|збили|збито|знищено");
-    return strong && !newsy;
+    // «Станом на зараз тушки не активні, а масових пусків шахедів не було… Всім тихої ночі» (26.11 22:45
+    // @nebo_raketa) — це «пусків НЕМА», а пішло «🚀 УВАГА — ПУСК ШАХЕДІВ» у канал і пушем із сиреною.
+    bool none = Regex.IsMatch(l, @"не\s+було|не\s+бyло|немає|(?<!\p{L})нема(?!\p{L})|не\s+активн|не\s+фіксу|не\s+спостеріга|не\s+очіку"
+        + @"|без\s+(?:масов\w*\s+)?пуск|загроз\w*\s+(?:немає|нема|відсутн)|тихої\s+ночі|добраніч|спокійної\s+ночі|не\s+было|нет\s+пуск");
+    return strong && !newsy && !none;
 }
 
 // Кількість із поста про пуск: «~30 шахедів», «30 ударних БпЛА», «пуск 30 …».
@@ -3081,11 +3102,23 @@ async Task BallisticWatch(string text, string[] localCanon, string src, string t
         MapWriter.Write(MapPath, tracker, MyDistrict, now); // застосунок: state.ballThreat
         foreach (var cc in cityChannels)
             if (cc.BallisticPost(from, fresh, now) is { } bp) await cc.Post(bp, null, silent: false);
-        if (channelPoster is not null && now - lastBallNews > TimeSpan.FromMinutes(5))
+        if (channelPoster is not null)
         {
-            lastBallNews = now;
-            await channelPoster.Post($"☄️ <b>Загроза балістики</b>{(from != null ? $" · район пуску: {H(from)}" : "")}\n"
-                + $"{H(BallisticAlert.Names(fresh))}\nПуску ще немає — будь ближче до укриття.\n\n{ChannelFoot()}", null);
+            string BallText() => $"☄️ <b>Загроза балістики</b>{(ballPostFrom != null ? $" · район пуску: {H(ballPostFrom)}" : "")}\n"
+                + $"{H(string.Join(", ", ballPostObl))}\nПуску ще немає — будь ближче до укриття.\n\n{ChannelFoot()}";
+            if (now - lastBallNews > TimeSpan.FromMinutes(5) || ballPostId is null)
+            {
+                lastBallNews = now; ballPostFrom = from; ballPostObl = BallisticAlert.Names(fresh).Split(", ").ToList();
+                ballPostId = await channelPoster.Post(BallText(), null);
+                ballEndId = null; ballEndPpo.Clear(); ballEndClear.Clear();
+            }
+            else
+            {
+                // Ще області до тієї самої загрози (перепост з ширшим переліком) — дописуємо в той самий пост.
+                var add = BallisticAlert.Names(fresh).Split(", ").Where(n => !ballPostObl.Contains(n)).ToList();
+                ballPostFrom ??= from;
+                if (add.Count > 0) { ballPostObl.AddRange(add); await channelPoster.Edit(ballPostId.Value, BallText()); }
+            }
         }
         return;
     }
@@ -3097,9 +3130,24 @@ async Task BallisticWatch(string text, string[] localCanon, string src, string t
         Ui.Line(ConsoleColor.Green, $"{(ppo ? "🛡" : "🟢")} [{time}] {src} · {(ppo ? "працює вороже ППО" : "відбій")} — загрозу балістики знято: {BallisticAlert.Names(gone)}");
         MapWriter.Write(MapPath, tracker, MyDistrict, now);
         if (channelPoster is not null)
-            await channelPoster.Post(ppo
-                ? $"🛡 <b>Працює вороже ППО</b>\nЗагрозу балістики знято — схоже, це не пуски по нас ({H(BallisticAlert.Names(gone))}).\nДо офіційного відбою — уважно.\n\n{ChannelFoot()}"
-                : $"🟢 <b>Відбій загрози балістики</b>\n{H(BallisticAlert.Names(gone))}\n\n{ChannelFoot()}", null, silent: true);
+        {
+            // Усе, що знімає загрозу за ці хвилини, — в одному пості (правкою).
+            var names = BallisticAlert.Names(gone).Split(", ");
+            bool newEnd = ballEndId is null || now - ballEndAt >= TimeSpan.FromMinutes(20);
+            if (newEnd) { ballEndPpo.Clear(); ballEndClear.Clear(); }
+            var list = ppo ? ballEndPpo : ballEndClear;
+            foreach (var n in names) if (!ballEndPpo.Contains(n) && !ballEndClear.Contains(n)) list.Add(n);
+            var sb = new StringBuilder();
+            if (ballEndPpo.Count > 0)
+                sb.Append($"🛡 <b>Працює вороже ППО</b>\nЗагрозу балістики знято — схоже, це не пуски по нас ({H(string.Join(", ", ballEndPpo))}).\n");
+            if (ballEndClear.Count > 0)
+                sb.Append(ballEndPpo.Count > 0 ? $"🟢 Відбій загрози: {H(string.Join(", ", ballEndClear))}\n"
+                                               : $"🟢 <b>Відбій загрози балістики</b>\n{H(string.Join(", ", ballEndClear))}\n");
+            if (ballEndPpo.Count > 0) sb.Append("До офіційного відбою — уважно.\n");
+            sb.Append('\n').Append(ChannelFoot());
+            if (!newEnd && ballEndId is { } eid) await channelPoster.Edit(eid, sb.ToString());
+            else { ballEndId = await channelPoster.Post(sb.ToString(), null, silent: true); ballEndAt = now; }
+        }
     }
     else if (ppo) Ui.Line(ConsoleColor.DarkGray, $"🛡 [{time}] {src} · працює вороже ППО (загрози балістики не було)");
     foreach (var cc in cityChannels)

@@ -147,11 +147,16 @@ public static class Slang
     static readonly Regex NotShot = new(@"світл|свет|відео|видео|фото|такой|твой|градус|мороз|температур", O);
 
     /// Рядок цілком каже «цю збили»: скільки (за замовч. 1), інакше null.
+    /// «Упал😔» — упав і вибухнув (влучання), а не збили: сумний смайлик (27.11 02:13 → «🎯 Минус»).
+    // Не [😔😢…]: у .NET емодзі — пари сурогатів, і клас символів ловив би будь-яке (💥 теж).
+    public static bool Sad(string text) => Regex.IsMatch(text, "😔|😢|😞|😥|💔|😭|😿");
+
     public static int? ShotCount(string line)
     {
         var l = Regex.Replace(Normalize(line).Trim().Replace('—', '–'), @"[^\p{L}\d\s\-−–]+", " ");
         l = Regex.Replace(l, @"\s+", " ").Trim().ToLowerInvariant();
         if (l.Length is 0 or > 48 || NotShot.IsMatch(l)) return null;
+        if (Sad(line)) return null;
         if (Both.IsMatch(l)) return 2;
         foreach (var re in Shots)
             if (re.Match(l) is { Success: true } m)

@@ -428,12 +428,15 @@ public static class NightSummary
             if (o.Hits > 0) sb.AppendLine($"💥 Влучання: {o.Hits} локацій");
             sb.AppendLine();
         }
-        if (d.Launched > 0)
+        // Офіційне число БпЛА вже є — наш лік хвиль (лише ті, що бачив канал пусків) його лише плутає
+        // (27.11: «Збито 110» і поруч «Запущено шахедів ~20»).
+        bool ownLaunch = d.Launched > 0 && d.Official is not { Drones: > 0 };
+        if (ownLaunch)
             sb.AppendLine($"🚀 Запущено шахедів: ~{d.Launched} (хвиль: {d.Waves.Count}"
                 + (d.Waves.Sum(w => w.Items.Where(i => i.Reactive).Sum(i => i.N)) is > 0 and var r ? $", реактивних ~{r}" : "") + ")");
         var sites = d.Waves.SelectMany(w => w.Items).GroupBy(i => i.Origin)
                      .OrderByDescending(g => g.Sum(i => i.N)).Take(5).Select(g => $"{g.Key} {g.Sum(i => i.N)}");
-        if (d.Launched > 0) sb.AppendLine("🛫 Звідки: " + T(string.Join(", ", sites)));
+        if (ownLaunch) sb.AppendLine("🛫 Звідки: " + T(string.Join(", ", sites)));
         if (d.Ballistics.Count > 0)
         {
             var byT = d.Ballistics.GroupBy(b => b.Target).OrderByDescending(g => g.Sum(b => b.N))

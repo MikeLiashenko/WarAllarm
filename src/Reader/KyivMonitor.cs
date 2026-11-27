@@ -140,6 +140,11 @@ public static class KyivMonitor
         if (Regex.IsMatch(l, ThreatParser.DroneRe)) return (ThreatKind.Drone, null);
         if (l.Contains("ракет") || l.Contains("крилат") || l.Contains("кинджал") || l.Contains("іскандер") || l.Contains("онікс") || Regex.IsMatch(l, @"х[-\s]?\d{2,3}|с[-\s]?300")) return (ThreatKind.Missile, null);
         if (Regex.IsMatch(l, @"розвід|дорозвід")) return (ThreatKind.Drone, "розвідка");
+        // Монітор поставив лише значок типу: «🛵 1 в області на Іванків йде» (27.11 03:12 — вийшло «🎯 Ціль»).
+        if (l.Contains("🛵")) return (ThreatKind.Drone, null);
+        if (l.Contains('☄')) return (ThreatKind.Ballistic, null);
+        if (l.Contains("💣")) return (ThreatKind.Kab, null);
+        if (l.Contains("🚀")) return (ThreatKind.Missile, null);
         return (ThreatKind.Unknown, null);
     }
 }

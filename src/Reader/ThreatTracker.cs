@@ -182,8 +182,17 @@ public sealed class ThreatTracker
         if (isNew)
         {
             t = new Threat { Id = key, Zone = zone, Kind = e.Kind, FirstSeen = now };
+            // Монітор перелічує, куди веде той самий дрон («Гостомель / Буча / Чайки», «Глеваха, Васильків»):
+            // нова точка без типу поруч зі свіжою ціллю зони — той самий тип, а не «🎯 Ціль» (27.11 03:16).
+            if (e.Kind is ThreatKind.Target or ThreatKind.Unknown && pos is { } np0
+                && _active.Values.Where(a => a.Zone == zone && a.Kind is not (ThreatKind.Target or ThreatKind.Unknown)
+                        && !a.Down && now - a.LastUpdate < TimeSpan.FromMinutes(4) && a.Pos is { } ap0 && ThreatGeo.Km(ap0, np0) <= 40)
+                    .OrderByDescending(a => a.LastUpdate).FirstOrDefault() is { } kin)
+            { t.Kind = kin.Kind; t.Ammo = kin.Ammo; }
             _active[key] = t;
         }
+        // Ціль без типу («Курсом на Вишгород»), а тепер монітор назвав її («Реактивний на Гостомель») — уточнюємо.
+        if (t!.Kind is ThreatKind.Target or ThreatKind.Unknown && e.Kind is not (ThreatKind.Target or ThreatKind.Unknown or ThreatKind.AllClear)) t.Kind = e.Kind;
         t!.Ammo ??= FitAmmo(t.Kind, e.Extra);
         // Розвідка/дорозвідка — низький пріоритет (не виє, не будить). Якщо в апдейті
         // з'явилось слово удару — знімаємо позначку (ціль ескалювала з розвідки в удар).

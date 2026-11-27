@@ -748,7 +748,7 @@ public sealed class SourceHub
                 if (Slang.MissilesDone(line)) { missiles = true; continue; }
                 // Спершу місце: «Ізюм мінус 2» — про Ізюм, а не про останню ціль каналу.
                 string? named = Slang.ShotPlace(line);
-                int? shot = named is null ? Slang.ShotCount(line) : null;
+                int? shot = named is null && !Slang.Sad(text) ? Slang.ShotCount(line) : null;
                 int? lost = named is null && shot is null ? Slang.LostCount(line) : null;
                 if (lost is { } gone)
                 {

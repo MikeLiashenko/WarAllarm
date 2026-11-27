@@ -198,6 +198,10 @@ public sealed class CityChannel
     {
         var places = e.Places.Count > 0 ? string.Join(", ", e.Places) : t.LastPlace;
         if (ru) places = RuPlace(places);
+        // Пост без типу («Гостомель / Буча / Чайки», «Курсом на Вишгород») — про ціль, яку вже ведемо: беремо
+        // її тип, а не «🎯 Ціль» (27.11 03:16 — «Реакт. шахед на Гостомель» і одразу «🎯 Ціль на Гостомель»).
+        if (e.Kind is ThreatKind.Target or ThreatKind.Unknown && t.Kind is not (ThreatKind.Target or ThreatKind.Unknown))
+            e = e with { Kind = t.Kind, Extra = e.Extra ?? (t.Kind == ThreatKind.Drone && (t.Ammo ?? "").Contains("реакт", StringComparison.OrdinalIgnoreCase) ? "реакт. шахед" : null) };
         var icon = e.Kind switch
         {
             ThreatKind.Drone => "🛵",
