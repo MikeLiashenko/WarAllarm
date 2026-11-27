@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- Alarm output: vibrate the phone and keep the screen awake during a raid. -->
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Голосові повідомлення в чаті -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <!-- Background alarm: keep watching with the app closed / phone locked. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>

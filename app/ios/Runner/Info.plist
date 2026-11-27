@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Щоб записувати голосові повідомлення в чаті.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Щоб надіслати фото в чат або поставити аватар.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Щоб зробити фото для чату або аватара.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

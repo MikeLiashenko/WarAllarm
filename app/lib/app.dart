@@ -90,7 +90,7 @@ class WarAlarmApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<ChatController>(
           create: (_) =>
-              ChatController(rtdb, currentUser: settings.displayName)..start(),
+              ChatController(rtdb, store, suggestedName: settings.displayName),
         ),
         ChangeNotifierProvider<AiController>(create: (_) => AiController(store)),
         ChangeNotifierProvider<ApiKeysController>(

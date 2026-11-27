@@ -454,6 +454,14 @@ if (args.Length >= 1 && args[0].Equals("journal", StringComparison.OrdinalIgnore
 }
 
 // ── 🔎 Аудит карти по журналу:   dotnet run -- audit journal/2026-11-15.jsonl [HH:mm HH:mm] [-v]
+// ── 💬 Чат без Telegram (налагодження на тестовій базі):  dotnet run -- chatrelay <url> <secret> [admin-uid]
+if (args.Length >= 3 && args[0].Equals("chatrelay", StringComparison.OrdinalIgnoreCase))
+{
+    new ChatRelay(args[1], args[2], args.Skip(3)).Start();
+    await Task.Delay(Timeout.Infinite);
+    return;
+}
+
 if (args.Length >= 2 && args[0].Equals("audit", StringComparison.OrdinalIgnoreCase))
 {
     var times = args.Skip(2).Where(a => a.Contains(':')).Select(TimeSpan.Parse).ToList();
@@ -1033,6 +1041,14 @@ using var client = new Client(Config);
 client.FloodRetryThreshold = 900;
 var me = await client.LoginUserIfNeeded();
 Console.WriteLine($"✅ Вошли как: {me.first_name} {me.last_name} (@{me.username})\n");
+
+// 💬 Чат застосунку: сервер — єдиний, хто публікує (перевірка 13+, ключ пристрою, ліміти, модерація).
+if (!string.IsNullOrWhiteSpace(fbSecret) && !(args.Length >= 1 && args[0].Equals("nightbatch", StringComparison.OrdinalIgnoreCase)))
+{
+    var chatAdmins = (SecretOpt("chat_admins") ?? cfg.GetValueOrDefault("chat_admins") ?? "")
+        .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+    new ChatRelay(fbUrl, fbSecret, chatAdmins).Start();
+}
 
 // ── 🌙 Пакетна генерація ночей:  dotnet run -- nightbatch [YYYY-MM-DD-from] [YYYY-MM-DD-to]
 if (args.Length >= 1 && args[0].Equals("nightbatch", StringComparison.OrdinalIgnoreCase))
