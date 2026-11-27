@@ -326,8 +326,34 @@ public static class MapImage
         var zones = AviationFeed.MapZones().Where(z => ShowAt((z.lat, z.lon))).ToList();
         var groups = LaunchGroups.Active.Where(g => ShowAt(g.PosAt(now))).ToList();
         float Km2Px(double km) => (float)(km * pxPerKm);
-        // Де мітка зараз: «на Харків» — ще на шляху до міста, а не над ним.
-        SKPoint DP(Threat t) { var q = t.DrawPos(now)!.Value; return P(q.lon, q.lat); }
+        // Де мітка зараз: «на Харків» — ще на шляху до міста, а не над ним. Але не далі межі тривоги:
+        // 27.11 «2 реактивні на Миргород» з'їхали з жовтого Лубенського району в Миргородський без тривоги
+        // (застосунок і сайт зупиняють рух на межі, картинка для каналів — ні).
+        var alarmRai = new Dictionary<string, string>();
+        if (raionLevels is not null) foreach (var kv in raionLevels) alarmRai[Napo(kv.Key)] = kv.Value;
+        bool haveAlarm = (oblastWhole is { Count: > 0 }) || alarmRai.Count > 0;
+        bool InAlarm((double lat, double lon) q)
+        {
+            if (!haveAlarm) return true;
+            if (OblastGeo.PolyName(q.lat, q.lon) is { } ob && oblastWhole is not null && oblastWhole.ContainsKey(ob)) return true;
+            return OblastGeo.RaionAt(q.lat, q.lon) is { } rn && alarmRai.ContainsKey(Napo(rn));
+        }
+        SKPoint DP(Threat t)
+        {
+            var q = t.DrawPos(now)!.Value;
+            if (t.Approach is { } a && !InAlarm(q) && InAlarm(a))
+            {
+                // Остання точка відрізка «звідки → куди» ще в зоні тривоги (двійковий пошук).
+                double lo = 0, hi = 1;
+                for (int i = 0; i < 14; i++)
+                {
+                    double m = (lo + hi) / 2;
+                    if (InAlarm((a.lat + (q.lat - a.lat) * m, a.lon + (q.lon - a.lon) * m))) lo = m; else hi = m;
+                }
+                q = (a.lat + (q.lat - a.lat) * lo, a.lon + (q.lon - a.lon) * lo);
+            }
+            return P(q.lon, q.lat);
+        }
 
         // Де зараз мітка польоту і скільки лишилось (хв) — та сама формула, що в застосунку.
         (SKPoint at, float heading, double left, bool landed) FlightNow(Threat t)

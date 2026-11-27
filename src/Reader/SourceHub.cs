@@ -132,6 +132,31 @@ public static class SourceCatalog
         ["war_monitor"] = A("war_monitor"),
         ["monitoring_zaxid"] = A("monitoring_zaxid", West),
         ["rocket_danger_lviv"] = A("rocket_danger_lviv", "Львівська"),
+
+        // ── Додано 27.11 (пошук + перевірка t.me/s: активні за добу, ≥40% постів про цілі, мало спільних постів
+        //    з уже підключеними — тобто незалежні очі, а не копії). Найбільше бракувало заходу й Кіровоградщини.
+        // Всеукраїнські зведення «N шахедів курсом на …»:
+        ["deraketaua"] = A("deraketaua"),                 // «Де Ракета?» ~155 тис.
+        ["mon1tor_ua"] = A("mon1tor_ua"),                 // «ППО радар» ~264 тис.
+        ["operinform"] = A("operinform"),                 // «Оперативний інформ» ~135 тис.
+        ["PpoUARadar"] = A("PpoUARadar"),                 // «ППО РАДАР 🇺🇦» ~27 тис.
+        ["nashe_ppo_monitoring"] = A("nashe_ppo_monitoring"), // «НАШЕ ППО» ~43 тис.
+        ["ua_radar_raket"] = A("ua_radar_raket"),         // «Радар ракет» ~35 тис., добре веде захід
+        ["monitorwarr"] = A("monitorwarr", "Київська", "Житомирська", "Волинська", "Рівненська"), // «monitoring» ~85 тис.
+        // Регіональні:
+        ["NochnojDozorKh"] = R("NochnojDozorKh", "Харківська"),      // «Ночной дозор Харьков» ~69 тис.
+        ["zlatopil24_7"] = R("zlatopil24_7", "Харківська"),          // Златопіль (Первомайський) і південь області
+        ["kropPPY"] = R("kropPPY", "Кіровоградська"),                // «ППУ | Кропивницький» ~38 тис., ~35 постів/год у наліт
+        ["Kropuvainfo"] = R("Kropuvainfo", "Кіровоградська"),        // «Кропивницьке небо»
+        ["InfoROMen"] = R("InfoROMen", "Сумська"),                   // Ромни й захід Сумщини ~54 тис.
+        ["Angry_Pol"] = R("Angry_Pol", "Житомирська"),               // «Злі Полісяни Житомир» ~64 тис.
+        ["truexazhitomir"] = R("truexazhitomir", "Житомирська"),     // «Новий реактивний БпЛА на Коростень»
+        ["ny_i_dnipro"] = R("ny_i_dnipro", "Дніпропетровська"),      // «НУ І ДНІПРО!» ~292 тис.
+        ["truexaternopil"] = R("truexaternopil", "Тернопільська"),
+        ["khmlv"] = R("khmlv", "Хмельницька"),                       // «Хмельницький LIVE» ~300 тис.
+        ["truexafrankivsk"] = R("truexafrankivsk", "Івано-Франківська"), // «Бурштин, уважно!» ~169 тис.
+        ["konkurentinua"] = R("konkurentinua", "Волинська"),         // «Конкурент» (Луцьк і Волинь)
+        ["vinnytsiarealll"] = R("vinnytsiarealll", "Вінницька"),     // «Реальна Вінниця» ~353 тис.
     };
 
     public static SourceInfo? Get(string? user) =>

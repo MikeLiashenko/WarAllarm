@@ -2635,6 +2635,38 @@ try
     Ui.Line(hubMissing.Count == 0 ? ConsoleColor.Green : ConsoleColor.Yellow,
         $"📡 Джерела: підписаний на {SourceCatalog.All.Count - hubMissing.Count}/{SourceCatalog.All.Count}"
         + (hubMissing.Count > 0 ? " · без підписки: " + string.Join(", ", hubMissing.Take(12).Select(u => "@" + u)) + (hubMissing.Count > 12 ? "…" : "") : ""));
+    // ➕ Нові джерела каталогу — підписуємось самі (auto_join=0 у settings.local.txt вимикає): по одному раз на
+    // 40 с (Telegram лімітує вступи) і одразу без звуку, щоб телефон власника не дзвонив від 20 нових каналів.
+    if (hubMissing.Count > 0 && cfg.GetValueOrDefault("auto_join", "1") != "0")
+        _ = Task.Run(async () =>
+        {
+            int joined = 0;
+            foreach (var u in hubMissing.Take(25))
+            {
+                try
+                {
+                    var res = await client.Contacts_ResolveUsername(u);
+                    if (res.chats.Values.OfType<Channel>().FirstOrDefault() is not { } jc) continue;
+                    await client.Channels_JoinChannel(jc);
+                    try
+                    {
+                        await client.Account_UpdateNotifySettings(new InputNotifyPeer { peer = jc },
+                            new InputPeerNotifySettings { flags = InputPeerNotifySettings.Flags.has_mute_until, mute_until = new DateTime(2038, 1, 1, 0, 0, 0, DateTimeKind.Utc) });
+                    }
+                    catch (Exception mex) { Console.Error.WriteLine($"⚠ без звуку @{u}: {mex.Message}"); }
+                    joined++;
+                    Ui.Line(ConsoleColor.Green, $"➕ Підписався на джерело @{u} (без звуку)");
+                }
+                catch (RpcException rex) when (rex.Code == 420)
+                {
+                    Ui.Line(ConsoleColor.DarkYellow, $"⏸ Telegram просить зачекати ({rex.X} с) — решту джерел підпишу після перезапуску");
+                    break;
+                }
+                catch (Exception jex) { Console.Error.WriteLine($"⚠ підписка @{u}: {jex.Message}"); }
+                await Task.Delay(TimeSpan.FromSeconds(40));
+            }
+            if (joined > 0) Ui.Line(ConsoleColor.Green, $"📡 Нових джерел: +{joined}");
+        });
 }
 catch (Exception ex)
 {
