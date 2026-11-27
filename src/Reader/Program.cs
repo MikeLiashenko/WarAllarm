@@ -2265,6 +2265,10 @@ string RiskAt(double lat, double lon)
     var (ballOn, ballFrom) = BallisticAlert.At(lat, lon, DateTime.Now);
     var ballText = "☄ Загроза балістики" + (ballFrom is { } bf ? $" · район пуску: {bf}" : "");
     var list = tracker.Active.Where(t => t.Pos is not null && !t.Approx).ToList(); // приблизні (центр області) — не тривога
+    // 💣 Загроза КАБ: авіація на пускових біля міста користувача (у межах дальності КАБ) — тривога лише тим, хто там.
+    var kab = AviationFeed.MapZones().Where(z => z.kab && ThreatGeo.Km((z.lat, z.lon), pt) <= z.areaKm)
+        .OrderBy(z => ThreatGeo.Km((z.lat, z.lon), pt)).FirstOrDefault();
+    if (kab.kab && !ballOn) { ballOn = true; ballText = "💣 Загроза КАБ" + (kab.where is { Length: > 0 } kw ? $" · {kw}" : ""); }
     if (list.Count == 0) return ballOn ? (true, ballText) : (false, "");
     Threat? top = null; double nearest = double.MaxValue;
     foreach (var t in list)
@@ -3006,7 +3010,19 @@ async Task OnUpdate(Update update)
             MapWriter.CarrierJson = $"{{\"name\":\"МіГ-31К\",\"up\":true,\"ts\":{((DateTimeOffset)DateTime.UtcNow).ToUnixTimeMilliseconds()}}}";
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
         }
-        if (!recent)
+        // КАБ і «авіація заходить на пуски» — загроза однієї прифронтової області, а не всієї країни: в
+        // основний канал (його читають усі) не пишемо, пуш власнику — лише коли КАБ-зона біля дому. Хто в
+        // зоні — дізнається з бота (AlarmAt: «💣 Загроза КАБ») і міського каналу своєї області.
+        bool kabLocal = lKind == ThreatKind.Kab;
+        if (!recent && kabLocal)
+        {
+            bool nearHome = AviationFeed.MapZones().Any(z => z.kab && ThreatGeo.Km((z.lat, z.lon), (HomeLat, HomeLon)) <= z.areaKm + 30);
+            if (nearHome)
+                await Notify("UA", new AlarmInfo(time, src, $"{icon} {head}! {advice}", txt, lKind, true, Silent: false), clear: false);
+            else
+                Ui.Line(ConsoleColor.DarkGray, $"{icon} [{time}] {src} · {head} — не твоя область: без пушу й посту в основний канал");
+        }
+        else if (!recent)
         {
             if (OperatingSystem.IsWindows()) SirenSound.PlayStage(TrackSound.Imminent, lKind);
             await Notify("UA", new AlarmInfo(time, src, $"{icon} {head}! {advice}", txt, lKind, true, Silent: false), clear: false);
