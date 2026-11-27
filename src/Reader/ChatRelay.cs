@@ -242,7 +242,13 @@ public sealed class ChatRelay
     async Task<string?> Profile(string uid, JsonObject r, bool admin)
     {
         var age13 = r["age13"] is JsonValue av && av.TryGetValue<bool>(out var age) && age;
-        if (!age13 && !_kids.ContainsKey(uid)) return "Чат — лише з 13 років (або з дозволу батьків)";
+        if (!age13)
+        {
+            // Дозвіл могли дати й вручну в консолі Firebase (chat/kids/<код> = true) — дивимось свіжий стан бази.
+            var allowed = (await Http.GetStringAsync(U($"chat/kids/{uid}"))).Trim() == "true";
+            if (allowed) _kids[uid] = true; else _kids.TryRemove(uid, out _);
+            if (!allowed) return "Чат — лише з 13 років (або з дозволу батьків)";
+        }
         var name = Regex.Replace(Str(r, "name") ?? "", @"[\p{C}]+", " ").Trim();
         name = Regex.Replace(name, @"\s{2,}", " ");
         if (name.Length is < 2 or > 32) return "Ім'я — від 2 до 32 символів";
