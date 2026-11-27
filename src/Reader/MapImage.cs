@@ -356,9 +356,28 @@ public static class MapImage
         }
 
         // Де зараз мітка польоту і скільки лишилось (хв) — та сама формула, що в застосунку.
+        // 💣 КАБ планує дугою (скинули по курсу літака — доворот на ціль), як на сайті й у застосунку.
+        bool IsKab(Threat t) => t.Kind == ThreatKind.Kab;
+        (double lat, double lon) KabAt(Threat t, double u)
+        {
+            var (a, b) = (t.From!.Value, t.To!.Value);
+            uint h = 0; foreach (var ch in t.Id) h = unchecked(h * 31 + ch);
+            int side = (h & 1) == 1 ? 1 : -1; double turn = 22 + (h >> 1) % 26, d = ThreatGeo.Km(a, b);
+            double brg = ThreatGeo.Bearing(a, b) + side * turn, ck = d * 0.45;
+            var c = (lat: a.lat + ck * Math.Cos(brg * Math.PI / 180) / 111, lon: a.lon + ck * Math.Sin(brg * Math.PI / 180) / (111 * Math.Cos(a.lat * Math.PI / 180)));
+            double v = 1 - u;
+            return (v * v * a.lat + 2 * u * v * c.lat + u * u * b.lat, v * v * a.lon + 2 * u * v * c.lon + u * u * b.lon);
+        }
         (SKPoint at, float heading, double left, bool landed) FlightNow(Threat t)
         {
             var (f, to) = (t.From!.Value, t.To!.Value);
+            if (IsKab(t))
+            {
+                double kd = Math.Max(0.1, ThreatGeo.Km(f, to) * 1.12), ks = ThreatGeo.SpeedKmh(t.Kind, t.Ammo) / 60;
+                double kp = Math.Clamp(ks * (now - t.LaunchAt).TotalMinutes / kd, 0, 1);
+                var q = KabAt(t, kp); var q2 = KabAt(t, Math.Min(1, kp + 0.01));
+                return (P(q.lon, q.lat), (float)ThreatGeo.Bearing(q, q2), kd / ks * (1 - kp), kp >= 1);
+            }
             double dist = Math.Max(0.1, ThreatGeo.Km(f, to));
             double spd = ThreatGeo.SpeedKmh(t.Kind, t.Ammo) / 60;
             double p = Math.Clamp(spd * (now - t.LaunchAt).TotalMinutes / dist, 0, 1);
@@ -409,9 +428,21 @@ public static class MapImage
             var a = P(t.From!.Value.lon, t.From!.Value.lat);
             var b = P(t.To!.Value.lon, t.To!.Value.lat);
             var (at, _, left, landed) = FlightNow(t);
-            using (var dash = Dashed(c.WithAlpha(0x73), 1.5f)) canvas.DrawLine(a, b, dash);
-            using (var flown = new SKPaint { Color = c.WithAlpha(0xD9), IsAntialias = true, StrokeWidth = 2.6f, StrokeCap = SKStrokeCap.Round })
-                canvas.DrawLine(a, at, flown);
+            if (IsKab(t))
+            {
+                // Дуга планування: попереду пунктир, пройдене — суцільно.
+                double kp = Math.Clamp(ThreatGeo.SpeedKmh(t.Kind, t.Ammo) / 60 * (now - t.LaunchAt).TotalMinutes / Math.Max(0.1, ThreatGeo.Km(t.From!.Value, t.To!.Value) * 1.12), 0, 1);
+                SKPath Arc(double u0, double u1) { var pth = new SKPath(); for (int k = 0; k <= 24; k++) { var q = KabAt(t, u0 + (u1 - u0) * k / 24); var pt = P(q.lon, q.lat); if (k == 0) pth.MoveTo(pt); else pth.LineTo(pt); } return pth; }
+                using (var ahead = Arc(kp, 1)) using (var dash = Dashed(c.WithAlpha(0x73), 1.5f)) canvas.DrawPath(ahead, dash);
+                using (var done = Arc(0, kp)) using (var flown = new SKPaint { Color = c.WithAlpha(0xD9), IsAntialias = true, StrokeWidth = 2.6f, StrokeCap = SKStrokeCap.Round, Style = SKPaintStyle.Stroke })
+                    canvas.DrawPath(done, flown);
+            }
+            else
+            {
+                using (var dash = Dashed(c.WithAlpha(0x73), 1.5f)) canvas.DrawLine(a, b, dash);
+                using (var flown = new SKPaint { Color = c.WithAlpha(0xD9), IsAntialias = true, StrokeWidth = 2.6f, StrokeCap = SKStrokeCap.Round })
+                    canvas.DrawLine(a, at, flown);
+            }
             using (var dot = new SKPaint { Color = c.WithAlpha(0xB3), IsAntialias = true }) canvas.DrawCircle(a, 4, dot);
             using (var aim = new SKPaint { Color = (landed ? new SKColor(0xFF, 0x45, 0x3A) : c).WithAlpha(0xE6), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2 })
             {

@@ -1055,18 +1055,31 @@ class _MapPainter extends CustomPainter {
         final a = _toScreen(fit.project(t.from![1], t.from![0]));
         final b = _toScreen(fit.project(t.to![1], t.to![0]));
         // Whole route (dashed), the part already flown (solid), the aim point.
-        _dashedLine(canvas, a, b,
-            Paint()
-              ..color = color.withValues(alpha: 0.45)
-              ..strokeWidth = 1.2
-              ..strokeCap = StrokeCap.round);
-        canvas.drawLine(
-            a,
-            scr,
-            Paint()
-              ..color = color.withValues(alpha: 0.85)
-              ..strokeWidth = 2
-              ..strokeCap = StrokeCap.round);
+        if (t.cat == 'kab') {
+          // KAB: the arc it glides along — ahead dashed, flown solid.
+          Offset at(double u) { final q = kabPoint(t, u); return _toScreen(fit.project(q.lon, q.lat)); }
+          final p = mo.progress!;
+          final ahead = [for (var k = 0; k <= 24; k++) at(p + (1 - p) * k / 24)];
+          for (var k = 0; k < 24; k += 2) {
+            canvas.drawLine(ahead[k], ahead[k + 1], Paint()..color = color.withValues(alpha: 0.45)..strokeWidth = 1.2..strokeCap = StrokeCap.round);
+          }
+          final flown = Path()..moveTo(a.dx, a.dy);
+          for (var k = 1; k <= 24; k++) { final q = at(p * k / 24); flown.lineTo(q.dx, q.dy); }
+          canvas.drawPath(flown, Paint()..style = PaintingStyle.stroke..color = color.withValues(alpha: 0.85)..strokeWidth = 2..strokeCap = StrokeCap.round);
+        } else {
+          _dashedLine(canvas, a, b,
+              Paint()
+                ..color = color.withValues(alpha: 0.45)
+                ..strokeWidth = 1.2
+                ..strokeCap = StrokeCap.round);
+          canvas.drawLine(
+              a,
+              scr,
+              Paint()
+                ..color = color.withValues(alpha: 0.85)
+                ..strokeWidth = 2
+                ..strokeCap = StrokeCap.round);
+        }
         canvas.drawCircle(a, 3, Paint()..color = color.withValues(alpha: 0.7));
         final aim = 7 + 5 * (math.sin(pulse * 2 * math.pi).abs());
         canvas.drawCircle(

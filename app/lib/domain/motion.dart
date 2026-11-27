@@ -242,6 +242,27 @@ TargetMotion _orbit(MapTarget t, double lat, double lon, double flownKm, int now
   return TargetMotion(lat: p.lat, lon: p.lon, heading: (ang + 90) % 360, quietMin: quiet, orbiting: true);
 }
 
+/// 💣 A KAB glides along a curve, not a straight line: dropped on the plane's course, it turns onto the
+/// target in an arc — each bomb its own (left or right, steeper or flatter, from its id), so a salvo from
+/// one plane fans out. Same formula as the site and the Reader's channel images.
+({double lat, double lon, double heading}) kabPoint(MapTarget t, double u) {
+  final a = t.from!, b = t.to!;
+  var h = 0;
+  for (final ch in t.id.codeUnits) {
+    h = (h * 31 + ch) & 0xFFFFFFFF;
+  }
+  final side = (h & 1) == 1 ? 1 : -1, turn = 22 + (h >> 1) % 26;
+  final d = kmBetween(a[0], a[1], b[0], b[1]);
+  final c = moveKm(a[0], a[1], bearingDeg(a[0], a[1], b[0], b[1]) + side * turn, d * 0.45);
+  final v = 1 - u;
+  final lat = v * v * a[0] + 2 * u * v * c.lat + u * u * b[0];
+  final lon = v * v * a[1] + 2 * u * v * c.lon + u * u * b[1];
+  final dl = 2 * v * (c.lat - a[0]) + 2 * u * (b[0] - c.lat);
+  final dn = 2 * v * (c.lon - a[1]) + 2 * u * (b[1] - c.lon);
+  final hd = (math.atan2(dn * math.cos(lat * math.pi / 180), dl) * 180 / math.pi + 360) % 360;
+  return (lat: lat, lon: lon, heading: hd);
+}
+
 TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
   final spd = speedKmPerMin(t);
   final from = t.from, to = t.to;
@@ -257,6 +278,14 @@ TargetMotion motionOf(MapTarget t, int nowMs, {bool frozen = false}) {
       // cap it (the Reader drops the ring once a target is named).
       reachKm: frozen ? 0 : math.min(t.cat == 'balist' ? 450 : 1200, spd * mins),
     );
+  }
+
+  if (from != null && to != null && t.t0 > 0 && t.cat == 'kab') {
+    final dist = math.max(0.1, kmBetween(from[0], from[1], to[0], to[1]) * 1.12); // the arc is longer
+    final mins = math.max(0, nowMs - t.t0) / 60000;
+    final p = frozen ? 1.0 : (spd * mins / dist).clamp(0.0, 1.0);
+    final q = kabPoint(t, p);
+    return TargetMotion(lat: q.lat, lon: q.lon, heading: q.heading, progress: p, landed: p >= 1, flightMin: dist / spd);
   }
 
   if (from != null && to != null && t.t0 > 0 && (t.cat == 'balist' || t.cat == 'kab')) {

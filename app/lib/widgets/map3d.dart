@@ -110,7 +110,7 @@ double _apogee(double distKm) => math.min(90.0, 25 + distKm * 0.15);
 double targetHeight3d(MapTarget t, TargetMotion m, double hs) {
   if (m.isFlight) {
     final p = m.progress!;
-    if (t.cat == 'kab') return 55 * (1 - p) * hs;
+    if (t.cat == 'kab') return 55 * math.pow(1 - p, 1.35).toDouble() * hs; // glides: flat first, steep at the end
     final d = kmBetween(t.from![0], t.from![1], t.to![0], t.to![1]);
     return _apogee(d) * 4 * p * (1 - p) * hs;
   }
@@ -907,9 +907,10 @@ class _Map3DPainter extends CustomPainter {
       const steps = 40;
       for (var i = 0; i <= steps; i++) {
         final p = i / steps;
-        final lat = from[0] + (to[0] - from[0]) * p;
-        final lon = from[1] + (to[1] - from[1]) * p;
-        final h = (kab ? 55 * (1 - p) : _apogee(d) * 4 * p * (1 - p)) * cam.hScale;
+        final kq = kab ? kabPoint(t, p) : null; // КАБ планує дугою, балістика — по прямій
+        final lat = kq?.lat ?? from[0] + (to[0] - from[0]) * p;
+        final lon = kq?.lon ?? from[1] + (to[1] - from[1]) * p;
+        final h = (kab ? 55 * math.pow(1 - p, 1.35).toDouble() : _apogee(d) * 4 * p * (1 - p)) * cam.hScale;
         route.add(cam.proj(lat, lon, h).o);
         shadow.add(cam.proj(lat, lon).o);
       }
