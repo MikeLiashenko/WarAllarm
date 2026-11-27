@@ -819,9 +819,18 @@ public sealed class SourceHub
             // «🗞 …» — рубрика новин (@nikalert); «удар по Новобаварському району — Терехов» — постфактум.
             // «⚡️Прилет Новобаварском районе», «є загиблі. — Терехов» — постфактум навіть коротко: ціль
             // уже не летить, а «Терехов» ставав селом Терни.
+            // «Наслідки вчорашньої атаки по підприємству на Хмельниччині, – ДСНС» (27.11, @khmlv) — коротка, але постфактум.
+            if (Regex.IsMatch(clean, @"наслідк\w*\s+(?:\p{L}+\s+){0,2}(?:атак|удар|обстріл)|вчорашн\w*\s+(?:\p{L}+\s+)?(?:атак|удар|обстріл)|[–—-]\s*(?:дснс|ова|ова\.|поліці\w*|нацполіці\w*)\s*\.?\s*$", RegexOptions.IgnoreCase))
+            { st.News++; return new(HubVerdict.News, [], "новина постфактум"); }
             if (text.TrimStart().StartsWith("🗞") || Impact.IsMatch(clean) && clean.Length < 200
                 || AfterNews.IsMatch(clean) && clean.Length > 70 || Summary.IsMatch(clean) || Quote.IsMatch(clean))
             { st.News++; return new(HubVerdict.News, [], "новина (не жива загроза)"); }
+
+            // Погода й загальні новини без жодного слова про засоби («27 листопада на Харківщині температура…
+            // від 4° морозу» від @zlatopil24_7 ставало «ціль ×27 на Харківщині», 27.11).
+            if (Regex.IsMatch(clean, @"температур|опад|мороз|°|погод|синоптик|ожеледиц|снігопад|хуртовин", RegexOptions.IgnoreCase)
+                && !DroneWord.IsMatch(clean) && !RocketWord.IsMatch(clean))
+            { st.News++; return new(HubVerdict.News, [], "погода/новина"); }
 
             // «Запоріжжя/район – без локаційних загроз» — повідомлення, що цілі нема.
             if (Regex.IsMatch(clean, @"(?<!\p{L})без\s+(?:\p{L}+\s+)?загроз", RegexOptions.IgnoreCase) && clean.Length < 120)

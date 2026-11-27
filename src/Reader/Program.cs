@@ -488,6 +488,8 @@ if (args.Length >= 2 && args[0].Equals("why", StringComparison.OrdinalIgnoreCase
         Console.WriteLine($"{t.Replace("\n", " ⏎ "),-60} → shot={Slang.ShotCount(t)?.ToString() ?? "-"} lost={Slang.LostCount(t)?.ToString() ?? "-"} ball={BallisticAlert.Classify(t)}"
             + $" launch={(LaunchMention(t) ? "так" : "-")} kinds={string.Join(",", ThreatParser.Parse(t).Select(e => e.Kind + ":" + (e.City ?? e.Oblast ?? "?")))}");
         if (OfficialReports.Parse(t) is { } rep) Console.WriteLine("   звіт ПС: " + rep);
+        if (BallisticAlert.Classify(t) == BallisticAlert.Kind.Threat)
+            Console.WriteLine($"   балістика: зона {BallisticAlert.Names(BallisticAlert.ScopeOf(Array.Empty<string>(), t))} · пуск {BallisticAlert.SiteOf(t)?.name ?? "?"}");
     }
     return;
 }
@@ -1149,6 +1151,35 @@ CityChannel? CityOf(string zone) => cityChannels.FirstOrDefault(c => c.Name == z
 // + помічені цілі за типом/місцем). Накопичуються в циклах, скидаються після зведення.
 var dayRed = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 var daySeen = new HashSet<string>();
+// Лічильники зведення за добу переживають перезапуск (оновлення сервера): раніше після кожного оновлення
+// зведення о 09:00 показувало лише те, що було після нього («Тривог по областях: 1» за всю добу, 27.11).
+DateTime DigestDay(DateTime t) => t.Hour >= 9 ? t.Date : t.Date.AddDays(-1);
+try
+{
+    if (File.Exists("digest_state.json"))
+    {
+        using var dj = System.Text.Json.JsonDocument.Parse(File.ReadAllText("digest_state.json"));
+        var root = dj.RootElement;
+        if (root.GetProperty("day").GetString() == DigestDay(DateTime.Now).ToString("yyyy-MM-dd"))
+        {
+            foreach (var p in root.GetProperty("red").EnumerateObject()) dayRed[p.Name] = p.Value.GetInt32();
+            foreach (var x in root.GetProperty("seen").EnumerateArray()) daySeen.Add(x.GetString() ?? "");
+        }
+    }
+}
+catch (Exception ex) { Console.Error.WriteLine("⚠ digest_state: " + ex.Message); }
+void SaveDigestState()
+{
+    try
+    {
+        List<string> seen; Dictionary<string, int> red;
+        lock (daySeen) seen = daySeen.ToList();
+        lock (dayRed) red = new(dayRed);
+        File.WriteAllText("digest_state.json", System.Text.Json.JsonSerializer.Serialize(new
+        { day = DigestDay(DateTime.Now).ToString("yyyy-MM-dd"), red, seen }));
+    }
+    catch (Exception ex) { Console.Error.WriteLine("⚠ digest_state save: " + ex.Message); }
+}
 var ppoSeen = new Dictionary<string, DateTime>(); // зона → коли востаннє згадали роботу ППО
 DateTime? nuclearUntil = null; // ☢️ доки активна радіаційна/ядерна небезпека (30 хв від згадки)
 DateTime? lastLaunch = null;   // 🚀 коли востаннє попереджали про пуски (щоб не спамити)
@@ -1631,7 +1662,7 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             {
                 var newly = nowRed.Where(r => !prevRed.Contains(r)).ToList();
                 var cleared = prevRed.Where(r => !nowRed.Contains(r)).ToList();
-                foreach (var r in newly) dayRed[r] = dayRed.GetValueOrDefault(r) + 1; // для зведення
+                lock (dayRed) foreach (var r in newly) dayRed[r] = dayRed.GetValueOrDefault(r) + 1; // для зведення
                 // Тривога / відбій → перемальовуємо й постимо карту разом із текстом.
                 if (newly.Count > 0)
                 {
@@ -1683,11 +1714,14 @@ async Task RunDailyDigest(ChannelPoster channel)
         try { await Task.Delay(TimeSpan.FromMinutes(5)); } catch { }
         var now = DateTime.Now;
         if (now.Date != lastDay) { lastDay = now.Date; postedToday = false; }
+        if (postedToday || now.Hour < 9) SaveDigestState();
         if (!postedToday && now.Hour >= 9)
         {
             postedToday = true;
             try { await channel.Post(BuildDigest(), null, silent: true); } catch (Exception ex) { Console.Error.WriteLine("⚠ digest: " + ex.Message); }
-            dayRed.Clear(); daySeen.Clear();
+            lock (dayRed) dayRed.Clear();
+            lock (daySeen) daySeen.Clear();
+            SaveDigestState();
         }
     }
 }
@@ -1702,10 +1736,12 @@ string BuildDigest()
     if (dayRed.Count > 0)
         sb.AppendLine("🔥 Найгарячіше: " + H(string.Join(", ",
             dayRed.OrderByDescending(k => k.Value).Take(3).Select(k => $"{ShortReg(k.Key)} ×{k.Value}"))));
-    var byKind = daySeen.GroupBy(x => x.Split('|')[0]).ToDictionary(g => g.Key, g => g.Count());
+    List<string> seenNow; lock (daySeen) seenNow = daySeen.ToList();
+    // За підписом, а не за видом: Target і Unknown — обидва «цілі» (було «цілі 43 · цілі 32»).
+    var byKind = seenNow.GroupBy(x => KindShortEnum(x.Split('|')[0])).ToDictionary(g => g.Key, g => g.Count());
     if (byKind.Count > 0)
         sb.AppendLine("🛸 Цілей помічено: " + H(string.Join(" · ",
-            byKind.OrderByDescending(k => k.Value).Select(k => $"{KindShortEnum(k.Key)} {k.Value}"))));
+            byKind.OrderByDescending(k => k.Value).Select(k => $"{k.Key} {k.Value}"))));
     if (announces == 0 && byKind.Count == 0) sb.AppendLine("😌 Доба була відносно спокійною.");
     sb.AppendLine();
     sb.Append("<i>🕊 Бережіть себе 🇺🇦 · автозведення WarAlarm</i>");
@@ -1773,7 +1809,7 @@ static string ShortReg(string ua) => ua.Replace(" область", "").Replace("
 static string KindShortEnum(string k) => k switch
 {
     "Drone" => "шахеди", "Missile" => "ракети", "Ballistic" => "балістика",
-    "Kab" => "КАБи", "Aviation" => "авіація", _ => "цілі",
+    "Kab" => "КАБи", "Aviation" => "авіація", "Fpv" => "ФПВ", _ => "цілі",
 };
 
 static string BuildAlertsJson(OfficialAlerts.Snapshot s)
@@ -1867,7 +1903,7 @@ static string BuildClearPost(List<string> cleared, int remaining)
 // засипало іншими постами. Решта — тихе редагування того самого поста.
 Task RunThreatNews(ChannelPoster channel) => RunLiveBoard(channel, _ => true, (active, ppoNow) =>
     {
-        foreach (var t in active) daySeen.Add($"{t.Kind}|{t.LastPlace}"); // для зведення
+        lock (daySeen) foreach (var t in active) daySeen.Add($"{t.Kind}|{t.LastPlace}"); // для зведення
         // Налёт на велике місто (Київ/Харків/Дніпро) → короткий формат; інакше — по областях.
         var raidCities = active.Select(NearBigCity).Where(c => c != null).Select(c => c!).Distinct().ToList();
         var core = raidCities.Count > 0
@@ -3400,7 +3436,7 @@ async Task HandleKh(KhEvent e, string src, string time, string zone)
         var hit = tracker.MarkShotZone(zone, shotN, DateTime.Now);
         Ui.Line(ConsoleColor.Green, $"🎯 [{time}] {src} · мінус{(hit is null ? " (цілі на карті нема)" : $" — {ThreatTracker.Label(hit)} · {hit.LastPlace}")}");
         if (hit is not null) MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
-        await CityPost(null);
+        await CityPost(hit is null ? null : new TrackUpdate(hit, false, TrackSound.None, "")); // «🎯 Мінус — Велика Данилівка»
         return;
     }
     var (emoji, label) = KharkivMonitor.Verdict(e);

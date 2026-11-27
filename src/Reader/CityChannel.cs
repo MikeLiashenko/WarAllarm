@@ -127,7 +127,9 @@ public sealed class CityChannel
         else if (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw)) { } // загроза балістики — BallisticPost (Program.BallisticWatch)
         else if (Slang.ShotCount(e.Raw) is { } n)
         {   // «мінус» без цілей біля міста — не про нас (або запізнілий перепост)
-            if (hadCityThreat) line = $"🎯 {T("Мінус", "Минус")}" + (n > 1 ? $" {n}" : "");
+            // Де саме збили — з цілі, яку зняли («🎯 Мінус — Велика Данилівка»), а не голе «🎯 Минус».
+            if (hadCityThreat) line = $"🎯 {T("Мінус", "Минус")}" + (n > 1 ? $" {n}" : "")
+                + (u?.Threat is { LastPlace.Length: > 0 } ht ? " — " + (Ru ? RuPlace(ht.LastPlace) : ht.LastPlace) : "");
         }
         else if (e.Signal == KhSignal.Threat && u is { Threat: { Recon: false, Pos: { } p } t } && ThreatGeo.Km(p, Center) <= 40
                  // без власного місця («Над вами!», «ховайтеся») — лише щойно вибух / над районом, інакше це шум

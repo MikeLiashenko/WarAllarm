@@ -103,7 +103,9 @@ public static class BallisticAlert
     }
 
     /// Район пуску з поста («з Таганрогу», «з району Брянської області»).
-    public static (string name, double lat, double lon)? SiteOf(string text) => LaunchSites.FromText(ThreatParser.FromOf(text) ?? text);
+    // «Словʼянськ (Донецька обл.)» — місце загрози, а не «район пуску Донецьк»: назви областей не беремо.
+    public static (string name, double lat, double lon)? SiteOf(string text) =>
+        LaunchSites.FromText(ThreatParser.FromOf(text) ?? Regex.Replace(text, @"\(?[\p{L}'’ʼ-]+[сц]ьк\w*\s+обл\w*\.?\)?", " ", O));
 
     // Названі в пості області: «(Харківська обл.)», «Харківщина», «у Києві».
     static string[] Mentioned(string text)
@@ -112,7 +114,9 @@ public static class BallisticAlert
         var set = new HashSet<string>();
         foreach (var (stem, canon) in Geo.Oblasts)
             if (low.Contains(stem[..Math.Max(4, stem.Length - 3)]) && OblastGeo.EnName(canon) is { } en) set.Add(en);
-        foreach (Match m in Regex.Matches(text, @"([А-ЯІЇЄҐ][\p{L}'’-]+ськ)(?:а|ої|ій|у)\s+обл", O))
+        // «Харківська обл.» і «Донецька обл.» (-цька): 27.11 «Словʼянськ (Донецька обл.)» не впізнавалось —
+        // «Донецьк» ставав районом пуску, і загроза йшла ще на Запоріжжя, Дніпро й Харківщину.
+        foreach (Match m in Regex.Matches(text, @"([А-ЯІЇЄҐ][\p{L}'’ʼ-]+[сц]ьк)(?:а|ої|ій|у)\s+обл", O))
             foreach (var canon in Geo.Oblasts.Values.Distinct())
                 if (canon.StartsWith(m.Groups[1].Value, StringComparison.OrdinalIgnoreCase) && OblastGeo.EnName(canon) is { } en) set.Add(en);
         if (Regex.IsMatch(low, @"(?<!\p{L})(?:києв|київ(?!щ|ськ)|киев(?!щ|ск))")) { set.Add("Kiev City"); set.Add("Kiev"); }
