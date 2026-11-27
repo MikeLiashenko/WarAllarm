@@ -83,6 +83,15 @@ class _ChatAgeGateState extends State<ChatAgeGate> {
             ),
           ),
         ]),
+        if (_d != null && _m != null && _y != null && ChatController.ageAt(DateTime(_y!, _m!, _d!), now) < 13)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(
+              '👪 Тобі ще немає 13 — натисни «Продовжити», і з\'явиться код. '
+              'Батьки введуть його у себе, і чат відкриється з їхнього дозволу.',
+              style: TextStyle(height: 1.35, color: AppColors.primary),
+            ),
+          ),
         const SizedBox(height: 18),
         Text('Правила чату', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
         const SizedBox(height: 8),
@@ -100,7 +109,7 @@ class _ChatAgeGateState extends State<ChatAgeGate> {
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
           onChanged: (v) => setState(() => _rules = v ?? false),
-          title: Text('Мені є 13 років, я прочитав(-ла) правила й дотримуватимусь їх',
+          title: Text('Я прочитав(-ла) правила й дотримуватимусь їх',
               style: TextStyle(fontSize: 13.5, color: AppColors.textPrimary)),
         ),
         const SizedBox(height: 8),
