@@ -2630,6 +2630,7 @@ try
         Ui.Line(ConsoleColor.Green, "✅ Підписки в порядку — усі потрібні канали на місці.");
     // 📡 Каталог джерел (neptun.in.ua/dzherela): скільки з них реально приходить.
     var hubMissing = SourceCatalog.All.Keys.Where(u => !subscribed.Contains(u)).ToList();
+    SourceCatalog.Missing = hubMissing.ToArray();
     // Повний список — у файл (консоль показує лише перші 12): посилання, щоб швидко підписатись.
     try { File.WriteAllLines("sources_missing.txt", hubMissing.Select(u => $"https://t.me/{u}")); } catch { }
     Ui.Line(hubMissing.Count == 0 ? ConsoleColor.Green : ConsoleColor.Yellow,
@@ -2655,6 +2656,7 @@ try
                     }
                     catch (Exception mex) { Console.Error.WriteLine($"⚠ без звуку @{u}: {mex.Message}"); }
                     joined++;
+                    SourceCatalog.Missing = SourceCatalog.Missing.Where(x => !x.Equals(u, StringComparison.OrdinalIgnoreCase)).ToArray();
                     Ui.Line(ConsoleColor.Green, $"➕ Підписався на джерело @{u} (без звуку)");
                 }
                 catch (RpcException rex) when (rex.Code == 420)
@@ -3295,6 +3297,9 @@ string BuildSourcesText()
     var top = hub.Top(8);
     var sb = new StringBuilder($"📡 <b>Джерела</b> · {SourceCatalog.All.Count} каналів моніторингу\n");
     if (hub.Pending > 0) sb.AppendLine($"⏳ Чекають підтвердження: {hub.Pending}");
+    var notSub = SourceCatalog.Missing;
+    sb.AppendLine(notSub.Length == 0 ? "✅ Підписка на всі джерела є"
+        : $"⚠️ Без підписки ({notSub.Length}): " + string.Join(", ", notSub.Take(15).Select(u => "@" + H(u))) + (notSub.Length > 15 ? "…" : ""));
     sb.AppendLine();
     if (top.Count == 0) sb.AppendLine("🤫 Поки що тихо — цілей з каналів ще не було.");
     else

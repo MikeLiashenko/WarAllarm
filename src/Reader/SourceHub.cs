@@ -159,6 +159,9 @@ public static class SourceCatalog
         ["vinnytsiarealll"] = R("vinnytsiarealll", "Вінницька"),     // «Реальна Вінниця» ~353 тис.
     };
 
+    /// Джерела каталогу, на які акаунт Reader НЕ підписаний (перевірка на старті, мінус автопідписані).
+    public static volatile string[] Missing = Array.Empty<string>();
+
     public static SourceInfo? Get(string? user) =>
         user is { Length: > 0 } && All.TryGetValue(user.TrimStart('@'), out var s) ? s : null;
 
@@ -1514,7 +1517,15 @@ public sealed class SourceHub
                   .Append(",\"confirmed\":").Append(s.Confirmed).Append(",\"first\":").Append(s.First)
                   .Append(",\"noise\":").Append(s.Noise + s.News).Append('}');
             }
-            sb.Append("],\"ts\":").Append(((DateTimeOffset)now.ToUniversalTime()).ToUnixTimeMilliseconds()).Append('}');
+            sb.Append(']');
+            // Повний стан підписок (перевірка «на все підписався?» без доступу до акаунта): без підписки
+            // й ті, що підписані, але за добу не написали нічого.
+            var missing = SourceCatalog.Missing;
+            var silent = SourceCatalog.All.Keys.Where(k => !missing.Contains(k, StringComparer.OrdinalIgnoreCase)
+                && !act.Any(a => a.Key.Equals(k, StringComparison.OrdinalIgnoreCase))).OrderBy(k => k);
+            sb.Append(",\"missing\":[").Append(string.Join(",", missing.Select(k => $"\"{E(k)}\""))).Append(']');
+            sb.Append(",\"silent\":[").Append(string.Join(",", silent.Select(k => $"\"{E(k)}\""))).Append(']');
+            sb.Append(",\"ts\":").Append(((DateTimeOffset)now.ToUniversalTime()).ToUnixTimeMilliseconds()).Append('}');
             return sb.ToString();
         }
     }
