@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../controllers/chat_controller.dart';
 import '../services/chat_media.dart';
@@ -128,19 +129,76 @@ class _ChatAgeGateState extends State<ChatAgeGate> {
   }
 }
 
-class ChatTooYoung extends StatelessWidget {
+class ChatTooYoung extends StatefulWidget {
   const ChatTooYoung({super.key});
 
   @override
+  State<ChatTooYoung> createState() => _ChatTooYoungState();
+}
+
+class _ChatTooYoungState extends State<ChatTooYoung> {
+  @override
+  void initState() {
+    super.initState();
+    // The chat opens by itself as soon as a parent allows this phone.
+    context.read<ChatController>().watchParentalPermission();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final dob = context.read<ChatController>().dob!;
+    final c = context.read<ChatController>();
+    final dob = c.dob!;
     final open = DateTime(dob.year + 13, dob.month, dob.day);
     return _GateCard(
       icon: Icons.lock_clock_rounded,
       title: 'Чат — з 13 років',
       subtitle: 'Він відкриється ${open.day} ${_months[open.month - 1]} ${open.year}. '
           'Усе інше в застосунку — тривоги, карта, укриття — працює як завжди. Бережи себе 💙',
-      children: const [],
+      children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              const Text('👪', style: TextStyle(fontSize: 18)),
+              const SizedBox(width: 8),
+              Text('Дозвіл батьків',
+                  style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+            ]),
+            const SizedBox(height: 6),
+            Text(
+              'Батьки можуть відкрити чат раніше. Надішли їм цей код — '
+              'вони дозволять саме цей телефон, і чат відкриється сам.',
+              style: TextStyle(height: 1.35, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 10),
+            SelectableText(c.uid,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontFamily: 'monospace', fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
+              OutlinedButton.icon(
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                label: const Text('Копіювати'),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: c.uid));
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Код скопійовано')));
+                },
+              ),
+              FilledButton.icon(
+                icon: const Icon(Icons.share_rounded, size: 18),
+                label: const Text('Надіслати батькам'),
+                onPressed: () => Share.share('Код мого телефона для чату WarAlarm: ${c.uid}'),
+              ),
+            ]),
+          ]),
+        ),
+      ],
     );
   }
 }
@@ -359,6 +417,10 @@ class _ChatProfileEditorState extends State<ChatProfileEditor> {
               ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Зберегти'),
         ),
+        if (c.isAdmin) ...[
+          const SizedBox(height: 18),
+          const _ChildPermission(),
+        ],
         if (c.myName.isNotEmpty) ...[
           const SizedBox(height: 18),
           Center(
@@ -468,4 +530,61 @@ Future<void> showChatProfile(BuildContext context, String uid, String fallbackNa
       });
     },
   );
+}
+
+/// Admin: open the chat for a child's phone (under 13) by the code shown on that phone.
+class _ChildPermission extends StatefulWidget {
+  const _ChildPermission();
+
+  @override
+  State<_ChildPermission> createState() => _ChildPermissionState();
+}
+
+class _ChildPermissionState extends State<_ChildPermission> {
+  final _id = TextEditingController();
+
+  @override
+  void dispose() {
+    _id.dispose();
+    super.dispose();
+  }
+
+  Future<void> _go(bool on) async {
+    final id = _id.text.trim().toLowerCase();
+    final messenger = ScaffoldMessenger.of(context);
+    if (!RegExp(r'^[0-9a-f]{16,40}$').hasMatch(id)) {
+      messenger.showSnackBar(const SnackBar(content: Text('Встав код із телефону дитини (екран «Чат — з 13 років»)')));
+      return;
+    }
+    await context.read<ChatController>().allowChild(id, on: on);
+    _id.clear();
+    messenger.showSnackBar(SnackBar(content: Text(on ? 'Готово: на тому телефоні чат відкриється сам' : 'Дозвіл знято')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('👪 Дозвіл дитині (до 13 років)',
+            style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+        const SizedBox(height: 6),
+        Text('Встав код, який показує телефон дитини на екрані «Чат — з 13 років».',
+            style: TextStyle(height: 1.35, color: AppColors.textSecondary)),
+        const SizedBox(height: 8),
+        TextField(controller: _id, decoration: const InputDecoration(labelText: 'Код телефону дитини')),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: FilledButton(onPressed: () => _go(true), child: const Text('Дозволити'))),
+          const SizedBox(width: 8),
+          TextButton(onPressed: () => _go(false), child: const Text('Зняти')),
+        ]),
+      ]),
+    );
+  }
 }

@@ -35,6 +35,7 @@ class ChatController extends ChangeNotifier {
       _store.setString('chat_key', _key);
     }
     _dob = DateTime.tryParse(_store.getString('chat_dob'));
+    _kidOk = _store.getBool('chat_kid_ok');
     _profileSaved = _store.getBool('chat_profile_saved');
     _blocked = _store.getString('chat_blocked').split(',').where((e) => e.isNotEmpty).toSet();
     _lastSeen = int.tryParse(_store.getString('chat_seen')) ?? 0;
@@ -65,10 +66,32 @@ class ChatController extends ChangeNotifier {
   ChatGate get gate {
     final d = _dob;
     if (d == null) return ChatGate.needAge;
-    if (ageAt(d, DateTime.now()) < 13) return ChatGate.tooYoung;
+    if (ageAt(d, DateTime.now()) < 13 && !_kidOk) return ChatGate.tooYoung;
     if (!_profileSaved) return ChatGate.needProfile;
     return ChatGate.ready;
   }
+
+  // ── Parental permission (under 13) ─────────────────────────────────────────
+  // A parent who is a chat admin opens the chat for THIS phone by its ID
+  // (or the server owner lists it in chat_kids). The server publishes chat/kids/<uid>.
+  bool _kidOk = false;
+  bool get isUnder13 => _dob != null && ageAt(_dob!, DateTime.now()) < 13;
+  StreamSubscription<dynamic>? _kidSub;
+
+  void watchParentalPermission() {
+    if (_kidSub != null || !isUnder13) return;
+    _kidSub = _rtdb.stream('chat/kids/$_uid').listen((v) {
+      final ok = v == true;
+      if (ok == _kidOk) return;
+      _kidOk = ok;
+      _store.setBool('chat_kid_ok', ok);
+      notifyListeners();
+    }, onError: (_) {});
+  }
+
+  /// Admin: open (or close) the chat for a child's phone by its ID.
+  Future<void> allowChild(String id, {bool on = true}) =>
+      _simple('kid', {'uid': id.trim().toLowerCase(), 'on': on});
 
   /// The date of birth is asked once: a "too young" answer stays (no retry until reinstall).
   Future<void> setBirthDate(DateTime d) async {
@@ -112,7 +135,7 @@ class ChatController extends ChangeNotifier {
         'name': name.trim(),
         'bio': bio.trim(),
         'city': city.trim(),
-        'age13': true,
+        'age13': !isUnder13,
       };
       if (avatar != null) body['ava'] = base64Encode(avatar);
       if (removeAvatar) body['avaDel'] = true;
@@ -180,6 +203,7 @@ class ChatController extends ChangeNotifier {
     _subs.add(_rtdb.stream('chat/msgs').listen(_onMsgs, onError: (_) {}));
     _subs.add(_rtdb.stream('chat/profiles').listen(_onProfiles, onError: (_) {}));
     _subs.add(_rtdb.stream('chat/res/$_uid').listen(_onRes, onError: (_) {}));
+    watchParentalPermission();
   }
 
   void _onMsgs(dynamic data) {
@@ -457,6 +481,7 @@ class ChatController extends ChangeNotifier {
     for (final s in _subs) {
       s.cancel();
     }
+    _kidSub?.cancel();
     super.dispose();
   }
 }

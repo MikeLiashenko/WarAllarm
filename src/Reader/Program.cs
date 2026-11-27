@@ -1047,7 +1047,10 @@ if (!string.IsNullOrWhiteSpace(fbSecret) && !(args.Length >= 1 && args[0].Equals
 {
     var chatAdmins = (SecretOpt("chat_admins") ?? cfg.GetValueOrDefault("chat_admins") ?? "")
         .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
-    new ChatRelay(fbUrl, fbSecret, chatAdmins).Start();
+    // chat_kids=<ID телефону дитини> — дозвіл батьків на чат до 13 років (ID — на екрані «Чат — з 13 років»).
+    var chatKids = (SecretOpt("chat_kids") ?? cfg.GetValueOrDefault("chat_kids") ?? "")
+        .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+    new ChatRelay(fbUrl, fbSecret, chatAdmins, chatKids).Start();
 }
 
 // ── 🌙 Пакетна генерація ночей:  dotnet run -- nightbatch [YYYY-MM-DD-from] [YYYY-MM-DD-to]

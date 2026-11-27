@@ -23,6 +23,9 @@ public sealed class ChatRelay
     readonly ConcurrentDictionary<string, string> _keys = new();
     readonly ConcurrentDictionary<string, JsonObject> _profiles = new();
     readonly ConcurrentDictionary<string, bool> _bans = new();
+    // Дозвіл батьків: телефони дітей до 13, яким адміністратор відкрив чат (за ID пристрою, не за датою).
+    readonly ConcurrentDictionary<string, bool> _kids = new();
+    readonly string[] _cfgKids;
     readonly ConcurrentDictionary<string, Queue<DateTime>> _rate = new();
     readonly ConcurrentDictionary<string, HashSet<string>> _reports = new();
     readonly ConcurrentDictionary<string, (string uid, string? mid)> _msgs = new();
@@ -30,8 +33,9 @@ public sealed class ChatRelay
     readonly SemaphoreSlim _one = new(1, 1);
     const int KeepMsgs = 400, MaxText = 2000, MaxMediaB64 = 480_000, MaxAvatarB64 = 120_000;
 
-    public ChatRelay(string baseUrl, string secret, IEnumerable<string> admins)
+    public ChatRelay(string baseUrl, string secret, IEnumerable<string> admins, IEnumerable<string>? kids = null)
     {
+        _cfgKids = (kids ?? []).Where(k => k.Length is >= 16 and <= 40).ToArray();
         _base = baseUrl.TrimEnd('/'); _secret = secret;
         _admins = new HashSet<string>(admins.Where(a => a.Length > 0), StringComparer.Ordinal);
     }
@@ -59,6 +63,7 @@ public sealed class ChatRelay
       "profiles": { ".read": true },
       "ava": { ".read": true },
       "res": { "$uid": { ".read": true } },
+      "kids": { "$uid": { ".read": true } },
       "in": {
         "$uid": {
           ".validate": "$uid.length >= 16 && $uid.length <= 40",
@@ -93,6 +98,12 @@ public sealed class ChatRelay
         async Task<JsonObject?> Get(string p) => JsonNode.Parse(await Http.GetStringAsync(U(p))) as JsonObject;
         if (await Get("chat/keys") is { } keys) foreach (var (k, v) in keys) if (v?.GetValue<string>() is { } s) _keys[k] = s;
         if (await Get("chat/bans") is { } bans) foreach (var (k, _) in bans) _bans[k] = true;
+        if (await Get("chat/kids") is { } kids) foreach (var (k, _) in kids) _kids[k] = true;
+        foreach (var k in _cfgKids.Where(k => !_kids.ContainsKey(k)))
+        {
+            _kids[k] = true; await Send(HttpMethod.Put, $"chat/kids/{k}", JsonValue.Create(true));
+        }
+        if (_kids.Count > 0) Console.WriteLine($"💬 Чат: дозвіл батьків для {_kids.Count} пристр.");
         if (await Get("chat/profiles") is { } pr) foreach (var (k, v) in pr) if (v is JsonObject o) _profiles[k] = (JsonObject)o.DeepClone();
         if (await Get("chat/msgs") is { } ms)
             foreach (var (k, v) in ms) if (v is JsonObject o) _msgs[k] = (o["uid"]?.GetValue<string>() ?? "", o["mid"]?.GetValue<string>());
@@ -202,6 +213,16 @@ public sealed class ChatRelay
                 await Send(HttpMethod.Patch, $"chat/msgs/{mid}", new JsonObject { ["text"] = text, ["edited"] = Now });
                 return null;
             }
+            case "kid" when admin:
+            {
+                var who = Str(r, "uid") ?? "";
+                if (who.Length is < 16 or > 40 || !Regex.IsMatch(who, "^[0-9a-f]+$")) return "Не той ID — скопіюй його з телефону дитини";
+                var on = r["on"] is not JsonValue ov || !ov.TryGetValue<bool>(out var o) || o;
+                if (on) { _kids[who] = true; await Send(HttpMethod.Put, $"chat/kids/{who}", JsonValue.Create(true)); }
+                else { _kids.TryRemove(who, out _); await Send(HttpMethod.Delete, $"chat/kids/{who}", null); }
+                Console.WriteLine($"👪 чат · дозвіл батьків {(on ? "надано" : "знято")}: {who[..6]}…");
+                return null;
+            }
             case "ban" when admin:
             {
                 var who = Str(r, "uid") ?? "";
@@ -220,7 +241,8 @@ public sealed class ChatRelay
 
     async Task<string?> Profile(string uid, JsonObject r, bool admin)
     {
-        if (r["age13"] is not JsonValue av || !av.TryGetValue<bool>(out var age) || !age) return "Чат — лише з 13 років";
+        var age13 = r["age13"] is JsonValue av && av.TryGetValue<bool>(out var age) && age;
+        if (!age13 && !_kids.ContainsKey(uid)) return "Чат — лише з 13 років (або з дозволу батьків)";
         var name = Regex.Replace(Str(r, "name") ?? "", @"[\p{C}]+", " ").Trim();
         name = Regex.Replace(name, @"\s{2,}", " ");
         if (name.Length is < 2 or > 32) return "Ім'я — від 2 до 32 символів";

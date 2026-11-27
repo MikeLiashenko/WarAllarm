@@ -73,6 +73,22 @@ void main() {
     expect(rtdb.pushed, isEmpty);
   });
 
+  test('under 13: parental permission for this phone opens the chat', () async {
+    final (c, rtdb) = await _make({});
+    await c.setBirthDate(DateTime(2014, 11, 19));
+    expect(c.gate, ChatGate.tooYoung);
+    c.watchParentalPermission();
+    rtdb.of('chat/kids/${c.uid}').add(true);
+    await Future<void>.delayed(Duration.zero);
+    expect(c.gate, ChatGate.needProfile);
+    await c.saveProfile(name: 'Син', bio: '', city: '');
+    expect(rtdb.pushed.values.last['age13'], false);
+    expect(c.gate, ChatGate.ready);
+    rtdb.of('chat/kids/${c.uid}').add(null); // permission withdrawn
+    await Future<void>.delayed(Duration.zero);
+    expect(c.gate, ChatGate.tooYoung);
+  });
+
   testWidgets('age gate is shown first', (tester) async {
     final (c, _) = await _make({});
     await tester.pumpWidget(_app(c));
