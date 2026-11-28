@@ -465,7 +465,8 @@ if (args.Length >= 3 && args[0].Equals("chatrelay", StringComparison.OrdinalIgno
 if (args.Length >= 2 && args[0].Equals("audit", StringComparison.OrdinalIgnoreCase))
 {
     var times = args.Skip(2).Where(a => a.Contains(':')).Select(TimeSpan.Parse).ToList();
-    Audit.Run(args[1], times.Count > 0 ? times[0] : null, times.Count > 1 ? times[1] : null, args.Contains("-v"));
+    Audit.Run(args[1], times.Count > 0 ? times[0] : null, times.Count > 1 ? times[1] : null, args.Contains("-v"),
+        args.Skip(2).Where(a => a.EndsWith(".jsonl")));
     return;
 }
 
@@ -1641,11 +1642,11 @@ async Task RunAlertsLoop(ChannelPoster? channel)
                 {
                     foreach (var obl in prevActive.Where(o => !nowActive.Contains(o)))
                         removed += tracker.SweepWhere(t => t.Pos is { } p && Quiet(t) && OblastGeo.PolyName(p.lat, p.lon) == obl).Count;
-                    // І постійно: ціль, що затихла (>3 хв) в області БЕЗ тривоги, — уже не там
-                    // (збита / пролетіла). Справжній дрон над областю = там тривога.
-                    removed += tracker.SweepWhere(t => t.Pos is { } p && !t.Launch
-                        && DateTime.Now - t.LastUpdate > TimeSpan.FromMinutes(3)
-                        && OblastGeo.PolyName(p.lat, p.lon) is { } o && !nowActive.Contains(o)).Count;
+                    // І постійно — по РАЙОНАХ (AlarmZones): ціль, що довше 2 хв стоїть у районі без
+                    // тривоги, знімаємо. По областях було мало: прифронтовий район Харківщини чи
+                    // Дніпропетровщини під тривогою завжди, і шахеди годинами висіли в зоні відбою.
+                    var zoneSnap = snap;
+                    removed += AlarmZones.Sweep(tracker, DateTime.Now, (la, lo) => zoneSnap.LevelAt(la, lo) is not null).Count;
                 }
                 if (removed > 0)
                 {

@@ -6,8 +6,15 @@ using System.Text.Json;
 // ракета й балістика над тим самим місцем, балістика без слова «балістика» в постах.
 public static class Audit
 {
-    public static void Run(string file, TimeSpan? from = null, TimeSpan? to = null, bool verbose = false)
+    public static void Run(string file, TimeSpan? from = null, TimeSpan? to = null, bool verbose = false, IEnumerable<string>? alarmSeed = null)
     {
+        // 🟢 Офіційні тривоги з @UkraineAlarmSignal (журнал попередньої доби — щоб знати стан на 00:00).
+        var tl = AlarmTimeline.FromJournals((alarmSeed ?? []).Append(file));
+        Tl = tl; AlarmZones.Reset();
+        bool zones = tl.Events > 0;
+        HashSet<string>? prevActive = null;
+        var zoneMin = new Dictionary<string, (int fresh, int stale, DateTime first, string place, string kind)>();
+        int drawnMin = 0;
         var day = DateTime.TryParse(Path.GetFileNameWithoutExtension(file), out var dd) ? dd : DateTime.Today;
         var posts = new List<(DateTime at, string ch, string text)>();
         foreach (var line in File.ReadLines(file))
@@ -35,6 +42,26 @@ public static class Audit
         {
             int b0 = Bort();
             var gone = tr.Tick(now, hub.ListCaps(now), hub.LastListAt, hub.ListTimes(now)).Where(u => u.Threat.Stage == TrackStage.Gone).ToList();
+            if (zones)
+            {
+                tl.AdvanceTo(now);
+                var nowActive = tl.ActivePolys();
+                if (prevActive is not null) LiveSweep(tr, now, prevActive, nowActive);
+                prevActive = nowActive;
+                foreach (var t in tr.Active)
+                {
+                    if (t.Down || !AlarmZones.Applies(t)) continue;
+                    if (AlarmZones.Drawn(t, now, tl.InAlarm) is not { } q) continue;
+                    if (OblastGeo.PolyName(q.lat, q.lon) is null || OblastGeo.Occupied(q.lat, q.lon)) continue;
+                    drawnMin++;
+                    if (tl.InAlarm(q.lat, q.lon)) continue;
+                    bool fresh = now - t.LastUpdate <= TimeSpan.FromMinutes(3);
+                    (int fresh, int stale, DateTime first, string place, string kind) z = zoneMin.TryGetValue(t.Id, out var o) ? o : (0, 0, now, t.LastPlace ?? "?", ThreatTracker.Label(t));
+                    zoneMin[t.Id] = fresh ? (z.fresh + 1, z.stale, z.first, t.LastPlace ?? "?", z.kind) : (z.fresh, z.stale + 1, z.first, t.LastPlace ?? "?", z.kind);
+                    if (verbose && z.fresh + z.stale == 0)
+                        Console.WriteLine($"\n{now:HH:mm} 🟢 у відбої: {Desc(t)} ({(now - t.LastUpdate).TotalMinutes:0} хв без оновлення) ← {why.GetValueOrDefault(t.Id, "?")}");
+                }
+            }
             if (b0 - Bort() >= 8)
                 Console.WriteLine($"\n{now:HH:mm} ⬇ ЗНЯТО за тишею {b0 - Bort()} бортів: " + string.Join("; ", gone.Select(u => $"{ThreatTracker.Label(u.Threat)} {u.Threat.LastPlace}×{u.Threat.Amount} ({(now - u.Threat.LastUpdate).TotalMinutes:0} хв)")));
             // Раз на 15 хв — що зараз на карті (усе, що трекер тримає): скільки й якого типу, найстаріші.
@@ -99,8 +126,32 @@ public static class Audit
             }
         }
         Console.WriteLine($"\n═══ {Path.GetFileName(file)}: цілей на карту {n}, дублів {dupPairs}, ракета/балістика разом {mixPairs}");
+        if (zones)
+        {
+            int fr = zoneMin.Values.Sum(z => z.fresh), st = zoneMin.Values.Sum(z => z.stale);
+            Console.WriteLine($"🟢 Ціль у районі БЕЗ тривоги: {fr + st} хв-міток із {drawnMin} ({100.0 * (fr + st) / Math.Max(1, drawnMin):0.0}%)"
+                + $" · свіжі (≤3 хв після посту) {fr} · застарілі {st} · цілей {zoneMin.Count} · подій тривог {tl.Events}, не розпізнано {tl.Unresolved}");
+            foreach (var (id, z) in zoneMin.OrderByDescending(p => p.Value.fresh + p.Value.stale).Take(verbose ? 60 : 25))
+                Console.WriteLine($"   {z.first:HH:mm} {z.kind} «{z.place}» — {z.fresh + z.stale} хв (свіжих {z.fresh})  ← {why.GetValueOrDefault(id, "?")[..Math.Min(150, why.GetValueOrDefault(id, "?").Length)]}");
+        }
         foreach (var (k, v) in kinds.OrderByDescending(p => p.Value)) Console.WriteLine($"   {k,-28} {v}");
     }
+
+    /// Як живий цикл тривог (Program.RunAlertsLoop): офіційний відбій прибирає затихлі цілі.
+    static void LiveSweep(ThreatTracker tr, DateTime now, HashSet<string> prev, HashSet<string> nowActive)
+    {
+        bool Quiet(Threat t) => now - t.LastUpdate > TimeSpan.FromMinutes(2);
+        if (nowActive.Count == 0) { tr.SweepWhere(t => t.Pos is not null && Quiet(t)); return; }
+        foreach (var obl in prev.Where(o => !nowActive.Contains(o)))
+            tr.SweepWhere(t => t.Pos is { } p && Quiet(t) && OblastGeo.PolyName(p.lat, p.lon) == obl);
+        if (OldZones) tr.SweepWhere(t => t.Pos is { } p && !t.Launch && now - t.LastUpdate > TimeSpan.FromMinutes(3)
+                           && OblastGeo.PolyName(p.lat, p.lon) is { } o && !nowActive.Contains(o));
+        else AlarmZones.Sweep(tr, now, Tl!.InAlarm);
+    }
+
+    /// Для порівняння «до/після»: старе правило (по областях) — змінна середовища ZONES_OLD=1.
+    static readonly bool OldZones = Environment.GetEnvironmentVariable("ZONES_OLD") == "1";
+    static AlarmTimeline? Tl;
 
     static bool IsRocket(ThreatKind k) => k is ThreatKind.Missile or ThreatKind.Ballistic;
     static bool Air(ThreatKind k) => k is ThreatKind.Drone or ThreatKind.Target;

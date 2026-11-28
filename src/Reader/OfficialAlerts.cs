@@ -13,7 +13,7 @@ public static class OfficialAlerts
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(12) };
 
     // Назва області у фіді (укр.) → наш полігон «n» (англ.).
-    static readonly Dictionary<string, string> UaToEn = new()
+    public static readonly Dictionary<string, string> UaToEn = new()
     {
         ["АР Крим"] = "Crimea",
         ["Севастополь"] = "Sevastopol'",

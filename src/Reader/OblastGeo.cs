@@ -160,6 +160,20 @@ public static class OblastGeo
     /// Район, що містить точку («Харківський район», як у фіді тривог), або null.
     public static string? RaionAt(double lat, double lon) => NameIn(RaionPolys, RaionBoxes, lat, lon);
 
+    /// Точка всередині району (середнє вершин найбільшого кільця) — щоб знати його область.
+    public static (double lat, double lon)? RaionCenter(string name)
+    {
+        static string N(string s) => s.Replace('’', '\'').Replace('ʼ', '\'').Replace('`', '\'');
+        var want = N(name);
+        foreach (var (en, rings) in RaionPolys)
+        {
+            if (N(en) != want || rings.Count == 0) continue;
+            var ring = rings.OrderByDescending(r => r.Count).First();
+            return (ring.Average(x => x[1]), ring.Average(x => x[0]));
+        }
+        return null;
+    }
+
     static string? NameAt(double lat, double lon) => NameIn(Polys, Boxes, lat, lon);
 
     static string? NameIn(List<(string en, List<List<double[]>> rings)> polys, (double minLat, double maxLat, double minLon, double maxLon)[] boxes, double lat, double lon)
