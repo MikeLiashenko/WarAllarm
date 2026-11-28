@@ -358,6 +358,9 @@ public static class PlaceFinder
     // Назва й запит — те саме слово з точністю до відмінкового закінчення
     // («Новоселівка» / «Новоселівку» / «Новоселівці»), а не лише «схожі приголосні».
     static string Core(string w) => Regex.Replace(w, "[аеєиіїоуюяь]+$", "");
+    static bool Alternates(char x, char y) =>
+        (x, y) is ('к', 'ц') or ('ц', 'к') or ('г', 'з') or ('з', 'г') or ('х', 'с') or ('с', 'х');
+
     public static bool Literal(string name, string q) => LiteralN(Norm(name), Norm(q));
     static bool LiteralN(string name, string q)
     {
@@ -370,7 +373,9 @@ public static class PlaceFinder
             if (a.Length < 2) { if (nw[i] != qw[i]) return false; continue; }
             // «Новоселівка/Новоселівці»: основа збігається, у відмінку може змінитись 1 приголосна (к→ц).
             // «Кропивницького», «Кам'янець-Подільського» — прикметник у родовому (основа на -ськ/-цьк + ог/ом/м).
-            if (a != b && !(a.Length == b.Length && a.Length >= 5 && a[..^1] == b[..^1])
+            // Лише справжнє чергування в місцевому відмінку (к/ц, г/з, х/с), а не будь-яка остання
+            // приголосна: «Доброволье» ставало Доброводами на Черкащині (28.11 00:28, шахед за 430 км).
+            if (a != b && !(a.Length == b.Length && a.Length >= 5 && a[..^1] == b[..^1] && Alternates(a[^1], b[^1]))
                 && !(AdjStem(nw[i]) is { Length: >= 5 } sa && sa == AdjStem(qw[i]) && Regex.IsMatch(sa, "[сц]ьк$")))
                 return false;
         }
@@ -745,6 +750,10 @@ public sealed class SourceHub
     void RememberKind(string user, ThreatKind kind, string? extra, DateTime at)
     {
         if (kind is not (ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Kab)) return;
+        // РСЗВ — залп, а не ціль, що летить далі: «Дальше курс на Змиев», «Развернулся курсом на Валки»
+        // після «РСЗО на Липцы» — це дрон (28.11 01:53–02:16: у харківському каналі вісім «ракет»,
+        // що розверталися над областю). Тип РСЗВ наступним постам не передаємо.
+        if ((extra ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase)) { _ctx.Remove(user); return; }
         _ctx[user] = (kind, extra, at);
         if (kind != ThreatKind.Kab) _ctxAir[user] = (kind, extra, at);
     }
@@ -831,6 +840,12 @@ public sealed class SourceHub
             if (Regex.IsMatch(clean, @"температур|опад|мороз|°|погод|синоптик|ожеледиц|снігопад|хуртовин", RegexOptions.IgnoreCase)
                 && !DroneWord.IsMatch(clean) && !RocketWord.IsMatch(clean))
             { st.News++; return new(HubVerdict.News, [], "погода/новина"); }
+
+            // Комуналка: вода, світло, тепло («⚡️Зупинилася насосна станція та призупинили воду у Синельниковому…
+            // через аварійне відключення світла» від @cxidua ставало «Ціль на Харків», 28.11 00:06).
+            if (Regex.IsMatch(clean, @"насосн|подач\w*\s+води|водопостач|водоканал|без\s+води|аварійн\w*\s+відключ|відключ\w*\s+(?:світла|електро)|знеструм|теплопостач|опаленн|графік\w*\s+відключ|черг\w*\s+відключ", RegexOptions.IgnoreCase)
+                && !DroneWord.IsMatch(clean) && !RocketWord.IsMatch(clean))
+            { st.News++; return new(HubVerdict.News, [], "комуналка/новина"); }
 
             // «Запоріжжя/район – без локаційних загроз» — повідомлення, що цілі нема.
             if (Regex.IsMatch(clean, @"(?<!\p{L})без\s+(?:\p{L}+\s+)?загроз", RegexOptions.IgnoreCase) && clean.Length < 120)

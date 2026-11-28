@@ -454,6 +454,17 @@ if (args.Length >= 1 && args[0].Equals("journal", StringComparison.OrdinalIgnore
 }
 
 // ── 🔎 Аудит карти по журналу:   dotnet run -- audit journal/2026-11-15.jsonl [HH:mm HH:mm] [-v]
+// ── Пошук місця (оффлайн):  dotnet run -- findplace "Доброволье" Харківська
+if (args.Length >= 2 && args[0].Equals("findplace", StringComparison.OrdinalIgnoreCase))
+{
+    var reg = args.Skip(2).ToArray();
+    Console.WriteLine($"Find:   {PlaceFinder.Find(args[1], reg)}");
+    if (reg.Length > 0) Console.WriteLine($"FindIn: {PlaceFinder.FindIn(args[1], reg[0])}");
+    Console.WriteLine($"Unique: {PlaceFinder.Unique(args[1])}");
+    Console.WriteLine($"Resolve:{ThreatGeo.Resolve(args[1])}");
+    return;
+}
+
 // ── «на Київщину» — курс цілі з сусідньої області, а не нова мітка в центрі (оффлайн):  dotnet run -- intotest
 if (args.Length >= 1 && args[0].Equals("intotest", StringComparison.OrdinalIgnoreCase))
 {
@@ -487,6 +498,11 @@ if (args.Length >= 1 && args[0].Equals("intotest", StringComparison.OrdinalIgnor
     Run("«на Київщині» (де, а не куди) — як раніше",
         (0, "UkraineRadar_24_7", "⚠️ Новий реактивний на Київщині з півночі, курсом на Іванків!"),
         (0, "kpszsu", "🏍 Київщина: реактивний БпЛА з півночі курсом на Іванків"));
+    Run("Шахед висить на Черкащині, а «на південь Миколаївщини з моря» — нова ціль з моря, чужу не беремо",
+        (0, "kpszsu", "🛵 Черкащина: ударний БпЛА на Умань"),
+        (3, "kpszsu", "🏍 Реактивні БпЛА на південь Миколаївщини з моря."),
+        (3, "raketa_trevoga", "Реактивні БпЛА на південь Миколаївщини з моря"));
+    Console.WriteLine("\n── 🇷🇺 Харківський канал: " + CityChannel.RuPlace("Нові Будинки (Харків), Великі Проходи, Швидкісна ціль, Крилата, Старий Салтів, Новоселівка"));
     Console.WriteLine("\n── 🚀 Звідки з'являється нова ракета (найближчий ворожий бік + 15 км)");
     foreach (var (n, la, lo) in new[] { ("Зачепилівка", 49.18, 35.25), ("Берестин", 49.40, 35.17), ("Київ", 50.45, 30.52), ("Одеса", 46.48, 30.73),
                                          ("Львів", 49.84, 24.03), ("Вінниця", 49.23, 28.47), ("Полтава", 49.59, 34.55), ("Запоріжжя", 47.84, 35.14) })
@@ -1716,6 +1732,9 @@ async Task RunAlertsLoop(ChannelPoster? channel)
     // Відбій — лише коли області немає у ДВОХ опитуваннях поспіль (~40 с): один дивний
     // знімок не дає хибного «ВІДБІЙ по всій країні» з подальшою «тривогою» назад.
     var missOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var alarmOnSince = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+    var alarmOffAt = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+    bool alarmSeeded = false;
     bool warnedFail = false;
     while (true)
     {
@@ -1786,6 +1805,22 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             MapWriter.Write(MapPath, tracker, MyDistrict, DateTime.Now);
             // 2) Канал: новини при змінах.
             // Пости — на червону тривогу на ВСЮ область (районні тривоги на фронті мигають щохвилини).
+            // 📊 Для зведення: тривога в області — хоч у частині районів (28.11 зведення писало «Тривог по
+            // областях: 0» після ночі з тривогами — рахувались лише тривоги на ВСЮ область). Повтор тієї ж
+            // області ≤10 хв після відбою — та сама тривога (прифронтові райони мигають).
+            {
+                var anyUa = snap.RedUa.Concat(snap.YellowUa).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var tnow = DateTime.Now;
+                foreach (var o in anyUa.Where(o => !alarmOnSince.ContainsKey(o)))
+                {
+                    bool flicker = alarmOffAt.TryGetValue(o, out var off) && tnow - off < TimeSpan.FromMinutes(10);
+                    bool already = !alarmSeeded && dayRed.ContainsKey(o); // перезапуск: уже пораховано до нього
+                    if (!flicker && !already) lock (dayRed) dayRed[o] = dayRed.GetValueOrDefault(o) + 1;
+                    alarmOnSince[o] = tnow;
+                }
+                foreach (var o in alarmOnSince.Keys.Where(o => !anyUa.Contains(o)).ToList()) { alarmOnSince.Remove(o); alarmOffAt[o] = tnow; }
+                alarmSeeded = true;
+            }
             var nowRed = new HashSet<string>(snap.RedWholeUa ?? snap.RedUa, StringComparer.OrdinalIgnoreCase);
             if (seeded)
             {   // зникла вперше — ще вважаємо під тривогою; зникла вдруге поспіль — відбій
@@ -1798,7 +1833,6 @@ async Task RunAlertsLoop(ChannelPoster? channel)
             {
                 var newly = nowRed.Where(r => !prevRed.Contains(r)).ToList();
                 var cleared = prevRed.Where(r => !nowRed.Contains(r)).ToList();
-                lock (dayRed) foreach (var r in newly) dayRed[r] = dayRed.GetValueOrDefault(r) + 1; // для зведення
                 // Тривога / відбій → перемальовуємо й постимо карту разом із текстом.
                 if (newly.Count > 0)
                 {
@@ -1868,7 +1902,7 @@ string BuildDigest()
     sb.AppendLine("📊 <b>Зведення за добу</b>");
     sb.AppendLine();
     int announces = dayRed.Values.Sum();
-    sb.AppendLine($"🔴 Тривог по областях: {announces}");
+    sb.AppendLine($"🔴 Тривог по областях: {announces} (уся область або частина районів)");
     if (dayRed.Count > 0)
         sb.AppendLine("🔥 Найгарячіше: " + H(string.Join(", ",
             dayRed.OrderByDescending(k => k.Value).Take(3).Select(k => $"{ShortReg(k.Key)} ×{k.Value}"))));

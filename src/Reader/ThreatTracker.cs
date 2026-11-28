@@ -274,7 +274,7 @@ public sealed class ThreatTracker
             if ((approx || gp.name.EndsWith("(обл.)")) && ev.Kind is ThreatKind.Drone or ThreatKind.Target or ThreatKind.Missile
                 && IntoOblast.Match(ev.Raw) is { Success: true } im && OblastGeo.OblastWordEn(im.Groups["o"].Value) is { } destEn
                 && OblastGeo.PolyName(gp.lat, gp.lon) == destEn
-                && CrossInto(ev, destEn, im.Groups["o"].Value, now) is { } crossed)
+                && CrossInto(ev, destEn, im.Groups["o"].Value, now, im.Groups["side"].Value) is { } crossed)
                 return crossed;
             // Приблизні (місто не знайдено → центр області): ключ із НАЗВОЮ міста, щоб
             // «Літин» і «Гнівань» не злипались в одну ціль із останнім ×N (губились дрони).
@@ -565,9 +565,15 @@ public sealed class ThreatTracker
     static readonly Dictionary<(int, int), (double lat, double lon)?> EdgeCache = new();
 
     /// Найближча до [pos] точка з ворожого боку + 15 км далі тим самим променем. null — не знайшли (≤ 600 км).
-    public static (double lat, double lon)? EnemyEdge((double lat, double lon) pos)
+    public static (double lat, double lon)? EnemyEdge((double lat, double lon) pos) => EdgeOf(pos, EnemySide, 0);
+
+    /// Море (Чорне / Азовське) — для «з моря».
+    static bool Sea((double lat, double lon) p) => !OblastGeo.InUkraine(p.lat, p.lon) && p.lat <= 46.6 && p.lon >= 30.3;
+    public static (double lat, double lon)? SeaEdge((double lat, double lon) pos) => EdgeOf(pos, Sea, 1);
+
+    static (double lat, double lon)? EdgeOf((double lat, double lon) pos, Func<(double lat, double lon), bool> EnemySide, int kind)
     {
-        var key = ((int)Math.Round(pos.lat * 20), (int)Math.Round(pos.lon * 20)); // ~5 км
+        var key = ((int)Math.Round(pos.lat * 20) * 2 + kind, (int)Math.Round(pos.lon * 20)); // ~5 км
         lock (EdgeCache) if (EdgeCache.TryGetValue(key, out var hit)) return hit;
         (double lat, double lon)? best = null; double bestKm = double.MaxValue, bestBrg = 0;
         for (int b = 0; b < 360; b += 4)
@@ -611,11 +617,13 @@ public sealed class ThreatTracker
     // «на Київщині» / «на півночі Київщини» — це ДЕ (місцевий відмінок), не підходить.
     static readonly Regex IntoOblast = new(
         @"(?:\bна|\bв\s+бік|\bу\s+бік|\bв\s+напрямку|\bу\s+напрямку|\bв\s+сторону|\bв\s+направлении|\bнаправлением\s+на|\bнапрямок\s+на)\s+"
-        + @"(?:(?:північ|південь|схід|захід|север|юг|восток|запад)\s+)?"
+        + @"(?:(?<side>північ|південь|схід|захід|север|юг|восток|запад)\s+)?"
         + @"(?<o>\p{Lu}[\p{L}'’ʼ-]*?(?:щин|ччин|тчин)[уиы]|Волинь|Волыни|Буковин[уиы])(?![\p{L}])", RegexOptions.IgnoreCase);
     // Звідки: «з Чернігівщини», «зі Сумщини», «с Харьковщины», «з т.о. Криму».
     static readonly Regex FromOblast = new(
         @"(?:\bз|\bзі|\bіз|\bс|\bсо|\bиз)\s+(?:т\.?\s?о\.?\s*)?(?<o>\p{Lu}[\p{L}'’ʼ-]*?(?:щин|ччин|тчин)[иы]|Криму|Крыма|Волині|Волыни|Буковини)(?![\p{L}])", RegexOptions.IgnoreCase);
+
+    static readonly Regex FromSea = new(@"(?:\bз|\bіз|\bзі|\bс|\bсо|\bиз)\s+(?:(?:Чорного|Черного|Азовського|Азовского)\s+)?мор[яе]|\bз\s+акваторі|\bс\s+акватори", RegexOptions.IgnoreCase);
 
     /// Перша точка всередині області [en] на шляху з [from] до [to] (+[deeper] км углиб) — де ціль перетне межу.
     static (double lat, double lon) EntryInto((double lat, double lon) from, (double lat, double lon) to, string en, double deeper)
@@ -633,15 +641,20 @@ public sealed class ThreatTracker
     /// Ціль летить в іншу область: беремо ту, що вже летить у сусідній (або названій «з X») області в той бік,
     /// і ведемо її через межу. Нема такої, але названо «з X» — нова мітка біля межі X, курсом туди.
     /// null — не знаємо, звідки (тоді як раніше: приблизна мітка області).
-    TrackUpdate? CrossInto(ThreatEvent ev, string destEn, string destWord, DateTime now)
+    TrackUpdate? CrossInto(ThreatEvent ev, string destEn, string destWord, DateTime now, string side = "")
     {
-        var dest = OblastGeo.PartPointEn(destEn, null);
+        // «на південь Миколаївщини» — у ту частину області (рос. «на юг» → «півд»).
+        var sd = side.ToLowerInvariant() switch { "север" => "півн", "юг" => "півд", "восток" => "сх", "запад" => "зах", var x => x };
+        var dest = OblastGeo.PartPointEn(destEn, sd.Length > 0 ? sd : null);
         if (dest is not { } dpt) return null;
         string? fromEn = FromOblast.Match(ev.Raw) is { Success: true } fm ? OblastGeo.OblastWordEn(fm.Groups["o"].Value) : null;
         if (fromEn == destEn) fromEn = null;
+        // «з моря» — ціль іде з моря, а не з сусідньої області: чужого шахеда не беремо (28.11 04:34
+        // «на південь Миколаївщини з моря» потягнуло дрон, що висів на Черкащині).
+        bool fromSea = FromSea.IsMatch(ev.Raw);
         bool jet = IsJet(ev.Extra), plain = Slang.PlainDrone(ev.Raw), fresh = Slang.NewTarget(ev.Raw);
         Threat? best = null; double bestScore = double.MaxValue;
-        if (!fresh)
+        if (!fresh && !fromSea)
             foreach (var c in _active.Values)
             {
                 bool sameKind = ev.Kind == ThreatKind.Missile ? c.Kind == ThreatKind.Missile : c.Kind is ThreatKind.Drone or ThreatKind.Target;
@@ -679,10 +692,19 @@ public sealed class ThreatTracker
         }
         else
         {
-            if (fromEn is null || OblastGeo.PartPointEn(fromEn, null) is not { } fpt) return null;
-            var key = $"UA:{OblastGeo.Short(fromEn)}→{OblastGeo.Short(destEn)}:{ev.Kind}";
-            var inEdge = EntryInto(fpt, dpt, destEn, 0);
-            start = ThreatGeo.Move(inEdge, ThreatGeo.Bearing(dpt, fpt), 20); // ~20 км до межі
+            string key;
+            if (fromSea && SeaEdge(dpt) is { } sea)
+            {
+                key = $"UA:Море→{OblastGeo.Short(destEn)}:{ev.Kind}";
+                start = sea;
+            }
+            else
+            {
+                if (fromEn is null || OblastGeo.PartPointEn(fromEn, null) is not { } fpt) return null;
+                key = $"UA:{OblastGeo.Short(fromEn)}→{OblastGeo.Short(destEn)}:{ev.Kind}";
+                var inEdge = EntryInto(fpt, dpt, destEn, 0);
+                start = ThreatGeo.Move(inEdge, ThreatGeo.Bearing(dpt, fpt), 20); // ~20 км до межі
+            }
             if (_active.TryGetValue(key, out var same) && now - same.LastUpdate < TimeSpan.FromMinutes(10)) { t = same; isNew = false; start = same.DrawPos(now) ?? start; }
             else { t = new Threat { Id = key, Zone = "UA", Kind = ev.Kind, FirstSeen = now }; _active[key] = t; }
             t.Ammo = IsJet(ev.Extra) ? ev.Extra : t.Ammo ?? FitAmmo(t.Kind, ev.Extra);

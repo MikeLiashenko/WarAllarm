@@ -122,6 +122,7 @@ public sealed class CityChannel
     public (string text, bool silent)? EventPost(KhEvent e, TrackUpdate? u, bool hadCityThreat, string ballisticText, DateTime now)
     {
         string? line = null;
+        string? key = null; // ключ повтору: та сама ціль на тій самій стадії — інший підпис не новина
         bool loud = false;
         if (e.Signal == KhSignal.News) { }
         else if (e.Kind == ThreatKind.Ballistic && Slang.BallisticThreat(e.Raw)) { } // загроза балістики — BallisticPost (Program.BallisticWatch)
@@ -136,6 +137,8 @@ public sealed class CityChannel
                  && (e.Places.Count > 0 || (u.Value.StageChanged && t.Stage is TrackStage.Impact or TrackStage.Overhead)))
         {
             line = ThreatLine(e, t, u.Value.StageChanged, Ru);
+            // «РСЗО на Золочев» і за 9 с «Далее Золочев» — дві різні підписи тієї ж цілі (28.11 06:39: два пости).
+            key = $"T|{t.Id}|{(u.Value.StageChanged ? t.Stage : TrackStage.Approaching)}|{string.Join(",", e.Places)}";
             loud = !hadCityThreat;
         }
 
@@ -148,8 +151,10 @@ public sealed class CityChannel
         if (line is null) return null;
 
         // Той самий рядок (перепост іншим каналом) ≤3 хв — не дублюємо.
+        key ??= line;
         if (_recent.TryGetValue(line, out var was) && now - was < TimeSpan.FromMinutes(3)) return null;
-        _recent[line] = now;
+        if (_recent.TryGetValue(key, out var wasK) && now - wasK < TimeSpan.FromMinutes(3)) return null;
+        _recent[line] = now; _recent[key] = now;
         if (_recent.Count > 200)
             foreach (var k in _recent.Where(kv => now - kv.Value > TimeSpan.FromMinutes(10)).Select(kv => kv.Key).ToList()) _recent.Remove(k);
 
@@ -283,7 +288,7 @@ public sealed class CityChannel
     public string DigestCore(IReadOnlyList<Threat> inScope, IReadOnlyList<Threat> all, int max = 12)
     {
         var rows = inScope
-            .GroupBy(t => (cat: MapImage.Category(t, all), place: Place(t)))
+            .GroupBy(t => (cat: (t.Ammo ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase) ? "rszv" : MapImage.Category(t, all), place: Place(t)))
             .Select(g => (label: $"{Icon(g.Key.cat)} {Label(g.Key.cat)}", g.Key.place, n: g.Sum(t => Math.Max(1, t.Amount)),
                           km: g.Min(t => ThreatGeo.Km(t.Pos!.Value, Center))))
             .OrderBy(r => r.km).ToList();
@@ -320,7 +325,7 @@ public sealed class CityChannel
     static string Icon(string cat) => cat switch
     {
         "shahed" or "shahed_jet" => "🛵",
-        "missile" or "banderol" => "🚀",
+        "missile" or "banderol" or "rszv" => "🚀",
         "balist" => "☄️",
         "kab" => "💣",
         "fpv" => "🪖",
@@ -334,6 +339,7 @@ public sealed class CityChannel
         "shahed_jet" => T("Реактивний шахед", "Реактивный шахед"),
         "missile" => "Ракета",
         "banderol" => "Бандероль",
+        "rszv" => T("РСЗВ", "РСЗО"), // 28.11: «Ракета ×2 на Золочев» — це був «Град»
         "balist" => T("Балістика", "Баллистика"),
         "kab" => "КАБ",
         "fpv" => T("ФПВ", "FPV"),
@@ -399,6 +405,15 @@ public sealed class CityChannel
         ["Коломак"] = "Коломак", ["Кегичівка"] = "Кегичевка", ["Старий Мерчик"] = "Старый Мерчик", ["Бабаї"] = "Бабаи",
         ["Балістика"] = "Баллистика", ["Молнія"] = "Молния", ["Бандероль"] = "Бандероль",
         ["Реакт. шахед"] = "Реакт. шахед", ["Розвідник"] = "Разведчик", ["Шахед"] = "Шахед",
+        // Типи цілей від моніторів (28.11 07:53: «☄️ Швыдкисна циль на Харьков» — транслітом).
+        ["Швидкісна ціль"] = "Скоростная цель", ["Швидкісна"] = "Скоростная", ["Ціль"] = "Цель",
+        ["Крилата"] = "Крылатая", ["Крилата ракета"] = "Крылатая ракета", ["Ракета"] = "Ракета",
+        ["Реактивний шахед"] = "Реактивный шахед", ["Реактивний"] = "Реактивный", ["Ударний БпЛА"] = "Ударный БпЛА",
+        ["Розвідувальний БпЛА"] = "Разведывательный БпЛА", ["Гербера"] = "Гербера", ["Авіація"] = "Авиация",
+        ["Великі Проходи"] = "Большие Проходы", ["Високий"] = "Высокий", ["Руська Лозова"] = "Русская Лозовая",
+        ["Черкаська Лозова"] = "Черкасская Лозовая", ["Питомник"] = "Питомник", ["Лісне"] = "Лесное",
+        ["Мала Рогань"] = "Малая Рогань", ["Безруки"] = "Безруки", ["Прудянка"] = "Прудянка",
+        ["Старий Салтів"] = "Старый Салтов", ["Вільшани"] = "Ольшаны", ["Солоницівка"] = "Солоницевка",
     };
 
     /// «Салтівка, Немишлянський» → «Салтовка, Немышлянский».
@@ -408,6 +423,10 @@ public sealed class CityChannel
     {
         if (w.Length == 0) return w;
         if (RuDict.TryGetValue(w, out var hit)) return hit;
+        // «Нові Будинки (Харків)» → «Новые Дома (Харьков)»; кілька слів — кожне окремо.
+        if (System.Text.RegularExpressions.Regex.Match(w, @"^(.+?)\s*\((.+)\)$") is { Success: true } pm)
+            return RuWord(pm.Groups[1].Value) + " (" + RuWord(pm.Groups[2].Value) + ")";
+        if (w.Contains(' ')) return string.Join(" ", w.Split(' ').Select(RuWord));
         // Правила: закінчення, потім літери (и→ы раніше за і→и).
         var r = w;
         foreach (var (a, b) in new[] { ("ський", "ский"), ("цький", "цкий"), ("івка", "овка"), ("ївка", "евка"), ("ичі", "ичи"), ("ів", "ов") })
