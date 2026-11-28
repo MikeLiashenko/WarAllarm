@@ -487,6 +487,17 @@ if (args.Length >= 1 && args[0].Equals("intotest", StringComparison.OrdinalIgnor
     Run("«на Київщині» (де, а не куди) — як раніше",
         (0, "UkraineRadar_24_7", "⚠️ Новий реактивний на Київщині з півночі, курсом на Іванків!"),
         (0, "kpszsu", "🏍 Київщина: реактивний БпЛА з півночі курсом на Іванків"));
+    Console.WriteLine("\n── 🚀 Звідки з'являється нова ракета (найближчий ворожий бік + 15 км)");
+    foreach (var (n, la, lo) in new[] { ("Зачепилівка", 49.18, 35.25), ("Берестин", 49.40, 35.17), ("Київ", 50.45, 30.52), ("Одеса", 46.48, 30.73),
+                                         ("Львів", 49.84, 24.03), ("Вінниця", 49.23, 28.47), ("Полтава", 49.59, 34.55), ("Запоріжжя", 47.84, 35.14) })
+    {
+        var e = ThreatTracker.EnemyEdge((la, lo));
+        Console.WriteLine(e is { } ep ? $"   {n,-12} ← {ep.lat:0.00},{ep.lon:0.00}  {ThreatGeo.Km((la, lo), ep),4:0} км  ({OblastGeo.Region(ep.lat, ep.lon)}{(OblastGeo.Occupied(ep.lat, ep.lon) ? ", окуп." : "")})" : $"   {n,-12} ← не знайдено");
+    }
+    Run("Бандероль на Зачепилівку — летить від кордону / окупованої",
+        (0, "monitor1654", "Бандероль на Зачепилівку⚠️"),
+        (0, "raketa_trevoga", "Харківщина: ⏎ Бандероль на Зачепилівку"),
+        (2, "cxidua", "🟠 Бандероль курсом на Зачепиловку"));
     Run("Два шахеди на Житомирщині + «на Київщину» — бере той, що ближче до межі",
         (0, "kpszsu", "🛵 Житомирщина: ударний БпЛА на Коростишів"),
         (0, "kpszsu", "🛵 Житомирщина: ударний БпЛА на Новоград-Волинський"),
@@ -1270,6 +1281,71 @@ if (channelPoster is not null)
 // тривога/відбій — у RunAlertsLoop.
 foreach (var cc in cityChannels)
     _ = RunCityDigest(cc);
+// 🚀 Крилаті ракети / бандеролі — окремий пост одразу (28.11: бандеролі на Харківщині о 11:08 не
+// потрапили ні в основний канал — «жива дошка» лише тихо правилась, а з 11:12 показувала тільки Харків, —
+// ні в харківський: зведення там раз на 8 хв, а ракета за цей час уже вилетіла з області).
+if (channelPoster is not null) _ = RunMissileWatch(channelPoster, null);
+foreach (var cc in cityChannels) if (cc.Poster is { } ccp) _ = RunMissileWatch(ccp, cc);
+
+// 🚀 Ракети: нова крилата ракета / бандероль (не РСЗВ) у зоні каналу → пост зі звуком за ≤5 с.
+// Нові місця тієї ж області за 10 хв — у той самий пост правкою; нова область після 3 хв — новий пост.
+async Task RunMissileWatch(ChannelPoster poster, CityChannel? cc)
+{
+    long? postId = null; var postAt = DateTime.MinValue;
+    var shown = new Dictionary<string, Threat>(); // Id → ціль у поточному пості
+    while (true)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        try
+        {
+            var now = DateTime.Now;
+            var all = tracker.Active.Where(t => t.Pos is not null).ToList();
+            // Місцеві монітори міста (не хаб) у міському каналі й так постять одразу — там лише цілі хаба.
+            var ms = all.Where(t => ThreatTracker.MissileAlertable(t, now) && (cc is null || t.Zone == "UA" && cc.InScope(t))).ToList();
+            // Ключ — ціль + область: та сама ракета, що перелетіла в іншу область, — теж новина
+            // (для міського каналу — щойно залетіла в його зону).
+            static string Key(Threat t) => t.Id + "|" + OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon);
+            var fresh = ms.Where(t => !shown.ContainsKey(Key(t))).ToList();
+            if (fresh.Count == 0) continue;
+            // Правкою (без звуку): нові місця в уже названих областях — 10 хв, нова область — лише перші 3 хв.
+            // Нова область пізніше — новий пост зі звуком (люди там мають дізнатися).
+            var postedObl = shown.Keys.Select(k => k[(k.IndexOf('|') + 1)..]).ToHashSet();
+            bool newObl = fresh.Any(t => !postedObl.Contains(OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon)));
+            bool edit = postId is not null && (now - postAt < TimeSpan.FromMinutes(3) || !newObl && now - postAt < TimeSpan.FromMinutes(10));
+            if (!edit) shown.Clear();
+            foreach (var t in ms) shown[Key(t)] = t;
+            var list = shown.Values.DistinctBy(t => t.Id).ToList();
+            var text = cc is null ? MissilePostMain(list, now) : MissilePostCity(cc, list, all, now);
+            Ui.Line(ConsoleColor.Red, $"🚀 [{now:HH:mm:ss}] {(cc is null ? "основний" : cc.Name)} · ракети: {string.Join(", ", fresh.Select(t => t.LastPlace))}");
+            if (edit && await poster.Edit(postId!.Value, text)) continue;
+            postId = await poster.Post(text, null, silent: false);
+            postAt = now;
+        }
+        catch (Exception ex) { Console.Error.WriteLine($"⚠ missiles{(cc is null ? "" : " " + cc.Name)}: " + ex.Message); }
+    }
+}
+
+static string MissilePostMain(List<Threat> ms, DateTime now)
+{
+    var sb = new StringBuilder("🚀 <b>Ракетна небезпека</b>\n");
+    foreach (var g in ms.GroupBy(t => OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon)))
+    {
+        sb.Append("📍 ").Append(H(g.Key)).Append(": ");
+        sb.AppendLine(string.Join("; ", g.GroupBy(t => ThreatTracker.Label(t)).Select(k =>
+            $"{H(k.Key)}{(k.Sum(t => Math.Max(1, t.Amount)) > 1 ? $" ×{k.Sum(t => Math.Max(1, t.Amount))}" : "")} → {H(string.Join(", ", k.Select(t => t.LastPlace).Distinct()))}")));
+    }
+    sb.AppendLine("➤ Будь ближче до укриття.");
+    sb.AppendLine($"<i>🕒 {now:HH:mm}</i>");
+    sb.AppendLine();
+    sb.Append(ChannelFoot());
+    return sb.ToString();
+}
+
+static string MissilePostCity(CityChannel cc, List<Threat> ms, List<Threat> all, DateTime now)
+{
+    var head = cc.Ru ? "🚀 <b>Ракетная опасность</b>\n" : "🚀 <b>Ракетна небезпека</b>\n";
+    return cc.DigestText(head + cc.DigestCore(ms, all), null, null, now);
+}
 
 // 🏙 Зведення міського каналу: кожні 30 с дивимось цілі в зоні, пост — раз на 8 хв,
 // коли картина змінилась (CityChannel.DigestStep). Карта зони — JPEG (~3× менше за PNG).

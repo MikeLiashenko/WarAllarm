@@ -15,6 +15,7 @@ public static class Audit
         HashSet<string>? prevActive = null;
         var zoneMin = new Dictionary<string, (int fresh, int stale, DateTime first, string place, string kind)>();
         int drawnMin = 0;
+        var missileSeen = new HashSet<string>();
         var day = DateTime.TryParse(Path.GetFileNameWithoutExtension(file), out var dd) ? dd : DateTime.Today;
         var posts = new List<(DateTime at, string ch, string text)>();
         foreach (var line in File.ReadLines(file))
@@ -42,6 +43,13 @@ public static class Audit
         {
             int b0 = Bort();
             var gone = tr.Tick(now, hub.ListCaps(now), hub.LastListAt, hub.ListTimes(now)).Where(u => u.Threat.Stage == TrackStage.Gone).ToList();
+            // 🚀 Коли канали написали б про ракету (RunMissileWatch: перевірка кожні 5 с, тут — щохвилини).
+            foreach (var t in tr.Active.Where(t => ThreatTracker.MissileAlertable(t, now) && missileSeen.Add(t.Id + "|" + OblastGeo.Region(t.Pos!.Value.lat, t.Pos!.Value.lon))))
+            {
+                var p = t.Pos!.Value;
+                Console.WriteLine($"\n{now:HH:mm} 🚀 ПОСТ: {ThreatTracker.Label(t)} → {t.LastPlace} ({OblastGeo.Region(p.lat, p.lon)})"
+                    + (t.Approach is { } ap ? $" · летить від {ap.lat:0.00},{ap.lon:0.00} ({ThreatGeo.Km(ap, p):0} км)" : "") + $"  ← {why.GetValueOrDefault(t.Id, "?")}");
+            }
             if (zones)
             {
                 tl.AdvanceTo(now);

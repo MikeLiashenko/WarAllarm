@@ -73,6 +73,9 @@ public sealed class Threat
     // тримаються тривога, дистанція й ETA — сирена не запізнюється), а Approach — звідки вона
     // летить: мітка малюється там і рухається до міста з реальною швидкістю.
     public (double lat, double lon)? Approach;
+    /// У тексті прямо сказано, що це ракета («ракета», «КР», «бандероль», «Калібр»…), а не «ціль», що
+    /// успадкувала тип із попереднього поста каналу. Лише про такі канали пишуть окремим гучним постом.
+    public bool MissileNamed;
     // Approach — не «летить до міста», а плавний переліт мітки з того місця, де її видно, до
     // щойно названого: без телепортів між районами, далі — потоком.
     public bool Glide;
@@ -375,6 +378,7 @@ public sealed class ThreatTracker
             // Тип засобу — лише з посту про той самий вид: «Вишгород» від каналу, що пише про ракети,
             // злився з балістикою й дописав їй «крилата» (17.11 05:38 — «Балістика (крилата)»).
             t!.Ammo = IsJet(ev.Extra) ? ev.Extra : t.Ammo ?? (ev.Kind == t.Kind ? FitAmmo(t.Kind, ev.Extra) : null);
+            if (t.Kind == ThreatKind.Missile && MissileWord.IsMatch(ev.Raw)) t.MissileNamed = true;
             t.Oblast = ev.Oblast ?? t.Oblast;
             t.Recon = ((ev.Extra ?? "") + " " + ev.Raw).ToLowerInvariant().Contains("розвід");
             // Новий пост про ціль, яку вважали збитою, — отже, вона ще летить.
@@ -398,10 +402,19 @@ public sealed class ThreatTracker
             // «на Харків» — ще летить: продовжуємо з того місця, де мітка зараз (повторний пост не
             // відкидає її назад); нова ціль — за ~10 хв польоту від міста з боку пуску / фронту.
             t.Approach = null; t.Glide = false;
-            if (!approx && ev.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target
+            // 🚀 Нова крилата ракета / бандероль з'являється не посеред країни, а там, звідки прилетіла:
+            // найближча точка з ворожого боку (кордон рф, окупована територія, море) трохи далі за межу,
+            // і летить звідти до названого місця. РСЗВ — як і раніше, від лінії фронту.
+            if (isNew && !approx && t.Kind == ThreatKind.Missile && !Rszv(t, ev)
+                && (LaunchSites.Resolve(ev.From) is { } mf ? (mf.lat, mf.lon) : EnemyEdge(pos)) is { } mStart
+                && ThreatGeo.Km(mStart, pos) >= 3)
+                t.Approach = mStart;
+            else if (!approx && ev.Kind is ThreatKind.Drone or ThreatKind.Missile or ThreatKind.Target
                 && ThreatParser.HeadingTo(ev.Raw, ev.City ?? gp.name))
             {
-                var start = NotFarther(drawnBefore ?? ApproachStart(ev, t, pos), pos, MaxApproachKm(t.Kind));
+                // Ракета вже летить (мітка від кордону) — наступний пост не підсуває її за 60 км до цілі.
+                double cap = drawnBefore is not null && t.Kind == ThreatKind.Missile && !Rszv(t, ev) ? 600 : MaxApproachKm(t.Kind);
+                var start = NotFarther(drawnBefore ?? ApproachStart(ev, t, pos), pos, cap);
                 if (ThreatGeo.Km(start, pos) >= 3) t.Approach = start;
             }
             // Дрон уже на карті, а канал назвав нове місце: мітка не телепортується (у Києві канали
@@ -527,6 +540,48 @@ public sealed class ThreatTracker
         }
         var from = LaunchSites.Resolve(ev.From) is { } f ? (f.lat, f.lon) : LaunchSites.NearestFront(dest);
         return NotFarther(from, dest, MaxApproachKm(t.Kind));
+    }
+
+    static readonly Regex MissileWord = new(@"ракет|крилат|крылат|(?<![\p{L}])кр(?![\p{L}])(?!\s*\.\s*р[іи]г)|бандерол|калібр|калибр|(?<![\p{L}])[хx][-\s]?\d{2,3}|іскандер|искандер|циркон|онікс|оникс|кинджал|кинжал", RegexOptions.IgnoreCase);
+
+    /// Крилата ракета / бандероль, про яку канали мають написати одразу (не РСЗВ, свіжа, ще летить).
+    public static bool MissileAlertable(Threat t, DateTime now) =>
+        t.Kind == ThreatKind.Missile && t.MissileNamed && !t.Down && !t.Launch && t.Pos is not null
+        && !(t.Ammo ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase)
+        && now - t.FirstSeen < TimeSpan.FromMinutes(15) && now - t.LastUpdate < TimeSpan.FromMinutes(5);
+
+    static bool Rszv(Threat t, ThreatEvent ev) =>
+        (t.Ammo ?? ev.Extra ?? "").StartsWith("РСЗВ", StringComparison.OrdinalIgnoreCase);
+
+    /// Ворожий бік: окупована територія, рф за північним / східним кордоном, Чорне й Азовське море.
+    /// Білорусь, Молдова й західні сусіди — ні (звідти ракети не летять).
+    static bool EnemySide((double lat, double lon) p)
+    {
+        if (OblastGeo.Occupied(p.lat, p.lon)) return true;
+        if (OblastGeo.InUkraine(p.lat, p.lon)) return false;
+        return (p.lat >= 50.0 && p.lon >= 31.8) || p.lon >= 36.0 || (p.lat <= 46.6 && p.lon >= 30.3);
+    }
+
+    static readonly Dictionary<(int, int), (double lat, double lon)?> EdgeCache = new();
+
+    /// Найближча до [pos] точка з ворожого боку + 15 км далі тим самим променем. null — не знайшли (≤ 600 км).
+    public static (double lat, double lon)? EnemyEdge((double lat, double lon) pos)
+    {
+        var key = ((int)Math.Round(pos.lat * 20), (int)Math.Round(pos.lon * 20)); // ~5 км
+        lock (EdgeCache) if (EdgeCache.TryGetValue(key, out var hit)) return hit;
+        (double lat, double lon)? best = null; double bestKm = double.MaxValue, bestBrg = 0;
+        for (int b = 0; b < 360; b += 4)
+            for (double km = 4; km <= Math.Min(600, bestKm); km += 4)
+            {
+                var p = ThreatGeo.Move(pos, b, km);
+                // Лиман / затока в спрощеному контурі — не «море»: і точка на 10 км далі має бути ворожою.
+                if (!EnemySide(p) || !EnemySide(ThreatGeo.Move(pos, b, km + 10))) continue;
+                if (km < bestKm) { bestKm = km; best = p; bestBrg = b; }
+                break;
+            }
+        (double lat, double lon)? res = best is null ? null : ThreatGeo.Move(pos, bestBrg, bestKm + 15);
+        lock (EdgeCache) { if (EdgeCache.Count > 5000) EdgeCache.Clear(); EdgeCache[key] = res; }
+        return res;
     }
 
     static double MaxApproachKm(ThreatKind kind) => kind == ThreatKind.Missile ? 60 : 30;

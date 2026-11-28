@@ -18,8 +18,10 @@ public static class AlarmZones
     static readonly Dictionary<string, DateTime> GreenSince = new();
     static readonly object Gate = new();
 
+    // Ракета в польоті (летить від кордону до цілі) — не чіпаємо: вона за хвилини пролітає райони без тривоги.
     public static bool Applies(Threat t) =>
-        !t.Launch && t.Pos is not null && t.Kind is ThreatKind.Drone or ThreatKind.Target or ThreatKind.Missile or ThreatKind.Fpv;
+        !t.Launch && t.Pos is not null && t.Kind is ThreatKind.Drone or ThreatKind.Target or ThreatKind.Missile or ThreatKind.Fpv
+        && !(t.Kind == ThreatKind.Missile && t.Approach is not null);
 
     /// Де мітку видно: DrawPos, але рух «звідки → куди» не далі межі тривоги.
     public static (double lat, double lon)? Drawn(Threat t, DateTime now, Func<double, double, bool> inAlarm)
