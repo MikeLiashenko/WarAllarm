@@ -82,9 +82,12 @@ public static class OblastGeo
     /// Точка в потрібній ЧАСТИНІ області: «на півночі Сумщини» → північ полігона Сумщини.
     /// [side] — «півночі», «південному сході», «центрі»… (null — середина). null, якщо
     /// область невідома.
-    public static (double lat, double lon)? PartPoint(string canonOblast, string? side)
+    public static (double lat, double lon)? PartPoint(string canonOblast, string? side) =>
+        CanonToEn.TryGetValue(canonOblast.Trim(), out var en) ? PartPointEn(en, side) : null;
+
+    /// Те саме за англ. назвою полігона («Kiev»).
+    public static (double lat, double lon)? PartPointEn(string en, string? side)
     {
-        if (!CanonToEn.TryGetValue(canonOblast.Trim(), out var en)) return null;
         var poly = Polys.FirstOrDefault(p => p.en == en);
         if (poly.rings is null) return null;
         var outer = poly.rings[0];
@@ -112,6 +115,27 @@ public static class OblastGeo
             pt = near;
         }
         return pt;
+    }
+
+    // Назва області в будь-якому відмінку, укр. чи рос. («Київщину», «Чернігівщини», «Киевщину»,
+    // «Харьковщины», «Криму») → англ. назва полігона.
+    static readonly (System.Text.RegularExpressions.Regex re, string en)[] OblastWords = new (string, string)[]
+    {
+        ("київщин|киевщин", "Kiev"), ("чернігівщин|черниговщин", "Chernihiv"), ("сумщин", "Sumy"),
+        ("харківщин|харьковщин", "Kharkiv"), ("полтавщин", "Poltava"), ("дніпропетровщин|днепропетровщин|дніпровщин|днепровщин", "Dnipropetrovs'k"),
+        ("запоріжжя$|запоріжж[яюі]|запорожь|запоріжчин", "Zaporizhzhya"), ("херсонщин", "Kherson"), ("миколаївщин|николаевщин", "Mykolayiv"),
+        ("одещин|одесщин|одессщин", "Odessa"), ("черкащин|черкасщин", "Cherkasy"), ("кіровоградщин|кировоградщин", "Kirovohrad"),
+        ("вінниччин|винниччин|винницчин", "Vinnytsya"), ("житомирщин", "Zhytomyr"), ("хмельниччин|хмельнитчин", "Khmel'nyts'kyy"),
+        ("рівненщин|ровенщин", "Rivne"), ("волин", "Volyn"), ("львівщин|львовщин", "L'viv"), ("тернопільщин|тернопольщин", "Ternopil'"),
+        ("прикарпатт|франківщин|франковщин", "Ivano-Frankivs'k"), ("закарпатт", "Transcarpathia"), ("буковин", "Chernivtsi"),
+        ("донеччин|донетчин", "Donets'k"), ("луганщин", "Luhans'k"), ("крим|крым", "Crimea"),
+    }.Select(x => (new System.Text.RegularExpressions.Regex("^(?:" + x.Item1 + ")", System.Text.RegularExpressions.RegexOptions.IgnoreCase), x.Item2)).ToArray();
+
+    public static string? OblastWordEn(string word)
+    {
+        var w = word.Trim();
+        foreach (var (re, en) in OblastWords) if (re.IsMatch(w)) return en;
+        return null;
     }
 
     /// Англ. назва полігона області для точки (збіг із ключами OfficialAlerts.ByPolygon),

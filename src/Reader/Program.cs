@@ -454,6 +454,46 @@ if (args.Length >= 1 && args[0].Equals("journal", StringComparison.OrdinalIgnore
 }
 
 // ── 🔎 Аудит карти по журналу:   dotnet run -- audit journal/2026-11-15.jsonl [HH:mm HH:mm] [-v]
+// ── «на Київщину» — курс цілі з сусідньої області, а не нова мітка в центрі (оффлайн):  dotnet run -- intotest
+if (args.Length >= 1 && args[0].Equals("intotest", StringComparison.OrdinalIgnoreCase))
+{
+    void Run(string title, params (int min, string ch, string text)[] posts)
+    {
+        Console.WriteLine($"\n── {title}");
+        var hub = new SourceHub(); var tr = new ThreatTracker((50.45, 30.52));
+        var t0 = DateTime.Today.AddHours(2);
+        foreach (var (min, ch, text) in posts)
+        {
+            var at = t0.AddMinutes(min);
+            if (SourceCatalog.Get(ch) is not { } si) { Console.WriteLine($"   нема каналу {ch}"); continue; }
+            var r = hub.Process(si, text, at);
+            foreach (var he in r.Confirmed) tr.IngestUa(he.Ev, at, (he.Place, he.Pos.lat, he.Pos.lon));
+            Console.WriteLine($"   +{min,2} хв «{text}»");
+            foreach (var t in tr.Active.Where(x => !x.Launch))
+            {
+                var p = t.DrawPos(at)!.Value;
+                Console.WriteLine($"        {ThreatTracker.Label(t),-18} {t.PlaceLabel,-22} зараз {OblastGeo.Region(p.lat, p.lon),-14} {p.lat:0.00},{p.lon:0.00}  [{t.Id}]");
+            }
+        }
+    }
+    Run("Шахед летить по Чернігівщині, потім «на Київщину» — та сама мітка перелітає межу",
+        (0, "kpszsu", "🛵 Чернігівщина: ударний БпЛА курсом на Козелець"),
+        (4, "kpszsu", "🛵 Ударний БпЛА на Київщину"));
+    Run("«з Чернігівщини на Київщину» без мітки — нова біля межі Чернігівщини",
+        (0, "kpszsu", "🏍 Реактивний БпЛА з Чернігівщини на Київщину"));
+    Run("«з т.о. Криму в бік Миколаївщини»",
+        (0, "kudy_letyt", "🛵Новий реактивний БпЛА з т.о.Криму в бік Миколаївщини"),
+        (0, "rozvidkaneba", "🛵Новий реактивний БпЛА з т.о.Криму в бік Миколаївщини"));
+    Run("«на Київщині» (де, а не куди) — як раніше",
+        (0, "UkraineRadar_24_7", "⚠️ Новий реактивний на Київщині з півночі, курсом на Іванків!"),
+        (0, "kpszsu", "🏍 Київщина: реактивний БпЛА з півночі курсом на Іванків"));
+    Run("Два шахеди на Житомирщині + «на Київщину» — бере той, що ближче до межі",
+        (0, "kpszsu", "🛵 Житомирщина: ударний БпЛА на Коростишів"),
+        (0, "kpszsu", "🛵 Житомирщина: ударний БпЛА на Новоград-Волинський"),
+        (3, "kpszsu", "🛵 БпЛА з Житомирщини на Київщину"));
+    return;
+}
+
 // ── 💬 Чат без Telegram (налагодження на тестовій базі):  dotnet run -- chatrelay <url> <secret> [admin-uid]
 if (args.Length >= 3 && args[0].Equals("chatrelay", StringComparison.OrdinalIgnoreCase))
 {

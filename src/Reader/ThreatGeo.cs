@@ -208,6 +208,13 @@ public static class ThreatGeo
     };
 
     // Координаты админцентра области по канон. имени («Дніпропетровська» → Дніпро).
+    /// Точка за [km] км від [p] курсом [brg]° (на малих відстанях — плоска Земля).
+    public static (double lat, double lon) Move((double lat, double lon) p, double brg, double km)
+    {
+        double r = brg * Math.PI / 180;
+        return (p.lat + km * Math.Cos(r) / 111.0, p.lon + km * Math.Sin(r) / (111.0 * Math.Cos(p.lat * Math.PI / 180)));
+    }
+
     public static (string name, double lat, double lon)? ResolveOblast(string? oblast)
     {
         if (oblast is null) return null;
